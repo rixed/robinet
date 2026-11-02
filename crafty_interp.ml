@@ -226,6 +226,36 @@ let stat loc (b : T.builtin) vs args =
         vs.(max 0 (rank - 1))
     | _ -> assert false
 
+(** [v] of type [typ] as {!Crafty_typing.summary_type} tells, with its type:
+ * of an array of numbers or intervals, how many there are and, unless none,
+ * their extremes, mean, standard deviation and percentiles. *)
+let rec summarize (typ : A.Type.t) v =
+    let loc = { A.line = 0 ; column = 0 } in
+    let summarized =
+        match typ, v with
+        | Array t, Array a when T.summary_type typ = T.summary_of_items t ->
+            (match T.summary_of_items t with
+            | Record fs ->
+                Record (Array.of_list (List.map (fun (n, _) ->
+                    if n = "count" then Int (Array.length a)
+                    else if Array.length a = 0 then Void
+                    else match n with
+                    | "min" -> stat loc T.Min a []
+                    | "max" -> stat loc T.Max a []
+                    | "mean" -> stat loc T.Mean a []
+                    | "stddev" -> stat loc T.Stddev a []
+                    | p -> stat loc T.Percentile a [ Int (int_of_string (String.lchop p)) ])
+                    fs))
+            | _ -> assert false)
+        | Array t, Array a when t <> A.Type.Byte -> Array (Array.map (snd % summarize t) a)
+        | Map (_, t), Map (m, d) ->
+            Map (Map.PMap.map (snd % summarize t) m, Option.map (snd % summarize t) d)
+        | Record fs, Record vs ->
+            Record (Array.of_list (List.mapi (fun i (_, t) -> snd (summarize t vs.(i))) fs))
+        | Variant cs, Variant (n, x) -> Variant (n, snd (summarize (List.assoc n cs) x))
+        | _ -> v in
+    T.summary_type typ, summarized
+
 (* What a setuid crafty, which drops the user's environment, prefixes their
  * variables with: *)
 let user_env_prefix = "CRAFTY_USER_ENV_"
@@ -479,7 +509,9 @@ type output =
     { print : string -> unit ; print_err : string -> unit ;
       now : unit -> Clock.Wall.t ;
       (* What [format()] writes: *)
-      format : format }
+      format : format ;
+      (* Given what [report] reports: its name, the type and value, and when: *)
+      report : string -> A.Type.t -> value -> Clock.Wall.t -> unit }
 
 let rec eval output (env : env) (e : T.expr) =
     let eval = eval output env in
@@ -499,11 +531,13 @@ let rec eval output (env : env) (e : T.expr) =
         List.assoc l.fields.(field).name u.values
     | T.Field (r, i) ->
         (* Void only in the fields of BUDGET, PORTS and PERMISSIONS that are
-         * not set, and
-         * in those of a packet sent that only its capture tells: *)
+         * not set, in those of a packet sent that only its capture tells,
+         * and in the stats of a summary of no values: *)
         (match eval r, r.typ with
         | Record vs, A.Type.Record fs ->
             (match vs.(i), List.nth fs i with
+            | Void, (n, _) when T.is_summary r.typ ->
+                error e.loc "No %s in the summary of no values" n
             | Void, (n, t) when t <> A.Type.Void ->
                 if r.typ = T.budget_type || r.typ = T.ports_type ||
                    r.typ = T.permissions_type then
@@ -554,6 +588,12 @@ let rec eval output (env : env) (e : T.expr) =
         | None ->
             error e.loc "Only a scalar, or a record, array or map of scalars, \
                          makes CSV, not %s" (A.Type.to_string x.typ))
+    | T.Call (T.Summary, [ x ]) -> snd (summarize x.typ (eval x))
+    | T.Call (T.Report, [ x ; name ]) ->
+        (match eval name with
+        | String n -> output.report n x.typ (eval x) (output.now ())
+        | _ -> assert false) ;
+        Void
     | T.Call ((T.Print | T.Print_err) as b, [ x ]) when x.typ <> A.Type.String ->
         call e.loc b [ String (to_string x.typ (eval x)) ]
              ~print:output.print ~print_err:output.print_err ~now:output.now
@@ -1210,11 +1250,17 @@ let idle (tree : Crafty_tree.node) () =
 
 let open_streams tree () = Crafty_tree.streams tree
 
-let output_of power ?(format=Human) ~print ~print_err () =
+(* What reports print unless told otherwise: the summary of what they report,
+ * after their name: *)
+let print_report print name typ v _ =
+    let typ, v = summarize typ v in
+    print (name ^": "^ to_string typ v)
+
+let output_of power ?(format=Human) ?report ~print ~print_err () =
     let now () =
         let sim = power.SimTypes.sim in
         Simulation.date_of sim (Simulation.now sim) in
-    { print ; print_err ; now ; format }
+    { print ; print_err ; now ; format ; report = report |? print_report print }
 
 let matches output tree (ps : filter) frame =
     List.exists (fun (p : T.pattern) ->
@@ -1230,8 +1276,9 @@ let matches output tree (ps : filter) frame =
 
 (* Runs [program] on [power]'s simulation, starting at once, sending and
  * receiving through [tree] (from {!Crafty_tree.make_root}), writing with
- * [print] and [print_err], and calling [on_exit] with its final status
- * (possibly before returning). *)
+ * [print] and [print_err], giving what it reports to [report] (else printing
+ * its summary), and calling [on_exit] with its final status (possibly before
+ * returning). *)
 (* The values of BUDGET, PORTS and PERMISSIONS, void where not set: *)
 let self_values (l : T.limits) =
     let record typ get =
@@ -1260,10 +1307,10 @@ let self_values (l : T.limits) =
         | "mac_spoofing" -> flag p.mac_spoofing
         | _ -> flag p.exfiltration)
 
-let run_on_tree power tree ?format ~print ~print_err ?(on_exit=ignore)
+let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
                 ?(limits=T.no_limits) (program : T.block) =
     let status = ref Running in
-    let t = { power ; output = output_of power ?format ~print ~print_err () ; tree ;
+    let t = { power ; output = output_of power ?format ?report ~print ~print_err () ; tree ;
               awaited = ref [] } in
     let exit s =
         if !status = Running then (
@@ -1334,7 +1381,7 @@ let print_status oc = function
 let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         ?(promisc=false)
         ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu
-        ?limits ?format ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
+        ?limits ?format ?report ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
         ?(on_warning=ignore) ?(on_closed=ignore) ?(rx_wire=true) (program : program) =
     let limits = limits |? program.limits in
     let ports =
@@ -1370,7 +1417,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     Simulation.asap power (fun () ->
         if not !stopped then
             started :=
-                Some (run_on_tree power tree ?format ~print ~print_err ~on_exit
+                Some (run_on_tree power tree ?format ?report ~print ~print_err ~on_exit
                                   ~limits program.body)
     ) () ;
     Eth.Iface.dev eth.iface,
@@ -1387,7 +1434,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         | None -> if !stopped then Stopped else Running) ;
       idle = idle tree ;
       emitted = (fun frame -> Option.may (fun (h : handle) -> h.emitted frame) !started) ;
-      matches = matches (output_of power ?format ~print ~print_err ()) tree ;
+      matches = matches (output_of power ?format ?report ~print ~print_err ()) tree ;
       open_streams = open_streams tree ;
       uses_port = tree.uses_port }
 
@@ -1573,6 +1620,16 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "h = histogram([1: 7ms, 2: 22ms, 3: 5ms], bucket=5ms)\nprint(\"${length(h)} ${h}\")")
   "0s: failed: line 1, column 5: The bucket of a histogram must be positive" \
     (runs "x = histogram([1], bucket=0)")
+  "0s: {count: 4, max: 4ms, mean: 2.5ms, min: 1ms, p50: 2ms, p95: 4ms, p99: 4ms, stddev: 1.11803ms}\n0s: done" \
+    (runs "print(summary([3ms, 1ms, 4ms, 2ms]))")
+  "0s: {count: 0, max: ?, mean: ?, min: ?, p50: ?, p95: ?, p99: ?, stddev: ?} 0\n0s: failed: line 3, column 5: No mean in the summary of no values" \
+    (runs "s = summary([1.5] * 0)\nprint(\"${s} ${s.count}\")\nx = s.mean")
+  "0s: [a: {count: 1, max: 2, mean: 2.0, min: 2, p50: 2, p95: 2, p99: 2, stddev: 0.0}] {n: x, v: 5} #0102\n0s: done" \
+    (runs "m = summary([\"a\": [2]])\nr = summary({n: \"x\", v: 5})\nprint(\"${m} ${r} ${summary(#0102)}\")")
+  "0s: rtt: {count: 2, max: 2ms, mean: 1.5ms, min: 1ms, p50: 1ms, p95: 2ms, p99: 2ms, stddev: 500µs}\n0s: done" \
+    (runs "report([1ms, 2ms], name=\"rtt\")")
+  "200ms: n: 2\n400ms: n: 2\n450ms1ps: n: 1\n450ms1ps: done" \
+    (runs "a = [0] * 0\nspawn { repeat every=200ms { wait 200ms ; report(length(a), name=\"n\") ; a := [0] * 0 } }\nrepeat count=5 every=100ms { a := append(a, 1) }\nwait 50ms\nreport(length(a), name=\"n\")")
   "0s: 1.5 1 -2 1792540800.25 1792540800\n0s: done" \
     (runs "t = 2026-10-21T00:00:00.25Z\nprint(\"${float(1500ms)} ${int(1500ms)} ${int(-2500ms)} ${float(t)} ${int(t)}\")")
   "0s: failed: line 1, column 5: No minimum of no values" \

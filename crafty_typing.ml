@@ -51,7 +51,7 @@ type builtin =
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
     | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
-    | Print | Print_err | Format | Assert | Stats
+    | Print | Print_err | Format | Assert | Stats | Summary | Report
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
 
@@ -215,6 +215,28 @@ let record_type fields =
     Type.Record (List.sort (fun (a, _) (b, _) ->
         String.compare (String.lowercase_ascii a) (String.lowercase_ascii b))
         fields)
+
+(* What [summary] gives of an array of numbers, or intervals, of type [t]: *)
+let summary_of_items t =
+    let avg = if t = Type.Interval then Type.Interval else Type.Float in
+    record_type [ "count", Type.Int ; "min", t ; "mean", avg ; "stddev", avg ;
+                  "p50", t ; "p95", t ; "p99", t ; "max", t ]
+
+(* The record of a summary of no values, the fields but [count] of which are
+ * void: *)
+let is_summary typ =
+    List.exists (fun t -> typ = summary_of_items t) Type.[ Int ; Float ; Interval ]
+
+(* What [summary] gives of a value of type [typ]: arrays of numbers or
+ * intervals summarized, within any other value, the rest as is: *)
+let rec summary_type (typ : Type.t) =
+    match typ with
+    | Array (Int | Float | Interval as t) -> summary_of_items t
+    | Array t when t <> Type.Byte -> Array (summary_type t)
+    | Map (k, v) -> Map (k, summary_type v)
+    | Record fs -> Record (List.map (fun (n, t) -> n, summary_type t) fs)
+    | Variant cs -> Variant (List.map (fun (n, t) -> n, summary_type t) cs)
+    | t -> t
 
 (* The record of a layer of a received packet, with every field that can be
  * read, in whatever mode: *)
@@ -481,7 +503,9 @@ type env =
       (* Whether a variable was widened while typing: *)
       widening : bool ref ;
       (* The constructor of what the variables of a case hold, by id: *)
-      held_by : (int, string) Hashtbl.t }
+      held_by : (int, string) Hashtbl.t ;
+      (* The type of what each report reports, and where first: *)
+      reports : (string, Type.t * A.location) Hashtbl.t }
 
 let bound env name =
     List.exists (fun (v : var) -> v.name = name) env.vars ||
@@ -1265,6 +1289,12 @@ let builtins =
       "print_err", Print_err, [ param "x" "a value" printable ],
         res Type.Void ;
       "format", Format, [ param "x" "a value" any_value ], res Type.String ;
+      (* Of a type that [expr] tells: *)
+      "summary", Summary, [ param "x" "a value" any_value ], res Type.Void ;
+      (* Of a name that [expr] checks: *)
+      "report", Report,
+        [ param "x" "a value" any_value ; param "name" "a string" (only Type.[ String ]) ],
+        res Type.Void ;
       (* Failing, as any error, where it is called: *)
       "assert", Assert,
         [ param "cond" "a bool or an int" (only_exactly Type.[ Bool ; Int ]) ;
@@ -1475,6 +1505,19 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                         (a_type bucket.typ) in
             mk (Type.Array (record_type [ "min", t ; "count", Type.Int ; "max", t ]))
                (Call (Histogram, [ a ; bucket ]))
+        | Summary, [ x ], _ ->
+            mk (summary_type x.typ) (Call (Summary, [ x ]))
+        | Report, [ x ; name ], t ->
+            (match name.desc with
+            | String [ Text n ] ->
+                (match Hashtbl.find_opt env.reports n with
+                | Some (typ, where) when typ <> x.typ ->
+                    error x.loc "Report %s is of %s since line %d, not of %s" n
+                        (a_type typ) where.A.line (a_type x.typ)
+                | Some _ -> ()
+                | None -> Hashtbl.add env.reports n (x.typ, x.loc))
+            | _ -> error name.loc "The name of a report must be a literal string") ;
+            mk t (Call (Report, [ x ; name ]))
         | Sum, [ a ], t ->
             let zero =
                 match t with
@@ -1719,7 +1762,7 @@ and call env loc f args =
     let fname, b, params, result = find_builtin loc f in
     let unnamed = List.filter (fun (a : A.arg) -> a.arg_name = None) args in
     (* The parameters of the unnamed arguments, in order: the only one, else
-     * those that must be given and are not named, if as many: *)
+     * those that must be given and are not named, if no fewer: *)
     let slots =
         match params with
         | [ p ] -> List.map (fun _ -> p) unnamed
@@ -1729,7 +1772,7 @@ and call env loc f args =
                 not (List.exists (fun (a : A.arg) ->
                     Option.map_default (same_name p.pname) false a.arg_name) args)
             ) params in
-    if unnamed <> [] && List.length unnamed <> List.length slots then
+    if List.length unnamed > List.length slots then
         error (List.hd unnamed).arg_loc "The arguments of %s must be named" fname ;
     let slots = ref slots in
     let named =
@@ -2634,7 +2677,8 @@ let check ?(warnings=ref []) (program : A.program) =
                     may_wait = true ; errors = ref [] ; warnings = ref [] ;
                     declared_at = Hashtbl.create 7 ; declared_as = Hashtbl.create 7 ;
                     reads = Hashtbl.create 7 ;
-                    widened ; widening = ref false ; held_by = Hashtbl.create 7 } in
+                    widened ; widening = ref false ; held_by = Hashtbl.create 7 ;
+                    reports = Hashtbl.create 3 } in
         let p = block env.errors env program in
         if !(env.widening) then typed () else p, env in
     let p, env = typed () in
@@ -2656,7 +2700,8 @@ let check_patterns (ps : A.patterns) =
                 errors = ref [] ; warnings = ref [] ; declared_at = Hashtbl.create 1 ;
                 declared_as = Hashtbl.create 1 ;
                 reads = Hashtbl.create 1 ; widened = Hashtbl.create 1 ;
-                widening = ref false ; held_by = Hashtbl.create 1 } in
+                widening = ref false ; held_by = Hashtbl.create 1 ;
+                reports = Hashtbl.create 1 } in
     try
         Ok (List.map (fun (p : A.pattern) ->
             if p.anchor <> A.Absolute then
@@ -2765,7 +2810,13 @@ let check_patterns (ps : A.patterns) =
   "line 1, column 27: The bucket of a histogram of an int[] must be a number, not an interval" \
     (types "h = histogram([1], bucket=1s)")
   "h: {count: int, max: float, min: float}[]" (types "h = histogram([1], 1)")
-  "line 1, column 15: The arguments of histogram must be named" (types "h = histogram([1])")
+  "line 1, column 5: histogram needs an argument bucket" (types "h = histogram([1])")
+  "line 2, column 8: Report x is of an int since line 1, not of a float" \
+    (types "report(1, name=\"x\")\nreport(1.5, name=\"x\")")
+  "line 2, column 16: The name of a report must be a literal string" \
+    (types "n = \"x\"\nreport(1, name=n)")
+  "s: {count: int, max: interval, mean: interval, min: interval, p50: interval, p95: interval, p99: interval, stddev: interval}[ip]" \
+    (types "s = summary([1.2.3.4: [1ms]])")
   "a: int, b: int, c: float, d: interval" \
     (types "a = sum([1])\nb = sum([#01])\nc = sum([1: 1.5])\nd = sum([1s])")
   "a: int, b: float, c: interval, d: float, e: string, f: int" \
@@ -2877,7 +2928,7 @@ let check_patterns (ps : A.patterns) =
     (types "x = prepend([1], [2])")
   "line 1, column 5: Cannot concatenate an int[] and a float[][]" \
     (types "x = concat([1], [[2.5]])")
-  "line 1, column 11: The arguments of array must be named" \
+  "line 1, column 5: array needs an argument len" \
     (types "x = array(1)")
   "line 2, column 7: A key must be an int, not a string" \
     (types "m = [1: 2]\nx = m[\"a\"]")

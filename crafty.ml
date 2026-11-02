@@ -55,6 +55,7 @@ let record format ?(json=[]) kind fields =
     | Csv ->
         let field = function
             | `String s -> Crafty_value.csv_field s
+            | `Null -> ""
             | j -> Crafty_value.json_to_string j in
         String.concat "," (kind :: List.map (field % snd) fields)
     | Json ->
@@ -455,6 +456,30 @@ let () =
     let emit ?json kind fields =
         let ts = Float.round (secs () *. 1e6) /. 1e6 in
         print_endline (record format ?json kind (("ts", `Float ts) :: fields)) in
+    (* A report as the summary of its value, in CSV as a line per key of a
+     * map, with the fields of a record of scalars after the key: *)
+    let report name typ v _ =
+        let typ, v = Crafty_interp.summarize typ v in
+        let json = Crafty_value.to_json in
+        let scalar = function
+            | Crafty_ast.Type.(Record _ | Map _ | Variant _ | Void | Pattern) -> false
+            | Crafty_ast.Type.Array t -> t = Crafty_ast.Type.Byte
+            | _ -> true in
+        let fields typ v =
+            match typ, v with
+            | Crafty_ast.Type.Record fs, Crafty_value.Record vs
+              when List.for_all (scalar % snd) fs ->
+                List.mapi (fun i (n, t) -> n, json t vs.(i)) fs
+            | t, v when scalar t -> [ "value", json t v ]
+            | t, v -> [ "value", `String (Crafty_value.json_to_string (json t v)) ] in
+        match format, typ, v with
+        | Human, _, _ ->
+            print_endline (name ^": "^ Crafty_value.to_string typ v)
+        | Json, _, _ -> emit "report" [ "name", `String name ; "value", json typ v ]
+        | Csv, Map (k, t), Map (m, _) when scalar k ->
+            Map.PMap.iter (fun key v ->
+                emit "report" (("name", `String name) :: ("key", json k key) :: fields t v)) m
+        | Csv, _, _ -> emit "report" (("name", `String name) :: fields typ v) in
     let print_stats what n =
         if !stats then
             if format = Human then
@@ -491,7 +516,7 @@ let () =
             (* The kernel answers for its own address: *)
             ~answer_arp:(!own_ip <> None) ~promisc:!promisc
             ~limits
-            ~format
+            ~format ~report
             ~print:(fun s ->
                 if format = Human then print_endline s
                 else emit "print" [ "text", `String s ])

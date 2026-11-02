@@ -304,7 +304,7 @@ let functions =
       "map" ; "has" ; "remove" ; "keys" ; "values" ;
       "count" ; "sum" ; "min" ; "max" ; "mean" ; "stddev" ; "percentile" ;
       "sort" ; "sorted" ; "histogram" ;
-      "print" ; "print_err" ; "format" ; "assert" ; "stats" ]
+      "print" ; "print_err" ; "format" ; "summary" ; "report" ; "assert" ; "stats" ]
 
 (** Variables that the program declares of itself, at most once each and at
  * its top level, with a literal record: its budget and its ports. *)

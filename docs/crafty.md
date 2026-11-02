@@ -453,6 +453,9 @@ what their engine computes (checksums).
 - `format(x)`: any value as a string, in the format of `--format`. CSV takes a
   scalar, or a record, array or map of scalars; record fields come in the
   order of their names: `print(format(stats()))`.
+- `summary(x)`: return `{count, min, mean, stddev, p50, p95, p99, max}` from
+  all values in `x` (key by key if `x` is a map or a record).
+- `report(x, name=s)`: prints the summary of `x` according to `--format`.
 - `assert(cond, msg=s)`: fails if `cond` is false.
 - `now()`: the current time.
 - `stats()`: the stats of the stream at the top of the current stack, so far:
@@ -688,6 +691,24 @@ reply from 192.0.2.10: seq=1 ttl=64
 ```
 
 The replies come back to the `Echo` stream of the requests, whatever its id.
+
+### Periodic reports
+
+```
+# Every 10s, the round trip times of the last 10s
+/IP!(dst=192.0.2.10)/UDP(dst=7) {
+  rtts = [0s] * 0
+  spawn { repeat every=10s { report(rtts, name="rtt") ; rtts := [0s] * 0 } }
+  repeat count=6000 every=10ms {
+    p = Raw("probe ${I}")
+    catch { expect timeout=500ms Raw("probe ${I}") { rtts += MATCH[Eth].ts - p[Eth].ts } }
+  }
+}
+```
+
+With `--format json`, each report is a line such as
+`{"type":"report","ts":10.0,"name":"rtt","value":{"count":998,"max":0.0021,"mean":0.0012,...}}`
+(intervals in seconds). The first one, at 0s, has only a `count` of 0.
 
 ### Round trip times
 
@@ -962,7 +983,7 @@ exceeds 1280 without a word.
 # usage: mtr.cfty TARGET [ROUNDS] [REPORT] [INTERVAL] [MAX_HOPS] [PORT]
 target = resolve(arg(0))[0]
 rounds = int(arg(1, default="60"))
-report = int(arg(2, default="10"))   # rounds per report
+per_report = int(arg(2, default="10"))   # rounds per report
 pace = interval(arg(3, default="1s"))
 max_hops = int(arg(4, default="30"))   # less than 64
 port = int(arg(5, default="33434"))
@@ -984,7 +1005,7 @@ sent_at = map(key=0, default=now())     # by IP id: round * 64 + hop
     }
   }
   repeat var=r count=rounds + 1 every=pace {
-    if r > 0 && r % report == 0 {
+    if r > 0 && r % per_report == 0 {
       print("after ${r} rounds:")
       repeat var=hop count=last + 1 {
         s = sent[hop]
