@@ -506,8 +506,11 @@ type env =
       held_by : (int, string) Hashtbl.t ;
       (* The type of what each report reports, and where first: *)
       reports : (string, Type.t * A.location) Hashtbl.t ;
-      (* Where variables are declared [[]], items unknown, by location: *)
-      unknown : (A.location, string) Hashtbl.t }
+      (* Whether an empty array literal is of {!unknown_items} when nothing
+       * tells its type, as in the value of a declaration typed first: *)
+      provisional : bool ;
+      (* The variables declared of such a type, by location: *)
+      unknown : (A.location, string * Type.t) Hashtbl.t }
 
 let bound env name =
     List.exists (fun (v : var) -> v.name = name) env.vars ||
@@ -536,17 +539,39 @@ let widens env at a b =
     | Some t -> Hashtbl.find_opt env.widened at <> Some t
     | None -> false
 
-(* The type of a variable declared [[]], until what is added to it tells the
- * type of its items: *)
+(* The type of an empty array literal of a declaration, until what is added
+ * to it tells the type of its items: *)
 let unknown_items = Type.Array Type.Void
+
+let rec has_unknown (typ : Type.t) =
+    match typ with
+    | Array Void -> true
+    | Array t | Map (_, t) -> has_unknown t
+    | Record fs | Variant fs -> List.exists (has_unknown % snd) fs
+    | _ -> false
+
+(* Whether [b] is [a] with what is unknown in it known: *)
+let rec fills (a : Type.t) (b : Type.t) =
+    match a, b with
+    | Array Void, Array t -> not (has_unknown b) && t <> Type.Void
+    | Array a, Array b | Map (_, a), Map (_, b) -> fills a b
+    | _ -> false
+
+(* [typ], with what [n] indexes into it reach being [t]: *)
+let rec set_at (typ : Type.t) n t =
+    if n = 0 then t else
+    match typ with
+    | Array u -> Type.Array (set_at u (n - 1) t)
+    | Map (k, u) -> Type.Map (k, set_at u (n - 1) t)
+    | _ -> invalid_arg "Crafty_typing.set_at"
 
 (* What an empty array literal next to [other] is of: *)
 let empty_next_to (other : Type.t) =
     match other with
-    | Type.Array _ when other <> unknown_items -> Some other
+    | _ when has_unknown other -> None
     | Type.Void -> None
-    | t when t <> unknown_items -> Some (Type.Array t)
-    | _ -> None
+    | Type.Array _ -> Some other
+    | t -> Some (Type.Array t)
 
 let is_empty_array (e : A.expr) = match e.desc with A.Array [] -> true | _ -> false
 
@@ -1575,6 +1600,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
     | A.Array [] ->
         (match expected with
         | Some (Type.Array _ as t) -> mk t (Array [])
+        | _ when env.provisional -> mk unknown_items (Array [])
         | _ -> error loc "Cannot tell the type of the items of an empty array")
     | A.Array items ->
         let expected_item =
@@ -2305,11 +2331,10 @@ and stmt errors env (s : A.stmt) =
                 | Some t -> Option.default e (coerce e t)
                 | None -> e in
             let typed () =
-                match e.desc, widened with
-                | A.Array [], None ->
-                    Hashtbl.replace env.unknown loc name ;
-                    { loc ; typ = unknown_items ; desc = Array [] }
-                | _ -> expr ?expected:widened ~tail:true env e in
+                let provisional = Option.map_default has_unknown true widened in
+                let e = expr ?expected:widened ~tail:true { env with provisional } e in
+                if has_unknown e.typ then Hashtbl.replace env.unknown loc (name, e.typ) ;
+                e in
             (match widen (typed ()) with
             | e when e.typ = Type.Void ->
                 tell errors (Error (loc, name ^" would have no value")) ;
@@ -2342,9 +2367,14 @@ and stmt errors env (s : A.stmt) =
                 match op with
                 | None -> expr ~expected:typ ~tail:true env e
                 | Some op -> binop env' loc op lhs e in
-            (match coerce e typ with
-            | Some value -> env, Some (mk (Assign { var = v ; path = List.rev path ; value }))
-            | None ->
+            (match coerce e typ, Hashtbl.find_opt env.declared_at v.id with
+            | Some value, _ -> env, Some (mk (Assign { var = v ; path = List.rev path ; value }))
+            | None, Some at when fills typ e.typ ->
+                (* Typed again, with the items of the type assigned: *)
+                Hashtbl.replace env.widened at (set_at v.typ (List.length is) e.typ) ;
+                env.widening := true ;
+                env, None
+            | None, _ ->
                 error loc "Cannot assign %s to an item of %s, which is %s"
                     (a_type e.typ) name (a_type typ))
         | A.Assign (name, [], op, e) ->
@@ -2352,14 +2382,13 @@ and stmt errors env (s : A.stmt) =
             let e =
                 match op with
                 | None ->
-                    expr ?expected:(if v.typ = unknown_items then None else Some v.typ)
+                    expr ?expected:(if has_unknown v.typ then None else Some v.typ)
                          ~tail:true env e
                 | Some op ->
                     binop env loc op { A.loc ; A.desc = A.Var name } e in
             (match coerce e v.typ, Hashtbl.find_opt env.declared_at v.id with
             | Some e, _ -> env, Some (mk (Assign { var = v ; path = [] ; value = e }))
-            | None, Some at when v.typ = unknown_items &&
-                                 empty_next_to e.typ = Some e.typ ->
+            | None, Some at when fills v.typ e.typ ->
                 (* Typed again, with the items of the type assigned: *)
                 Hashtbl.replace env.widened at e.typ ;
                 env.widening := true ;
@@ -2748,7 +2777,8 @@ let check ?(warnings=ref []) (program : A.program) =
                     declared_at = Hashtbl.create 7 ; declared_as = Hashtbl.create 7 ;
                     reads = Hashtbl.create 7 ;
                     widened ; widening = ref false ; held_by = Hashtbl.create 7 ;
-                    reports = Hashtbl.create 3 ; unknown = Hashtbl.create 3 } in
+                    reports = Hashtbl.create 3 ; provisional = false ;
+                    unknown = Hashtbl.create 3 } in
         let p = block env.errors env program in
         if !(env.widening) then typed () else p, env in
     let p, env = typed () in
@@ -2757,10 +2787,15 @@ let check ?(warnings=ref []) (program : A.program) =
     if Hashtbl.length env.unknown > 0 then (
         let unknown = tname unknown_items in
         env.errors := List.filter (fun (_, m) -> not (String.exists m unknown)) !(env.errors)) ;
-    Hashtbl.iter (fun loc name ->
+    Hashtbl.iter (fun loc (name, typ) ->
         env.errors :=
-            (loc, Printf.sprintf "Cannot tell the type of the items of %s: \
-                                  nothing is added to it" name) :: !(env.errors)
+            (loc, if typ = unknown_items then
+                      Printf.sprintf "Cannot tell the type of the items of %s: \
+                                      nothing is added to it" name
+                  else
+                      Printf.sprintf "Cannot tell the type of the items of the \
+                                      empty arrays in %s: nothing is added to them" name)
+            :: !(env.errors)
     ) env.unknown ;
     warnings := in_order !(env.warnings) ;
     let errors = !self_errors @ !(env.errors) in
@@ -2781,7 +2816,8 @@ let check_patterns (ps : A.patterns) =
                 declared_as = Hashtbl.create 1 ;
                 reads = Hashtbl.create 1 ; widened = Hashtbl.create 1 ;
                 widening = ref false ; held_by = Hashtbl.create 1 ;
-                reports = Hashtbl.create 1 ; unknown = Hashtbl.create 1 } in
+                reports = Hashtbl.create 1 ; provisional = false ;
+                unknown = Hashtbl.create 1 } in
     try
         Ok (List.map (fun (p : A.pattern) ->
             if p.anchor <> A.Absolute then
@@ -3040,8 +3076,10 @@ let check_patterns (ps : A.patterns) =
     (types "a = [1]\nw = [] + 1\nx = concat([], a)\ny = append([], 1)\nz = [] == a")
   "m: int[][int], r: int[][]" \
     (types "m = [1: [1]]\nm[2] := []\nr = [[1]]\nr := array(init=[], len=2)")
-  "line 1, column 16: Cannot tell the type of the items of an empty array" \
-    (types "r = array(init=[], len=2)")
+  "m: interval[][ip], n: string[], o: float[][], p: int[][string][int]" \
+    (types "m = map(key=0.0.0.0, default=[])\nm[1.2.3.4] += 1ms\nn = []\nn += \"x\"\no = array(init=[], len=2)\no[0] := [1.5]\np = map(key=1, default=map(key=\"\", default=[]))\np[1][\"a\"] += 2")
+  "line 1, column 1: Cannot tell the type of the items of the empty arrays in m: nothing is added to them" \
+    (types "m = map(key=1, default=[])\nprint(length(m))")
   "line 2, column 1: Cannot index an int" \
     (types "x = [1]\nx[0][0] := 1")
   "line 1, column 1: x would have no value" \

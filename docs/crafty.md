@@ -853,7 +853,7 @@ port = int(arg(3, default="33434"))
 /IP!(dst=target)/UDP(dst=port) {
   probe = 0                       # the IP id, that tells the probes apart
   repeat var=hop count=max_hops {
-    rtts = map(key=0.0.0.0, default=[0s] * 0)
+    rtts = map(key=0.0.0.0, default=[])
     reached = false
     repeat count=probes {
       probe += 1
@@ -989,7 +989,7 @@ max_hops = int(arg(4, default="30"))   # less than 64
 port = int(arg(5, default="33434"))
 last = max_hops - 1               # the target's hop, from 0, once known
 sent = array(init=0, len=max_hops)
-rtts = array(init=[0s] * 0, len=max_hops)
+rtts = array(init=[], len=max_hops)
 hosts = array(init=map(key=0.0.0.0, default=0), len=max_hops)
 sent_at = map(key=0, default=now())     # by IP id: round * 64 + hop
 /IP!(dst=target)/UDP(dst=port) {

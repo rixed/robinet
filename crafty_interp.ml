@@ -1628,6 +1628,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "m = summary([\"a\": [2]])\nr = summary({n: \"x\", v: 5})\nprint(\"${m} ${r} ${summary(#0102)}\")")
   "0s: [1ms, 2ms] [a] [1, 2] [2.5]\n0s: done" \
     (runs "a = []\nb = []\nc = []\nd = [1.5]\na += 1ms\nb += \"a\"\nc := [1]\nc += 2\nd := []\nd += 2.5\na := append(a, 2ms)\nprint(\"${a} ${b} ${c} ${d}\")")
+  "0s: [1.2.3.4: [1ms, 2ms], 5.6.7.8: [3ms]] [[], [1.5]]\n0s: done" \
+    (runs "m = map(key=0.0.0.0, default=[])\nm[1.2.3.4] += 1ms\nm[5.6.7.8] += 3ms\nm[1.2.3.4] += 2ms\nr = array(init=[], len=2)\nr[1] += 1.5\nprint(\"${m} ${r}\")")
   "0s: rtt: {count: 2, max: 2ms, mean: 1.5ms, min: 1ms, p50: 1ms, p95: 2ms, p99: 2ms, stddev: 500µs}\n0s: done" \
     (runs "report([1ms, 2ms], name=\"rtt\")")
   "200ms: n: 2\n400ms: n: 2\n450ms1ps: n: 1\n450ms1ps: done" \

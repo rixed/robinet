@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 17fad7745217527c065e8312e5a7c187) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 bb3c6245411af28b16258611edabea4e) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -783,7 +783,7 @@ Whole programs
     /IP!(dst=target)/UDP(dst=port) {
       probe = 0                       # the IP id, that tells the probes apart
       repeat var=hop count=max_hops {
-        rtts = map(key=0.0.0.0, default=[0s] * 0)
+        rtts = map(key=0.0.0.0, default=[])
         reached = false
         repeat count=probes {
           probe += 1
@@ -911,7 +911,7 @@ probes without an answer.
     port = int(arg(5, default="33434"))
     last = max_hops - 1               # the target's hop, from 0, once known
     sent = array(init=0, len=max_hops)
-    rtts = array(init=[0s] * 0, len=max_hops)
+    rtts = array(init=[], len=max_hops)
     hosts = array(init=map(key=0.0.0.0, default=0), len=max_hops)
     sent_at = map(key=0, default=now())     # by IP id: round * 64 + hop
     /IP!(dst=target)/UDP(dst=port) {
