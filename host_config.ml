@@ -137,26 +137,14 @@ type iface =
     { ifname : string ;
       mac : Eth.Addr.t ;
       mtu : int ;
-      (* Its first IPv4 address and netmask, if any: *)
-      ip : (Ip.Addr.t * Ip.Addr.t) option ;
-      (* All its addresses, IPv4 and IPv6: *)
-      addresses : Unix.inet_addr list ;
-      (* The IPv4 gateway of its default route, if any: *)
-      gateway : Ip.Addr.t option }
-
-let netmask_of_prefix n =
-    Ip.Addr.of_bitstring (Bitstring.concat [ Bitstring.ones_bitstring n ;
-                                             Bitstring.zeroes_bitstring (32 - n) ])
-
-(*$= netmask_of_prefix & ~printer:identity
-  "255.255.255.0" (Ip.Addr.to_dotted_string (netmask_of_prefix 24))
-  "255.255.240.0" (Ip.Addr.to_dotted_string (netmask_of_prefix 20))
-  "0.0.0.0" (Ip.Addr.to_dotted_string (netmask_of_prefix 0))
- *)
+      (* Its addresses, IPv4 and IPv6, with their prefix lengths: *)
+      addresses : Ip.Cidr.t list ;
+      (* The gateways of its default routes, the first of each family: *)
+      gateways : Ip.Addr.t list }
 
 (* [ip_addr] is the output of [ip addr show dev IF], [ip_route] that of
- * [ip -4 route show default dev IF], in the text format common to iproute2
- * and busybox: *)
+ * [ip -4 route show default dev IF] and [ip -6 route show default dev IF],
+ * in the text format common to iproute2 and busybox: *)
 let iface_of_ip_output ifname ~ip_addr ~ip_route =
     let lines s =
         String.split_on_char '\n' s |>
@@ -175,27 +163,24 @@ let iface_of_ip_output ifname ~ip_addr ~ip_route =
             | l :: m :: _ when String.starts_with l "link/" -> Some m
             | _ -> None)
     and mtu = find "MTU" (fun l -> Option.map int_of_string (after "mtu" l))
-    and ip =
-        List.find_map_opt (function
-            | "inet" :: a :: _ ->
-                let a, p =
-                    try String.split a ~by:"/"
-                    with Not_found -> a, "32" in
-                Some (Ip.Addr.of_dotted_string a,
-                      netmask_of_prefix (int_of_string p))
-            | _ -> None) addr
     and addresses =
         List.filter_map (function
             | ("inet" | "inet6") :: a :: _ ->
-                Some (Unix.inet_addr_of_string (fst (try String.split a ~by:"/"
-                                                     with Not_found -> a, "")))
+                let a = Ip.Addr.of_dotted_string (fst (try String.split a ~by:"/"
+                                                       with Not_found -> a, ""))
+                and p = try int_of_string (snd (String.split a ~by:"/"))
+                        with Not_found | Failure _ -> -1 in
+                Some (Ip.Cidr.o (a, if p < 0 then Ip.Addr.length a else p))
             | _ -> None) addr
-    and gateway =
+    and gateways =
         lines ip_route |>
-        List.find_map_opt (function
+        List.filter_map (function
             | "default" :: r -> Option.map Ip.Addr.of_dotted_string (after "via" r)
-            | _ -> None) in
-    { ifname ; mac = Eth.Addr.of_string mac ; mtu ; ip ; addresses ; gateway }
+            | _ -> None) |>
+        List.fold_left (fun gws gw ->
+            if List.exists (fun g -> Ip.Addr.is_v6 g = Ip.Addr.is_v6 gw) gws then gws
+            else gws @ [ gw ]) [] in
+    { ifname ; mac = Eth.Addr.of_string mac ; mtu ; addresses ; gateways }
 
 (*$inject
   let iproute2_addr = {|3: wlp59s0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
@@ -207,6 +192,8 @@ let iface_of_ip_output ifname ~ip_addr ~ip_route =
        valid_lft 32605sec preferred_lft 32605sec
 |}
   let iproute2_route = {|default via 192.168.1.254 dev wlp59s0 proto dhcp src 192.168.1.31 metric 600
+default via fe80::1 dev wlp59s0 proto ra metric 600 pref medium
+default via fe80::2 dev wlp59s0 proto ra metric 1024 pref medium
 |}
   let busybox_addr = {|5: eth0@if6: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1400 qlen 1000
     link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
@@ -218,39 +205,41 @@ let iface_of_ip_output ifname ~ip_addr ~ip_route =
   let busybox_route = {|default via 10.1.1.1 dev eth0
 |}
   let describe i =
-      Printf.sprintf "%s %s mtu=%d ip=%s gw=%s" i.ifname
+      Printf.sprintf "%s %s mtu=%d addrs=%s gws=%s" i.ifname
           (Eth.Addr.to_hexstring i.mac) i.mtu
-          (match i.ip with
-           | None -> "none"
-           | Some (a, m) -> Ip.Addr.to_dotted_string a ^"/"^ Ip.Addr.to_dotted_string m)
-          (Option.map_default Ip.Addr.to_dotted_string "none" i.gateway)
+          (String.join "," (List.map Ip.Cidr.to_string i.addresses))
+          (String.join "," (List.map Ip.Addr.to_dotted_string i.gateways))
 *)
 (*$= iface_of_ip_output & ~printer:identity
-  "wlp59s0 04:EA:56:AD:BF:AB mtu=1500 ip=192.168.1.31/255.255.255.0 gw=192.168.1.254" \
+  "wlp59s0 04:EA:56:AD:BF:AB mtu=1500 addrs=2a01:e0a:823:6270:fa1f:2a78:30a:3da2/64,192.168.1.31/24 gws=192.168.1.254,fe80::1" \
     (describe (iface_of_ip_output "wlp59s0" ~ip_addr:iproute2_addr ~ip_route:iproute2_route))
-  "wlp59s0 04:EA:56:AD:BF:AB mtu=1500 ip=192.168.1.31/255.255.255.0 gw=none" \
+  "wlp59s0 04:EA:56:AD:BF:AB mtu=1500 addrs=2a01:e0a:823:6270:fa1f:2a78:30a:3da2/64,192.168.1.31/24 gws=" \
     (describe (iface_of_ip_output "wlp59s0" ~ip_addr:iproute2_addr ~ip_route:""))
-  "eth0 02:00:00:00:00:01 mtu=1400 ip=10.1.1.2/255.255.255.192 gw=10.1.1.1" \
+  "eth0 02:00:00:00:00:01 mtu=1400 addrs=10.1.1.2/26,fe80::ff:fe00:1/64 gws=10.1.1.1" \
     (describe (iface_of_ip_output "eth0" ~ip_addr:busybox_addr ~ip_route:busybox_route))
+  "tun0 00:00:00:00:00:00 mtu=1500 addrs=10.8.0.1/32 gws=" \
+    (describe (iface_of_ip_output "tun0" ~ip_addr:"7: tun0: <UP> mtu 1500\n    link/none 00:00:00:00:00:00\n    inet 10.8.0.1 scope global tun0\n" ~ip_route:""))
   "No MAC address for interface tun0" \
     (try describe (iface_of_ip_output "tun0" ~ip_addr:"7: tun0: <UP> mtu 1500\n    link/none\n" ~ip_route:"") \
      with Failure e -> e)
  *)
-(*$= iface_of_ip_output & ~printer:dump
-  [ "192.168.1.31" ; "2a01:e0a:823:6270:fa1f:2a78:30a:3da2" ] \
-    (List.sort Stdlib.compare (List.map Unix.string_of_inet_addr \
-      (iface_of_ip_output "wlp59s0" ~ip_addr:iproute2_addr ~ip_route:"").addresses))
- *)
+
+(* The default routes, IPv4 then IPv6, of [args] (of [ip route show
+ * default]); none of a family the host has no support for: *)
+let default_routes args =
+    let routes family =
+        try output ~quiet:true "ip" ([ family ; "route" ; "show" ; "default" ] @ args)
+        with _ -> "" in
+    routes "-4" ^ routes "-6"
 
 (** The configuration of interface [ifname]. *)
 let iface ifname =
     iface_of_ip_output ifname
         ~ip_addr:(output "ip" [ "addr" ; "show" ; "dev" ; ifname ])
-        ~ip_route:(output "ip" [ "-4" ; "route" ; "show" ; "default" ;
-                                 "dev" ; ifname ])
+        ~ip_route:(default_routes [ "dev" ; ifname ])
 
 (* The interface of the first default route in [ip_route], the output of
- * [ip -4 route show default]: *)
+ * [ip route show default]: *)
 let ifname_of_default_route ip_route =
     String.split_on_char '\n' ip_route |>
     List.find_map_opt (fun line ->
@@ -269,9 +258,10 @@ let ifname_of_default_route ip_route =
   None (ifname_of_default_route "")
  *)
 
-(** The interface of the IPv4 default route, if any. *)
+(** The interface of the IPv4 default route, or else of the IPv6 one, if
+ * any. *)
 let default_ifname () =
-    ifname_of_default_route (output "ip" [ "-4" ; "route" ; "show" ; "default" ])
+    ifname_of_default_route (default_routes [])
 
 (** The slowest Ethernet speed at least as fast as [mbps] Mb/s, the fastest
  * past it, or none for a speed that is not positive (unknown). *)
@@ -365,19 +355,22 @@ let port_range_of_string proto s =
 let string_of_range r =
     if r.lo = r.hi then string_of_int r.lo else Printf.sprintf "%d-%d" r.lo r.hi
 
-(** A pcap filter for what a program may receive and send: ARP, and IPv4
- * to and from [ip] if given, of which ICMP, fragments but the first, and
- * the TCP and UDP ports of [ports], if any, as destination and as source
- * respectively. *)
+(** A pcap filter for what a program may receive and send: ARP and neighbor
+ * discovery, and IP to and from [ip] if given, of which ICMP, fragments but
+ * the first (IPv4) or all of them (IPv6, where the ports follow the fragment
+ * header), and the TCP and UDP ports of [ports], if any, as destination and
+ * as source respectively. IPv6 fragments are told by a fragment header
+ * right after the fixed one. *)
 let pcap_filter ?ip ports =
-    (* With the ports as [dirs], and the fragments but the first, which have
-     * no ports to tell. TODO: IPv6 fragments, which are all missed. *)
     let l4 dirs =
         if ports = [] then None
         else Some (String.concat " or " (
-            "icmp" :: "(ip[6:2] & 0x1fff != 0)" :: List.concat_map (fun dir -> List.map (fun r ->
+            "icmp" :: "icmp6" :: "(ip[6:2] & 0x1fff != 0)" :: "(ip6[6] = 44)" ::
+            List.concat_map (fun dir -> List.map (fun r ->
                 Printf.sprintf "(%s %s portrange %d-%d)"
                     (string_of_proto r.proto) dir r.lo r.hi) ports) dirs)) in
+    (* Neighbor solicitations go to a multicast group, not to [ip]: *)
+    let link = "arp or (icmp6 and ip6[40] >= 133 and ip6[40] <= 137)" in
     match ip with
     | None -> Option.map_default (fun l4 -> "arp or "^ l4) "" (l4 [ "dst" ; "src" ])
     | Some ip ->
@@ -386,30 +379,36 @@ let pcap_filter ?ip ports =
             match l4 [ dir ] with
             | None -> Printf.sprintf "%s host %s" dir ip
             | Some l4 -> Printf.sprintf "(%s host %s and (%s))" dir ip l4 in
-        Printf.sprintf "arp or %s or %s" (one "dst") (one "src")
+        Printf.sprintf "%s or %s or %s" link (one "dst") (one "src")
 
 (*$= pcap_filter & ~printer:identity
   "" (pcap_filter [])
-  "arp or dst host 10.0.0.1 or src host 10.0.0.1" \
+  "arp or (icmp6 and ip6[40] >= 133 and ip6[40] <= 137) or dst host 10.0.0.1 or src host 10.0.0.1" \
     (pcap_filter ~ip:(Ip.Addr.of_string "10.0.0.1") [])
-  "arp or icmp or (ip[6:2] & 0x1fff != 0) or (tcp dst portrange 14000-14099) or (udp dst portrange 53-53) or (tcp src portrange 14000-14099) or (udp src portrange 53-53)" \
+  "arp or icmp or icmp6 or (ip[6:2] & 0x1fff != 0) or (ip6[6] = 44) or (tcp dst portrange 14000-14099) or (udp dst portrange 53-53) or (tcp src portrange 14000-14099) or (udp src portrange 53-53)" \
     (pcap_filter [ port_range_of_string Tcp "14000-14099" ; port_range_of_string Udp "53" ])
-  "arp or (dst host 10.0.0.1 and (icmp or (ip[6:2] & 0x1fff != 0) or (udp dst portrange 1-2))) or (src host 10.0.0.1 and (icmp or (ip[6:2] & 0x1fff != 0) or (udp src portrange 1-2)))" \
-    (pcap_filter ~ip:(Ip.Addr.of_string "10.0.0.1") [ port_range_of_string Udp "1-2" ])
+  "arp or (icmp6 and ip6[40] >= 133 and ip6[40] <= 137) or (dst host 2001:db8::1 and (icmp or icmp6 or (ip[6:2] & 0x1fff != 0) or (ip6[6] = 44) or (udp dst portrange 1-2))) or (src host 2001:db8::1 and (icmp or icmp6 or (ip[6:2] & 0x1fff != 0) or (ip6[6] = 44) or (udp src portrange 1-2)))" \
+    (pcap_filter ~ip:(Ip.Addr.of_string "2001:db8::1") [ port_range_of_string Udp "1-2" ])
  *)
 
 (** The local port that the host refuses with [frame], if it is a frame of
- * its that does: a TCP reset from that port, or an ICMP port unreachable
- * about a UDP datagram to it. *)
+ * its that does: a TCP reset from that port, or an ICMP or ICMPv6 port
+ * unreachable about a UDP datagram to it. *)
 let refused_port frame =
     let ( let* ) r f = match r with Ok x -> f x | Error _ -> None in
     let* eth = Eth.Pdu.unpack frame in
-    let* ip = Ip.Pdu.unpack (eth.payload :> Bitstring.bitstring) in
-    let pld = (ip.payload :> Bitstring.bitstring) in
-    if ip.proto = Ip.Proto.tcp then
+    let* proto, pld =
+        if eth.proto = Eth.Proto.ip6 then
+            Result.map (fun (ip : Ip6.Pdu.t) -> ip.proto, ip.payload)
+                       (Ip6.Pdu.unpack (eth.payload :> Bitstring.bitstring))
+        else
+            Result.map (fun (ip : Ip.Pdu.t) -> ip.proto, ip.payload)
+                       (Ip.Pdu.unpack (eth.payload :> Bitstring.bitstring)) in
+    let pld = (pld :> Bitstring.bitstring) in
+    if proto = Ip.Proto.tcp then
         let* tcp = Tcp.Pdu.unpack pld in
         if tcp.flags.rst then Some (Tcp, (tcp.src_port :> int)) else None
-    else if ip.proto = Ip.Proto.icmp then
+    else if proto = Ip.Proto.icmp then
         let* icmp = Icmp.Pdu.unpack pld in
         match (icmp.msg_type :> int * int), icmp.payload with
         | (3, 3), Header { pld ; _ } ->
@@ -420,6 +419,14 @@ let refused_port frame =
                 Some (Udp, dst)
             | {| _ |} -> None)
         | _ -> None
+    else if proto = Ip.Proto.icmpv6 then
+        (* The type and code, the checksum and 4 unused bytes, then the IPv6
+         * header quoted (without extensions), then the UDP ports: *)
+        match%bitstring pld with
+        | {| 1 : 8 ; 4 : 8 ; _ : 48 ; 6 : 4 ; _ : 44 ; 17 : 8 ; _ : 264 : bitstring ;
+             _ : 16 ; dst : 16 |} ->
+            Some (Udp, dst)
+        | {| _ |} -> None
     else None
 
 (*$inject
@@ -431,6 +438,13 @@ let refused_port frame =
   let tcp ~rst = Tcp.Pdu.make ~src_port:(Tcp.Port.o 40001) ~dst_port:(Tcp.Port.o 80) ~rst ~ack:true Bitstring.empty_bitstring |> Tcp.Pdu.pack
   let reply = Ip.Pdu.make Ip.Proto.udp peer me
       (Udp.Pdu.make ~src_port:(Udp.Port.o 53) ~dst_port:(Udp.Port.o 40002) (Bitstring.bitstring_of_string "hi") |> Udp.Pdu.pack)
+  let me6 = Ip.Addr.of_string "2001:db8::1" and peer6 = Ip.Addr.of_string "2001:db8::2"
+  let frame6 proto bits =
+      Eth.Pdu.make Eth.Proto.ip6 (Eth.Addr.of_string "02:00:00:00:00:01")
+          (Eth.Addr.of_string "02:00:00:00:00:02")
+          (Ip6.Pdu.pack (Ip6.Pdu.make proto me6 peer6 bits)) |> Eth.Pdu.pack
+  let reply6 = Ip6.Pdu.make Ip.Proto.udp peer6 me6
+      (Udp.Pdu.make ~src_port:(Udp.Port.o 53) ~dst_port:(Udp.Port.o 40002) (Bitstring.bitstring_of_string "hi") |> Udp.Pdu.pack)
 *)
 (*$= refused_port & ~printer:dump
   (Some (Tcp, 40001)) (refused_port (frame Ip.Proto.tcp (tcp ~rst:true)))
@@ -438,6 +452,11 @@ let refused_port frame =
   (Some (Udp, 40002)) (refused_port (frame Ip.Proto.icmp (Icmp.Pdu.pack (Icmp.Pdu.make_port_unreachable reply))))
   None (refused_port (frame Ip.Proto.icmp (Icmp.Pdu.pack (Icmp.Pdu.make_host_unreachable reply))))
   None (refused_port (frame Ip.Proto.udp (Ip.Pdu.pack reply)))
+  (Some (Tcp, 40001)) (refused_port (frame6 Ip.Proto.tcp (tcp ~rst:true)))
+  (Some (Udp, 40002)) (refused_port (frame6 Ip.Proto.icmpv6 \
+    (Icmp6.Pdu.pack (Icmp6.Pdu.make_port_unreachable reply6))))
+  None (refused_port (frame6 Ip.Proto.icmpv6 \
+    (Icmp6.Pdu.pack (Icmp6.Pdu.make_echo_request 1 1))))
 *)
 
 (** {2 Firewall} *)
@@ -483,7 +502,8 @@ let ruleset ~table ~ifname ?(ports=[]) ?forward_drop () =
             icmp_errors r ~src:false) ports
     and forward =
         Option.map_default (fun ip ->
-            [ "ip daddr "^ Ip.Addr.to_dotted_string ip ^" drop" ]) [] forward_drop in
+            [ Printf.sprintf "%s daddr %s drop" (if Ip.Addr.is_v6 ip then "ip6" else "ip")
+                             (Ip.Addr.to_dotted_string ip) ]) [] forward_drop in
     Printf.sprintf "table inet %s {\n%s%s%s}\n" table
         (chain "input" "iifname" input)
         (chain "output" "oifname" output)
@@ -514,6 +534,9 @@ let ruleset ~table ~ifname ?(ports=[]) ?forward_drop () =
     "    }" ; \
     "}" ; "" ]) \
     (ruleset ~table:"t" ~ifname:"eth0" ~forward_drop:(Ip.Addr.of_string "10.0.0.1") ())
+  "        iifname \"eth0\" ip6 daddr 2001:db8::1 drop" \
+    (List.nth (String.split_on_char '\n' \
+      (ruleset ~table:"t" ~ifname:"eth0" ~forward_drop:(Ip.Addr.of_string "2001:db8::1") ())) 3)
  *)
 
 (** {2 Changes and their undoing}

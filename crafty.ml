@@ -352,7 +352,10 @@ let () =
              own shares no port with the kernel." ;
     let iface = Host_config.iface !ifname in
     if !fw then (
-        match Host_config.fenced ~addresses:iface.addresses ports
+        let addresses =
+            List.map (fun c -> (fst (c : Ip.Cidr.t :> Ip.Addr.t * int) :> Unix.inet_addr))
+                     iface.addresses in
+        match Host_config.fenced ~addresses ports
                                  (Host_config.listening ()) with
         | [] -> ()
         | sockets ->
@@ -370,7 +373,12 @@ let () =
                                 Some (Unix.string_of_inet_addr a)
                             else None) sockets))) ports))) ;
     let ip, netmask =
-        match iface.ip, !own_ip with
+        let ip4 =
+            List.find_map_opt (fun c ->
+                let a, w = (c : Ip.Cidr.t :> Ip.Addr.t * int) in
+                if Ip.Addr.is_v6 a then None
+                else Some (a, Ip.Addr.of_bitstring (Ip.Addr.mask w))) iface.addresses in
+        match ip4, !own_ip with
         | Some (ip, netmask), None -> ip, netmask
         | Some (_, netmask), Some ip -> ip, netmask
         | None, _ -> die "Interface %s has no IPv4 address." !ifname in
@@ -381,9 +389,9 @@ let () =
             match !own_ip with
             | Some ip -> [ ip ]
             | None ->
-                List.filter_map (fun a ->
-                    if Unix.is_inet6_addr a then None else Some (Ip.Addr.o a))
-                    iface.addresses in
+                List.filter_map (fun c ->
+                    let a = fst (c : Ip.Cidr.t :> Ip.Addr.t * int) in
+                    if Ip.Addr.is_v6 a then None else Some a) iface.addresses in
         { limits with permissions =
             Crafty_typing.resolve_permissions ~program:program.limits.permissions
                                               ~cli:cli_permissions ~local } in
@@ -512,7 +520,8 @@ let () =
     let dev, h =
         Crafty_interp.run ~parent:sim.root ~mac:iface.mac ~ip ~netmask
             ~speed ~full_duplex ~mtu
-            ?gateway:(Option.map (fun gw -> Eth.Gateway.Ip gw) iface.gateway)
+            ?gateway:(Option.map (fun gw -> Eth.Gateway.Ip gw)
+                        (List.find_opt Ip.Addr.is_v4 iface.gateways))
             (* The kernel answers for its own address: *)
             ~answer_requests:(!own_ip <> None) ~promisc:!promisc
             ~limits
