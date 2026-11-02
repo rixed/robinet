@@ -619,11 +619,31 @@ one of `{"timestamps": [ … ]}`, `{"addresses and timestamps": [{"address": …
 start of the option, from 1. Left automatic, a route or a list of stamps has
 one empty slot.
 
+IPv6 `extensions` are a list in packet order; `next header` names the upper
+layer and the chain is rebuilt from the list. Each is
+`{"hop-by-hop options": [ … ]}` or `{"destination options": [ … ]}`,
+`{"routing": …}`, `{"fragment": {"offset": …, "more fragments": …, "id": …}}`
+(offset in 8-byte units) or `{"other": {"type": …, "body": …}}` (the bytes
+after the next header byte, length included). Options are `{"Pad1": null}`,
+`{"PadN": …}` (that many zero bytes), `{"PDM": {"scale DTLR": …,
+"scale DTLS": …, "PSN this packet": …, "PSN last received": …,
+"delta time last received": …, "delta time last sent": …}}`,
+`{"alternate marking": {"flow monitoring id": …, "loss": …, "delay": …}}`,
+`{"minimum path MTU": {"minimum": …, "returned": …, "R": …}}` or
+`{"other": …}` (type and length included). A routing header is
+`{"segment routing": {"segments left": …, "flags": …, "tag": …,
+"segments": [ "2001:db8::1", … ], "TLVs": [ … ]}}`, segments final destination
+first and TLVs `{"Pad1": null}`, `{"PadN": …}`, `{"HMAC": {"D": …, "key id": …,
+"HMAC": …}}` or `{"other": …}`; or `{"other": {"type": …, "segments left": …,
+"data": …}}`. Headers are padded to a multiple of 8 bytes with Pad1 or PadN
+(zeroes for an other routing header). Left automatic, a segment list has one
+empty slot and segments left points at its last segment.
+
 An automatic value is a *plausible* one and not any the field could hold: a
 protocol number says what is above it, a length counts what is below, a TTL is
-64, an IP id is the previous packet's plus one, IP and TCP options are none. `Data`
-is the raw bottom layer and its whole `fields` is one value: from a generator,
-it is that many random bytes. Layer names are `Eth`, `Arp`, `Ip`, `Ip6`, `Udp`,
+64, an IP id is the previous packet's plus one, IP and TCP options and IPv6
+extensions are none. `Data` is the raw bottom layer and its whole `fields` is
+one value: from a generator, it is that many random bytes. Layer names are `Eth`, `Arp`, `Ip`, `Ip6`, `Udp`,
 `Tcp`, `Icmp`, `Dns`, `Dhcp`, `Vlan`, `Sll`, `Pcap`, `Data`; a field left out
 of `fields` is refused, so write them all, `null` for the ones to leave alone.
 

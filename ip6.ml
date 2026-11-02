@@ -172,6 +172,98 @@ module Extension = struct
                                     randbs len ]) in
             List.init (Random.int 4) (fun _ -> one ())
 
+        module Kinds =
+        struct
+            open SimTypes
+            let u8 = IRange (0, 0xff)
+            let u16 = IRange (0, 0xffff)
+            let pdm =
+                Widget.record [|
+                    "scale DTLR", u8 ;
+                    "scale DTLS", IRange (-128, 127) ;
+                    "PSN this packet", u16 ;
+                    "PSN last received", u16 ;
+                    "delta time last received", u16 ;
+                    "delta time last sent", u16 |]
+            let flow_mon_id = IRange (0, 0xfffff)
+            let alt_mark =
+                Widget.record [| "flow monitoring id", flow_mon_id ;
+                                 "loss", Bool ; "delay", Bool |]
+            let min_pmtu =
+                Widget.record [| "minimum", u16 ; "returned", u16 ; "R", Bool |]
+            let other = BRange (2, 0x101)
+            let opt =
+                Widget.variant [|
+                    "Pad1", None ;
+                    "PadN", Some u8 ;
+                    "PDM", Some pdm ;
+                    "alternate marking", Some alt_mark ;
+                    "minimum path MTU", Some min_pmtu ;
+                    "other", Some other |]
+        end
+
+        let to_json opt : Yojson.Basic.t =
+            match opt with
+            | Pad1 -> `Assoc [ "Pad1", `Null ]
+            | PadN n -> `Assoc [ "PadN", `Int n ]
+            | Pdm p ->
+                `Assoc [ "PDM", `Assoc [
+                    "scale DTLR", `Int p.scale_dtlr ;
+                    "scale DTLS", `Int p.scale_dtls ;
+                    "PSN this packet", `Int p.psn_this ;
+                    "PSN last received", `Int p.psn_last ;
+                    "delta time last received", `Int p.delta_last_recv ;
+                    "delta time last sent", `Int p.delta_last_sent ] ]
+            | Alt_mark a ->
+                `Assoc [ "alternate marking", `Assoc [
+                    "flow monitoring id", `Int a.flow_mon_id ;
+                    "loss", `Bool a.loss ; "delay", `Bool a.delay ] ]
+            | Min_pmtu m ->
+                `Assoc [ "minimum path MTU", `Assoc [
+                    "minimum", `Int m.min_pmtu ;
+                    "returned", `Int m.rtn_pmtu ; "R", `Bool m.r ] ]
+            | Other bits -> `Assoc [ "other", Widget.json_of_bytes bits ]
+
+        (* [js] is the synth of an option of [Kinds.opt], as [Generator.expand]
+         * leaves it. The flow monitoring id is random when automatic, as RFC
+         * 9343 wants it, and all else is zero but the minimum path MTU: *)
+        let of_synth gen_values js =
+            let open Generator in
+            let int ?auto name kind v = int_of_field name gen_values ?auto kind identity v
+            and bool name v =
+                of_field name gen_values ~auto:(fun () -> false) SimTypes.Bool
+                         Widget.to_bool v
+            and zero () = 0 in
+            match js with
+            | `Assoc [ "Pad1", _ ] ->
+                Pad1
+            | `Assoc [ "PadN", v ] ->
+                PadN (of_value gen_values ~auto:zero Kinds.u8 Widget.to_int v)
+            | `Assoc [ "PDM", v ] ->
+                let v = expand gen_values Kinds.pdm v in
+                let u16 name = int ~auto:zero name Kinds.u16 v in
+                Pdm { scale_dtlr = int ~auto:zero "scale DTLR" Kinds.u8 v ;
+                      scale_dtls = int ~auto:zero "scale DTLS" (IRange (-128, 127)) v ;
+                      psn_this = u16 "PSN this packet" ;
+                      psn_last = u16 "PSN last received" ;
+                      delta_last_recv = u16 "delta time last received" ;
+                      delta_last_sent = u16 "delta time last sent" }
+            | `Assoc [ "alternate marking", v ] ->
+                let v = expand gen_values Kinds.alt_mark v in
+                Alt_mark { flow_mon_id = int "flow monitoring id" Kinds.flow_mon_id v ;
+                           loss = bool "loss" v ; delay = bool "delay" v }
+            | `Assoc [ "minimum path MTU", v ] ->
+                let v = expand gen_values Kinds.min_pmtu v in
+                Min_pmtu { min_pmtu = int ~auto:(fun () -> 1500) "minimum" Kinds.u16 v ;
+                           rtn_pmtu = int ~auto:zero "returned" Kinds.u16 v land 0xfffe ;
+                           r = bool "R" v }
+            | `Assoc [ "other", v ] ->
+                (* An option of an experimental type (RFC 4727), carrying nothing: *)
+                Other (bs_of_value gen_values ~auto:(fun () -> bitstring_of_string "\x1e\x00")
+                                   Kinds.other v)
+            | js ->
+                Widget.bad_value "not an IPv6 option: %s" (Yojson.Basic.to_string js)
+
         (*$>*)
     end
 
@@ -300,6 +392,118 @@ module Extension = struct
                       flags = randi 8 ; tag = randi 16 ; segments ;
                       tlvs = List.init (Random.int 3) (fun _ -> tlv ()) }
 
+        module Kinds =
+        struct
+            open SimTypes
+            let u8 = IRange (0, 0xff)
+            let tag = IRange (0, 0xffff)
+            let addr = Widget.hint "2001:db8::1" Ipv6
+            let key_id = IRange (0, 0xffff_ffff)
+            let hmac_bytes = BRange (0, 0xff - 6)
+            let hmac = Widget.record [| "D", Bool ; "key id", key_id ;
+                                        "HMAC", hmac_bytes |]
+            let other_tlv = BRange (2, 0x101)
+            let tlv =
+                Widget.variant [|
+                    "Pad1", None ;
+                    "PadN", Some u8 ;
+                    "HMAC", Some hmac ;
+                    "other", Some other_tlv |]
+            let srh =
+                Widget.record [|
+                    "segments left", u8 ;
+                    "flags", u8 ;
+                    "tag", tag ;
+                    "segments", Widget.list addr ;
+                    "TLVs", Widget.list tlv |]
+            (* So that the header is at most 2048 octets long: *)
+            let data = BRange (0, 2044)
+            let other =
+                Widget.record [| "type", u8 ; "segments left", u8 ; "data", data |]
+            let routing =
+                Widget.variant [|
+                    "segment routing", Some srh ;
+                    "other", Some other |]
+        end
+
+        let tlv_to_json : tlv -> Yojson.Basic.t = function
+            | Pad1 -> `Assoc [ "Pad1", `Null ]
+            | PadN n -> `Assoc [ "PadN", `Int n ]
+            | Hmac h ->
+                `Assoc [ "HMAC", `Assoc [ "D", `Bool h.d ;
+                                          "key id", `Int (uint32 h.key_id) ;
+                                          "HMAC", Widget.json_of_bytes h.hmac ] ]
+            | Other_tlv bits -> `Assoc [ "other", Widget.json_of_bytes bits ]
+
+        let to_json : t -> Yojson.Basic.t = function
+            | Srh s ->
+                `Assoc [ "segment routing", `Assoc [
+                    "segments left", `Int s.segments_left ;
+                    "flags", `Int s.flags ;
+                    "tag", `Int s.tag ;
+                    "segments", `List (List.map Ip.Addr.to_json s.segments) ;
+                    "TLVs", `List (List.map tlv_to_json s.tlvs) ] ]
+            | Other o ->
+                `Assoc [ "other", `Assoc [
+                    "type", `Int o.typ ;
+                    "segments left", `Int o.segments_left ;
+                    "data", Widget.json_of_bytes o.data ] ]
+
+        (* As [Options.of_synth]. An automatic SRH has one empty segment,
+         * that is still to visit; an automatic other routing header is of an
+         * experimental type (RFC 4727): *)
+        let of_synth gen_values js =
+            let open Generator in
+            let int ?auto name kind v = int_of_field name gen_values ?auto kind identity v
+            and zero () = 0 in
+            let tlv = function
+                | `Assoc [ "Pad1", _ ] ->
+                    Pad1
+                | `Assoc [ "PadN", v ] ->
+                    PadN (of_value gen_values ~auto:zero Kinds.u8 Widget.to_int v)
+                | `Assoc [ "HMAC", v ] ->
+                    let v = expand gen_values Kinds.hmac v in
+                    Hmac { d = of_field "D" gen_values ~auto:(fun () -> false)
+                                        SimTypes.Bool Widget.to_bool v ;
+                           key_id = Int32.of_int (int ~auto:zero "key id" Kinds.key_id v) ;
+                           hmac = bs_of_field "HMAC" gen_values
+                                              ~auto:(fun () -> empty_bitstring)
+                                              Kinds.hmac_bytes v }
+                | `Assoc [ "other", v ] ->
+                    Other_tlv (bs_of_value gen_values
+                                           ~auto:(fun () -> bitstring_of_string "\x7e\x00")
+                                           Kinds.other_tlv v)
+                | js ->
+                    Widget.bad_value "not an SRH TLV: %s" (Yojson.Basic.to_string js) in
+            let addr =
+                of_value gen_values ~auto:(fun () -> Ip.Addr.zero6) Kinds.addr
+                         (Ip.Addr.of_dotted_string % Widget.to_string) in
+            match js with
+            | `Assoc [ "segment routing", v ] ->
+                let v = expand gen_values Kinds.srh v in
+                let segments =
+                    Widget.to_field "segments" (function
+                        | `Null -> [ addr `Null ]
+                        | l -> expand gen_values (Widget.list Kinds.addr) l |>
+                               Widget.to_list addr) v in
+                Srh { segments_left = int ~auto:(fun () -> List.length segments - 1)
+                                          "segments left" Kinds.u8 v ;
+                      flags = int ~auto:zero "flags" Kinds.u8 v ;
+                      tag = int ~auto:zero "tag" Kinds.tag v ;
+                      segments ;
+                      tlvs = Widget.to_field "TLVs" (function
+                          | `Null -> []
+                          | l -> expand gen_values (Widget.list Kinds.tlv) l |>
+                                 Widget.to_list tlv) v }
+            | `Assoc [ "other", v ] ->
+                let v = expand gen_values Kinds.other v in
+                Other { typ = int ~auto:(fun () -> 253) "type" Kinds.u8 v ;
+                        segments_left = int ~auto:zero "segments left" Kinds.u8 v ;
+                        data = bs_of_field "data" gen_values
+                                           ~auto:(fun () -> empty_bitstring) Kinds.data v }
+            | js ->
+                Widget.bad_value "not a routing header: %s" (Yojson.Basic.to_string js)
+
         (*$>*)
     end
 
@@ -398,6 +602,34 @@ module Extension = struct
     let list_to_string exts =
         String.concat ", " (List.map to_string exts)
 
+    (* The padding that makes [len] octets of data after the length octet a
+     * multiple of 8: *)
+    let padding len pad1 padn =
+        match (2 + len) land 7 with
+        | 0 -> []
+        | 7 -> [ pad1 ]
+        | r -> [ padn (6 - r) ]
+
+    (** [e] padded to a multiple of 8 octets, as [pack] wants it, with Pad1
+     * or PadN, or zeroes after the data of an unknown routing header. *)
+    let pad e =
+        let pad_opts opts =
+            opts @ padding (bytelength (Options.pack opts))
+                           Options.Pad1 (fun n -> Options.PadN n) in
+        match e with
+        | Hop_by_hop opts -> Hop_by_hop (pad_opts opts)
+        | Dest_opts opts -> Dest_opts (pad_opts opts)
+        | Routing (Routing.Srh s as r) ->
+            let tlvs =
+                s.tlvs @ padding (bytelength (Routing.pack r))
+                                 Routing.Pad1 (fun n -> Routing.PadN n) in
+            Routing (Routing.Srh { s with tlvs })
+        | Routing (Routing.Other o as r) ->
+            let missing = (6 - bytelength (Routing.pack r)) land 7 in
+            Routing (Routing.Other { o with data = concat [ o.data ;
+                                                            zeroes_bitstring (8 * missing) ] })
+        | e -> e
+
     let random () =
         let one () =
             match Random.int 5 with
@@ -412,28 +644,111 @@ module Extension = struct
                 Other { typ = 51 ;
                         body = concat [ [%bitstring {| len : 8 |}] ;
                                         randbs (4 * (len + 2) - 2) ] } in
-        (* Padded with PadN, as [pack_generic] wants it: *)
-        let pad_opts opts =
-            match (2 + bytelength (Options.pack opts)) land 7 with
-            | 0 -> opts
-            | 7 -> opts @ [ Options.Pad1 ]
-            | r -> opts @ [ Options.PadN (6 - r) ] in
-        let pad_tlvs = function
-            | Routing.Srh s as r ->
-                (match (2 + bytelength (Routing.pack r)) land 7 with
-                | 0 -> r
-                | 7 -> Routing.Srh { s with tlvs = s.tlvs @ [ Routing.Pad1 ] }
-                | n -> Routing.Srh { s with tlvs = s.tlvs @ [ Routing.PadN (6 - n) ] })
-            | Routing.Other o as r ->
-                (match (2 + bytelength (Routing.pack r)) land 7 with
-                | 0 -> r
-                | n -> Routing.Other { o with data = concat [ o.data ; randbs (8 - n) ] }) in
-        List.init (Random.int 4) (fun _ ->
-            match one () with
-            | Hop_by_hop opts -> Hop_by_hop (pad_opts opts)
-            | Dest_opts opts -> Dest_opts (pad_opts opts)
-            | Routing r -> Routing (pad_tlvs r)
-            | e -> e)
+        List.init (Random.int 4) (fun _ -> pad (one ()))
+
+    module Kinds =
+    struct
+        open SimTypes
+        let options = Widget.list Options.Kinds.opt
+        let fragment_offset = IRange (0, 0x1fff)
+        let fragment_id = IRange (0, 0xffff_ffff)
+        let fragment =
+            Widget.record [| "offset", fragment_offset ;
+                             "more fragments", Bool ;
+                             "id", fragment_id |]
+        let typ = IRange (0, 0xff)
+        let body = BRange (1, 0x7ff)
+        let other = Widget.record [| "type", typ ; "body", body |]
+        let ext =
+            Widget.variant [|
+                "hop-by-hop options", Some options ;
+                "destination options", Some options ;
+                "routing", Some Routing.Kinds.routing ;
+                "fragment", Some fragment ;
+                "other", Some other |]
+        let extensions = Widget.list ext
+    end
+
+    let to_json : t -> Yojson.Basic.t = function
+        | Hop_by_hop opts ->
+            `Assoc [ "hop-by-hop options", `List (List.map Options.to_json opts) ]
+        | Dest_opts opts ->
+            `Assoc [ "destination options", `List (List.map Options.to_json opts) ]
+        | Routing r ->
+            `Assoc [ "routing", Routing.to_json r ]
+        | Fragment f ->
+            `Assoc [ "fragment", `Assoc [ "offset", `Int f.offset ;
+                                          "more fragments", `Bool f.more ;
+                                          "id", `Int (uint32 f.id) ] ]
+        | Other o ->
+            `Assoc [ "other", `Assoc [ "type", `Int o.typ ;
+                                       "body", Widget.json_of_bytes o.body ] ]
+
+    (* [js] is the synth of an extension of [Kinds.ext], as
+     * [Generator.expand] leaves it; the result is [pad]ded. Automatic
+     * options are none, an automatic fragment is the first and only one,
+     * and an automatic other header is an experimental one (RFC 4727) as
+     * short as can be: *)
+    let of_synth gen_values js =
+        let open Generator in
+        let options = function
+            | `Null -> []
+            | l -> expand gen_values Kinds.options l |>
+                   Widget.to_list (Options.of_synth gen_values) in
+        pad (match js with
+        | `Assoc [ "hop-by-hop options", v ] ->
+            Hop_by_hop (options v)
+        | `Assoc [ "destination options", v ] ->
+            Dest_opts (options v)
+        | `Assoc [ "routing", v ] ->
+            Routing (Routing.of_synth gen_values
+                                      (expand gen_values Routing.Kinds.routing v))
+        | `Assoc [ "fragment", v ] ->
+            let v = expand gen_values Kinds.fragment v in
+            Fragment {
+                offset = int_of_field "offset" gen_values ~auto:(fun () -> 0)
+                                      Kinds.fragment_offset identity v ;
+                more = of_field "more fragments" gen_values ~auto:(fun () -> false)
+                                SimTypes.Bool Widget.to_bool v ;
+                id = Int32.of_int (int_of_field "id" gen_values Kinds.fragment_id
+                                                identity v) }
+        | `Assoc [ "other", v ] ->
+            let v = expand gen_values Kinds.other v in
+            Other { typ = int_of_field "type" gen_values ~auto:(fun () -> 253)
+                                       Kinds.typ identity v ;
+                    body = bs_of_field "body" gen_values
+                                       ~auto:(fun () -> zeroes_bitstring 56)
+                                       Kinds.body v }
+        | js ->
+            Widget.bad_value "not an IPv6 extension header: %s"
+                             (Yojson.Basic.to_string js))
+
+    (* Automatic extensions pack, and are read back: *)
+    (*$= of_synth & ~printer:identity
+      ("HBH [MinPMTU 1500 rtn 0, AltMark 0, PadN 0], SRH left 0 [::], " ^ \
+       "routing type 253 left 0 00000000, " ^ \
+       "DSTOPT [PDM psn 0/0 delta 0<<0/0<<0, opt 1E00], " ^ \
+       "frag id 0 off 0, ext 253 00000000000000") \
+        (let autos ?(gen=[]) kind = \
+          `Assoc (Array.to_list (Widget.field_names kind) |> List.map (fun n -> \
+            n, if List.mem n gen then `Assoc [ "gen", `Int 0 ] else `Null)) in \
+        let exts = \
+          Generator.expand [| 0 |] Kinds.extensions (`List [ \
+            `Assoc [ "hop-by-hop options", `List [ \
+              `Assoc [ "minimum path MTU", autos Options.Kinds.min_pmtu ] ; \
+              `Assoc [ "alternate marking", \
+                       autos ~gen:[ "flow monitoring id" ] Options.Kinds.alt_mark ] ] ] ; \
+            `Assoc [ "routing", `Assoc [ "segment routing", autos Routing.Kinds.srh ] ] ; \
+            `Assoc [ "routing", `Assoc [ "other", autos Routing.Kinds.other ] ] ; \
+            `Assoc [ "destination options", `List [ \
+              `Assoc [ "PDM", autos Options.Kinds.pdm ] ; `Assoc [ "other", `Null ] ] ] ; \
+            `Assoc [ "fragment", autos ~gen:[ "id" ] Kinds.fragment ] ; \
+            `Assoc [ "other", autos Kinds.other ] ]) |> \
+          Widget.to_list (of_synth [| 0 |]) in \
+        let next, bits = pack exts 6 in \
+        let exts, _, _ = unpack next bits in \
+        list_to_string exts)
+     *)
 
     (*$Q pack
       (Q.make ~print:list_to_string (fun _ -> random ())) (fun exts -> \
@@ -470,7 +785,7 @@ module Pdu = struct
           extensions ; payload = Payload.o payload }
 
     let random () =
-        make (Ip.Proto.random ())
+        make ~extensions:(Extension.random ()) (Ip.Proto.random ())
              (Ip.Addr.random ~v4:false ())
              (Ip.Addr.random ~v4:false ())
              (randbs (Random.int 10 + 20))
@@ -546,8 +861,6 @@ module Pdu = struct
 
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
-      (Q.make (fun _ -> { (random ()) with extensions = Extension.random () } |> pack)) \
-        (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
     (* The checksum is patched for the final destination, and not in
      * fragments: *)
@@ -575,7 +888,10 @@ module Pdu = struct
      * module is.
      *
      * The traffic class is split in two here, unlike IPv4's type of service,
-     * because [t] holds it split. *)
+     * because [t] holds it split.
+     *
+     * The next header is the upper layer's: the next header fields of the
+     * extensions follow from their list. *)
     module Kinds =
     struct
         open SimTypes
@@ -585,6 +901,7 @@ module Pdu = struct
         let proto = Widget.one_of ~range:(0, 0xff) Ip.Proto.choices
         let ttl = IRange (0, 0xff)
         let addr = Widget.hint "2001:db8::1" Ipv6
+        let extensions = Extension.Kinds.extensions
         let payload = BRange (0, 0xffff)
     end
 
@@ -597,6 +914,7 @@ module Pdu = struct
                "hop limit", Kinds.ttl ;
                "source", Kinds.addr ;
                "destination", Kinds.addr ;
+               "extensions", Kinds.extensions ;
                "payload", Kinds.payload |]
 
     let to_json (t : t) =
@@ -607,6 +925,7 @@ module Pdu = struct
                  "hop limit", `Int t.ttl ;
                  "source", Ip.Addr.to_json t.src ;
                  "destination", Ip.Addr.to_json t.dst ;
+                 "extensions", `List (List.map Extension.to_json t.extensions) ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
 
     (* Where each field is in [kind], which [of_synth] reads them by: *)
@@ -620,6 +939,7 @@ module Pdu = struct
         let ttl = i "hop limit"
         let src = i "source"
         let dst = i "destination"
+        let extensions = i "extensions"
         let payload = i "payload"
     end
 
@@ -643,7 +963,10 @@ module Pdu = struct
           ttl = int Field.ttl ~auto:(fun () -> 64) Kinds.ttl identity ;
           src = addr Field.src ;
           dst = addr Field.dst ;
-          extensions = [] ;
+          extensions = nth r Field.extensions (function
+              | `Null -> []
+              | js -> expand gen_values Kinds.extensions js |>
+                      Widget.to_list (Extension.of_synth gen_values)) ;
           payload = Payload.o (payload_of_nth ?upper r Field.payload
                                               gen_values Kinds.payload) }
 
