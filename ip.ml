@@ -566,16 +566,23 @@ module Cidr = struct
         let net = Addr.higher_bits ip n in
         o (net, n)
 
-    let random ?mask () =
-        let mask = Option.default (Random.int 32 + 1) mask in
-        let net = Addr.higher_bits (Addr.random ()) mask in
+    (* IPv4 unless [v6]: *)
+    let random ?(v6=false) ?mask () =
+        let mask =
+            Option.default (Random.int (if v6 then 128 else 32) + 1) mask in
+        let net = Addr.higher_bits (Addr.random ~v4:(not v6) ()) mask in
         o (net, mask)
     (*$Q of_string
       (Q.make (fun _ -> random () |> to_string)) (fun t -> t = to_string (of_string t))
+      (Q.make (fun _ -> random ~v6:true () |> to_string)) (fun t -> t = to_string (of_string t))
      *)
 
     (** Build a CIDR from a single address *)
-    let single ip = o (ip, 32)
+    let single ip = o (ip, Addr.length ip)
+    (*$= single & ~printer:to_string
+      (of_string "10.0.0.1/32") (single (Addr.of_string "10.0.0.1"))
+      (of_string "2001:db8::1/128") (single (Addr.of_string "2001:db8::1"))
+     *)
 
     let mem (t : t) =
         let net, width = (t :> Addr.t * int) in
@@ -601,13 +608,15 @@ module Cidr = struct
         let _, width = (t :> Addr.t * int) in
         width
 
-    (* Number of IPs in that range *)
+    (* Number of IPs in that range, or [max_int] if there are more: *)
     let count (t : t) =
         let net, width = (t :> Addr.t * int) in
-        let tot_width = Addr.length net in
-        1 lsl (tot_width - width)
+        let host_bits = Addr.length net - width in
+        if host_bits >= Sys.int_size - 1 then max_int else 1 lsl host_bits
     (*$= count & ~printer:string_of_int
       256 (count (of_string "192.168.1.0/24"))
+      max_int (count (of_string "2001:db8::/64"))
+      4 (count (of_string "2001:db8::/126"))
     *)
 
     let enlarge (t : t) n =
@@ -740,8 +749,10 @@ module Cidr = struct
                 let ip' = Addr.to_bitstring ip' in
                 match ip_n with
                 | None ->
-                    Some (ip', 32)
+                    Some (ip', bitstring_length ip')
                 | Some (ip, n) ->
+                    if bitstring_length ip <> bitstring_length ip' then
+                        invalid_arg "smallest: mixed address families" ;
                     let n' = bitstring_common_prefix_length ip ip' in
                     Some (ip, min n n')
             ) None e in
@@ -751,6 +762,12 @@ module Cidr = struct
         | Some (ip, n) ->
             let ip = Addr.higher_bits (Addr.of_bitstring ip) n in
             o (ip, n)
+    (*$= smallest & ~printer:to_string
+      (of_string "10.0.0.0/30") \
+        (smallest (List.enum [ Addr.of_string "10.0.0.1" ; Addr.of_string "10.0.0.2" ]))
+      (of_string "2001:db8::1/128") \
+        (smallest (List.enum [ Addr.of_string "2001:db8::1" ]))
+     *)
 
     (*$>*)
 end

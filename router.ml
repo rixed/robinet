@@ -997,10 +997,12 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
  * to the destination IP only.
  * Assume an admin interface on every network reachable without gateway. *)
 let routes_of_addrs addrs =
+    (* The address of a directly reached network is ours when it has host
+     * bits set: *)
     let is_my_address dest_ip mask addr =
         addr = None &&
-        Int32.logand (Int32.lognot (Ip.Addr.to_int32 mask))
-                     (Ip.Addr.to_int32 dest_ip) <> Int32.zero in
+        Ip.Addr.compare (Ip.Cidr.zero_addr (Ip.Cidr.of_netmask dest_ip mask))
+                        dest_ip <> 0 in
     Array.fold_lefti (fun tbl i (gws, _) ->
         List.fold_left (fun tbl (dest_ip, mask, addr) ->
             (* First route: to reach that network: *)
@@ -1031,6 +1033,18 @@ let routes_of_addrs addrs =
         ) tbl gws
     ) [] addrs |>
     List.rev
+(*$= routes_of_addrs & ~printer:string_of_int
+  2 (let a = Ip.Addr.of_string in \
+     List.length (routes_of_addrs \
+        [| [ a "10.0.0.1", a "255.255.255.0", None ], Eth.Addr.random () |]))
+  1 (let a = Ip.Addr.of_string in \
+     List.length (routes_of_addrs \
+        [| [ a "10.0.0.0", a "255.255.255.0", None ], Eth.Addr.random () |]))
+  2 (let a = Ip.Addr.of_string in \
+     List.length (routes_of_addrs \
+        [| [ a "2001:db8::1", a "ffff:ffff:ffff:ffff::", None ], \
+           Eth.Addr.random () |]))
+ *)
 
 (* [addrs] is an array (one entry for each iface of the router) of list of
  * networks reachable via this iface (as an Etx.Gateway.t, which has an
