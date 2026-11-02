@@ -210,13 +210,17 @@ module Addr = struct
 
     (** Some predefined addresses *)
 
-    (* FIXME: take bitlength in parameter *)
     let zero = o (Unix.inet_addr_of_string "0.0.0.0")
     let all_ones = o (Unix.inet_addr_of_string "255.255.255.255")
     let broadcast = all_ones
-    let mask width =
-        if width > 32 then invalid_arg "Ip.Addr.mask" ;
-        Bitstring.concat [ ones_bitstring width ; zeroes_bitstring (32 - width) ]
+    let zero6 = o Unix.inet6_addr_any
+    let loopback6 = o Unix.inet6_addr_loopback
+
+    (* The netmask of that prefix width, as bits, IPv4 unless [v6]: *)
+    let mask ?(v6=false) width =
+        let len = if v6 then 128 else 32 in
+        if width < 0 || width > len then invalid_arg "Ip.Addr.mask" ;
+        Bitstring.concat [ ones_bitstring width ; zeroes_bitstring (len - width) ]
 
     (** Convert an {!Ip.Addr} to a [bitstring]. *)
     let to_bitstring (t : t) =
@@ -259,104 +263,194 @@ module Addr = struct
         let str : string = Obj.magic t in
         Tools.hexstring ~sep:"" str
 
-    (** Returns a random {!Ip.Addr} (apart from broadcast and zero). *)
-    let rec random ?(v4=true) () =
-        let str = randstr (if v4 then 4 else 16) in
-        let t : Unix.inet_addr = Obj.magic str in
-        let ip = o t in
-        if ip = broadcast || ip = zero then random ()
-        else ip
+    let is_v6 (t : t) =
+        Unix.is_inet6_addr (t :> Unix.inet_addr)
+
+    let is_v4 = not % is_v6
+
+    (* Bitstring patterns match prefixes, so an IPv4 pattern would also match
+     * the first bits of an IPv6 address: predicates test each family apart. *)
+    let by_family t v4 v6 =
+        let bits = to_bitstring t in
+        if bitstring_length bits = 32 then v4 bits else v6 bits
 
     let is_routable t =
-        match%bitstring (to_bitstring t) with
-        (* Private as per RFC 1918: *)
-        | {| 10 : 8 ; _ : 24 |} -> false
-        | {| 0xAC1 : 12 ; _ : 20 |} -> false
-        | {| 0xC0A8 : 16 ; _ : 16 |} -> false
-        (* Loopback (127.0.0.0/8) *)
-        | {| 127 : 8 ; _ : 24 |} -> false
-        (* Link-Local / APIPA (169.254.0.0/16) *)
-        | {| 0xA9Fe : 16 ; _ : 16 |} -> false
-        (* CG-NAT (100.64.0.0/10) *)
-        | {| 0b1100100101 : 10 ; _ : 22 |} -> false
-        (* Examples (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24) *)
-        | {| 0xC00002 : 24 ; _ : 8 |} -> false
-        | {| 0xC63364 : 24 ; _ : 8 |} -> false
-        | {| 0xCB0071 : 24 ; _ : 8 |} -> false
-        (* Multicast (224.0.0.0/4) *)
-        | {| 0x1110 : 4 ; _ : 28 |} -> false
-        (* Class E, reserved *)
-        | {| 0b1111 : 4 ; _ : 28 |} -> false
-        (* IPv6 link-local (fe80::/10) *)
-        | {| 0b1111111010 : 10 ; _ : 54 ; _ : 64 |} -> false
-        (* IPv6 unique Local (fc00::/7) *)
-        | {| 0b1111110 : 7 ; _ : 57 ; _ : 64 |} -> false
-        (* IPv6 loopback (::1/128) *)
-        | {| 0L : 64 ; 1L : 64 |} -> false
-        (* IPv6 unspecified (::/128) *)
-        | {| 0L : 64 ; 0L : 64 |} -> false
-        (* Examples (2001:db8::/32) *)
-        | {| 0x2001_0DB8l : 32 ; _ : 32 ; 0L : 64 |} -> false
-        (* Discard prefix (100::/64) *)
-        | {| 0x0100_0000_0000_0000L : 64 ; _ : 64 |} -> false
-        (* IPv4 Mapped (::ffff:0:0/96) *)
-        | {| 0L : 64 ; 0x0000_FFFFl : 32 ; _ : 32 |} -> false
-        (* Everything else should be routable *)
-        | {| _ |} -> true
+        by_family t
+            (fun bits -> match%bitstring bits with
+            (* Private as per RFC 1918: *)
+            | {| 10 : 8 ; _ : 24 |} -> false
+            | {| 0xAC1 : 12 ; _ : 20 |} -> false
+            | {| 0xC0A8 : 16 ; _ : 16 |} -> false
+            (* Loopback (127.0.0.0/8) *)
+            | {| 127 : 8 ; _ : 24 |} -> false
+            (* Link-Local / APIPA (169.254.0.0/16) *)
+            | {| 0xA9Fe : 16 ; _ : 16 |} -> false
+            (* CG-NAT (100.64.0.0/10) *)
+            | {| 0b1100100101 : 10 ; _ : 22 |} -> false
+            (* Examples (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24) *)
+            | {| 0xC00002 : 24 ; _ : 8 |} -> false
+            | {| 0xC63364 : 24 ; _ : 8 |} -> false
+            | {| 0xCB0071 : 24 ; _ : 8 |} -> false
+            (* Multicast (224.0.0.0/4) *)
+            | {| 0b1110 : 4 ; _ : 28 |} -> false
+            (* Class E, reserved *)
+            | {| 0b1111 : 4 ; _ : 28 |} -> false
+            | {| _ |} -> true)
+            (fun bits -> match%bitstring bits with
+            (* Link-local (fe80::/10) *)
+            | {| 0b1111111010 : 10 ; _ : 54 ; _ : 64 |} -> false
+            (* Unique Local (fc00::/7) *)
+            | {| 0b1111110 : 7 ; _ : 57 ; _ : 64 |} -> false
+            (* Multicast (ff00::/8) *)
+            | {| 0xff : 8 ; _ : 56 ; _ : 64 |} -> false
+            (* Loopback (::1/128) *)
+            | {| 0L : 64 ; 1L : 64 |} -> false
+            (* Unspecified (::/128) *)
+            | {| 0L : 64 ; 0L : 64 |} -> false
+            (* Examples (2001:db8::/32) *)
+            | {| 0x2001_0DB8l : 32 ; _ : 32 ; _ : 64 |} -> false
+            (* Discard prefix (100::/64) *)
+            | {| 0x0100_0000_0000_0000L : 64 ; _ : 64 |} -> false
+            (* IPv4 Mapped (::ffff:0:0/96) *)
+            | {| 0L : 64 ; 0x0000_FFFFl : 32 ; _ : 32 |} -> false
+            | {| _ |} -> true)
 
     (*$T is_routable
        is_routable (of_string "135.12.0.42")
        is_routable (of_string "5402:7f8:5b:66b0::2")
        is_routable (of_string "2a01:4f8:1c1e:808e::1")
+       is_routable (of_string "a00::1")
        not (is_routable (of_string "192.168.10.1"))
        not (is_routable (of_string "10.20.30.40"))
        not (is_routable (of_string "172.18.3.4"))
        not (is_routable (of_string "240.0.92.35"))
+       not (is_routable (of_string "239.1.2.3"))
        not (is_routable (of_string "fe80::1234:5678"))
+       not (is_routable (of_string "2001:db8::1"))
+       not (is_routable (of_string "ff02::1"))
      *)
 
     let is_local t =
-        match%bitstring (to_bitstring t) with
-        | {| 127 : 8 ; _ : 24 |} -> true
-        | {| 0L : 64 ; 1L : 64 |} -> true
-        | {| _ |} -> false
+        by_family t
+            (fun bits -> match%bitstring bits with
+            | {| 127 : 8 ; _ : 24 |} -> true
+            | {| _ |} -> false)
+            (fun bits -> match%bitstring bits with
+            | {| 0L : 64 ; 1L : 64 |} -> true
+            | {| _ |} -> false)
     (*$T is_local
        is_local (of_string "127.0.0.1")
        is_local (of_string "::1")
        not (is_local (of_string "10.0.0.1"))
        not (is_local (of_string "::2"))
+       not (is_local (of_string "7f00::1"))
      *)
 
+    (* IPv6 has no broadcast: *)
     let is_broadcast t =
-        match%bitstring (to_bitstring t) with
-        | {| 0xffffffffl : 32 |} -> true
-        | {| _ |} -> false
+        by_family t
+            (fun bits -> match%bitstring bits with
+            | {| 0xffffffffl : 32 |} -> true
+            | {| _ |} -> false)
+            (fun _ -> false)
+    (*$T is_broadcast
+       is_broadcast (of_string "255.255.255.255")
+       not (is_broadcast (of_string "ffff:ffff::"))
+     *)
 
     let is_multicast t =
-        match%bitstring (to_bitstring t) with
-        | {| 0b1110 : 4 ; _ : 28 |} -> true
-        | {| _ |} -> false
+        by_family t
+            (fun bits -> match%bitstring bits with
+            | {| 0b1110 : 4 ; _ : 28 |} -> true
+            | {| _ |} -> false)
+            (fun bits -> match%bitstring bits with
+            | {| 0xff : 8 ; _ : 56 ; _ : 64 |} -> true
+            | {| _ |} -> false)
+    (*$T is_multicast
+       is_multicast (of_string "224.0.0.1")
+       is_multicast (of_string "ff02::1")
+       not (is_multicast (of_string "10.0.0.1"))
+       not (is_multicast (of_string "e000::1"))
+     *)
 
     let is_zero t =
-        match%bitstring (to_bitstring t) with
-        | {| 0l : 32 |} -> true
-        | {| _ |} -> false
+        by_family t
+            (fun bits -> match%bitstring bits with
+            | {| 0l : 32 |} -> true
+            | {| _ |} -> false)
+            (fun bits -> match%bitstring bits with
+            | {| 0L : 64 ; 0L : 64 |} -> true
+            | {| _ |} -> false)
+    (*$T is_zero
+       is_zero (of_string "0.0.0.0")
+       is_zero (of_string "::")
+       not (is_zero (of_string "::1"))
+     *)
+
+    (* 169.254.0.0/16 and fe80::/10: *)
+    let is_link_local t =
+        by_family t
+            (fun bits -> match%bitstring bits with
+            | {| 0xA9FE : 16 ; _ : 16 |} -> true
+            | {| _ |} -> false)
+            (fun bits -> match%bitstring bits with
+            | {| 0b1111111010 : 10 ; _ : 54 ; _ : 64 |} -> true
+            | {| _ |} -> false)
+    (*$T is_link_local
+       is_link_local (of_string "169.254.3.4")
+       is_link_local (of_string "fe80::1")
+       not (is_link_local (of_string "10.0.0.1"))
+       not (is_link_local (of_string "2001:db8::1"))
+       not (is_link_local (of_string "a9fe::1"))
+     *)
 
     (* not (is_local || is_broadcast || is_zero || is_discard(?)),
      * but faster: *)
     let is_natable t =
-        match%bitstring (to_bitstring t) with
-        | {| (0l | 0xffffffffl) : 32 |} -> false  (* all 0s/1s *)
-        | {| 127 : 8 ; _ : 24 |} -> false  (* localhost *)
-        | {| 0b1110 : 4 ; _ : 28 |} -> false (* multicast *)
-        | {| 0L : 64 ; 1L : 64 |} -> false (* localhost *)
-        | {| 100L : 64 ; _ : 64 |} -> false (* discard *)
-        | {| _ |} -> true
+        by_family t
+            (fun bits -> match%bitstring bits with
+            | {| (0l | 0xffffffffl) : 32 |} -> false  (* all 0s/1s *)
+            | {| 127 : 8 ; _ : 24 |} -> false  (* localhost *)
+            | {| 0b1110 : 4 ; _ : 28 |} -> false (* multicast *)
+            | {| _ |} -> true)
+            (fun bits -> match%bitstring bits with
+            | {| 0L : 64 ; (0L | 1L) : 64 |} -> false (* unspecified, localhost *)
+            | {| 0xff : 8 ; _ : 56 ; _ : 64 |} -> false (* multicast *)
+            | {| 0x0100_0000_0000_0000L : 64 ; _ : 64 |} -> false (* discard *)
+            | {| _ |} -> true)
+    (*$T is_natable
+       is_natable (of_string "10.0.0.1")
+       is_natable (of_string "2001:db8::1")
+       is_natable (of_string "7f00::1")
+       not (is_natable (of_string "127.0.0.1"))
+       not (is_natable (of_string "::1"))
+       not (is_natable (of_string "::"))
+       not (is_natable (of_string "100::5"))
+     *)
 
-    let is_v6 (t : t) =
-        Unix.is_inet6_addr (t :> Unix.inet_addr)
+    (** Returns a random {!Ip.Addr} (apart from broadcast and zero). *)
+    let rec random ?(v4=true) () =
+        let str = randstr (if v4 then 4 else 16) in
+        let t : Unix.inet_addr = Obj.magic str in
+        let ip = o t in
+        if is_broadcast ip || is_zero ip then random ()
+        else ip
 
-    let is_v4 = not % is_v6
+    (* The solicited-node multicast address of an IPv6 address
+     * (ff02::1:ff00:0/104 and its lower 24 bits): *)
+    let solicited_node t =
+        match%bitstring to_bitstring t with
+        | {| _ : 104 : bitstring ; low : 24 : bitstring |}
+          when bitstring_length (to_bitstring t) = 128 ->
+            of_bitstring (concat [
+                bitstring_of_string "\xff\x02\x00\x00\x00\x00\x00\x00\
+                                     \x00\x00\x00\x01\xff" ;
+                low ])
+        | {| _ |} -> invalid_arg "Ip.Addr.solicited_node"
+    (*$= solicited_node & ~printer:to_string
+       (of_string "ff02::1:ff28:9c5a") \
+         (solicited_node (of_string "fe80::2aa:ff:fe28:9c5a"))
+     *)
 
     (** This printer can be composed with others (for instance to print a list of ips.
      FIXME: always use batteries IO to print instead of Format printer? *)

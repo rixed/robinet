@@ -153,6 +153,19 @@ module Addr = struct
     (** Constant for Ethernet all zeroes address. *)
     let zero = of_string "00:00:00:00:00:00"
 
+    (** The group address an IPv6 multicast address maps to: 33:33 and the
+     * lower 32 bits of the IP (RFC 2464). *)
+    let of_ip6_multicast ip =
+        match%bitstring Ip.Addr.to_bitstring ip with
+        | {| 0xff : 8 ; _ : 88 : bitstring ; low : 32 : bitstring |}
+          when Ip.Addr.is_v6 ip ->
+            o (concat [ bitstring_of_string "\x33\x33" ; low ])
+        | {| _ |} -> invalid_arg "Eth.Addr.of_ip6_multicast"
+    (*$T of_ip6_multicast
+       eq (of_string "33:33:ff:28:9c:5a") \
+          (of_ip6_multicast (Ip.Addr.of_string "ff02::1:ff28:9c5a"))
+     *)
+
     (** Since Ethernet addresses are bitstrings, which cannot be compared
      * using the built-in [=] operator, here is a dedicated comparison
      * operator for addresses. *)
