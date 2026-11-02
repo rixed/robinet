@@ -132,18 +132,24 @@ let tcp_trx_of_socket ctx sock =
       Tcp.TRX.is_over = (fun () -> t.is_closed) ;
       Tcp.TRX.may_reopen = (fun _ -> t.is_closed) }
 
-(* TODO: make use of another thread for an asynchronous gethostbyname *)
-let gethostbyname ctx name cont =
-    let h_entry = Unix.gethostbyname name in
+(* The addresses of [name], of both families, in the order the system
+ * prefers them. TODO: from another thread, not to block. *)
+let resolve ctx name =
+    let addrs =
+        Unix.getaddrinfo name "" [ Unix.AI_SOCKTYPE Unix.SOCK_STREAM ] |>
+        List.filter_map (function
+            | Unix.{ ai_addr = ADDR_INET (a, _) ; _ } -> Some a
+            | _ -> None) |>
+        List.unique ~eq:(=) in
     Simulation.synch ctx.sim ;
     Log.(log (logger ctx) Debug (lazy (Printf.sprintf2 "Got these IPs for '%s': %a"
-        name
-        (Array.print Ip.inet_addr_print)
-        h_entry.Unix.h_addr_list))) ;
-    let ips = Array.enum h_entry.Unix.h_addr_list /@
-        Ip.Addr.of_inet_addr |>
-        List.of_enum in
-    cont (Some ips)
+        name (List.print Ip.inet_addr_print) addrs))) ;
+    addrs
+
+let gethostbyname ctx name cont =
+    match resolve ctx name with
+    | [] -> cont None
+    | addrs -> cont (Some (List.map Ip.Addr.of_inet_addr addrs))
 
 let wait_server_delay = ref 3.
 
@@ -153,9 +159,11 @@ let tcp_connect ctx ?(wait_for_server=true) ?ttl ?tos
         Log.(log (logger ctx) Debug (lazy (Printf.sprintf "Connecting to %s:%s"
             (Unix.string_of_inet_addr inet_addr)
             (Tcp.Port.to_string dst_port)))) ;
-        let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+        let v6 = Unix.is_inet6_addr inet_addr in
+        let sock = Unix.socket (if v6 then Unix.PF_INET6 else Unix.PF_INET) Unix.SOCK_STREAM 0 in
         Option.may (fun (port : Tcp.Port.t) ->
-            Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_any, (port :> int))))
+            let any = if v6 then Unix.inet6_addr_any else Unix.inet_addr_any in
+            Unix.bind sock (Unix.ADDR_INET (any, (port :> int))))
             src_port ;
         Option.may (Sockopt.set_ttl sock) ttl ;
         Option.may (Sockopt.set_tos sock) tos ;
@@ -180,23 +188,23 @@ let tcp_connect ctx ?(wait_for_server=true) ?ttl ?tos
         | Host.Ip dst_ip ->
             connect_ (Ip.Addr.to_inet_addr dst_ip)
         | Host.Name name ->
-            let dst_ips =
-                (* FIXME: use Localhost.gethostbyname *)
-                let h_entry = Unix.gethostbyname name in
-                Simulation.synch ctx.sim ;
-                Log.(log (logger ctx) Debug (lazy (Printf.sprintf2 "Got these IPs for '%s': %a"
-                    name
-                    (Array.print Ip.inet_addr_print)
-                    h_entry.Unix.h_addr_list))) ;
-                h_entry.Unix.h_addr_list in
-            connect_ dst_ips.(0)
+            (match resolve ctx name with
+            | a :: _ -> connect_ a
+            | [] -> raise Not_found)
 
-(* A port already in use is refused by [bind]. *)
+(* For both families, or IPv4 only on a host without IPv6. A port already
+ * in use is refused by [bind]. *)
 let tcp_server ctx src_port server_f =
     Log.(log (logger ctx) Debug (lazy (Printf.sprintf "Establishing a server on port %s" (Tcp.Port.to_string src_port)))) ;
-    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    let sock, any =
+        match Unix.socket Unix.PF_INET6 Unix.SOCK_STREAM 0 with
+        | sock ->
+            Unix.setsockopt sock Unix.IPV6_ONLY false ;
+            sock, Unix.inet6_addr_any
+        | exception Unix.Unix_error (Unix.EAFNOSUPPORT, _, _) ->
+            Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0, Unix.inet_addr_any in
     Unix.setsockopt sock Unix.SO_REUSEADDR true ;
-    Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_any, (src_port :> int))) ;
+    Unix.bind sock (Unix.ADDR_INET (any, (src_port :> int))) ;
     Unix.listen sock 5 ;
     let rec sock_server () =
         let fd, _ = Unix.accept sock in

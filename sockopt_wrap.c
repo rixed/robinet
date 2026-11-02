@@ -46,6 +46,15 @@ static void fail_setsockopt(void)
     fail("setsockopt");
 }
 
+/* Whether [fd] is an IPv6 socket, which IPv4 options do not apply to: */
+static bool is_v6(int fd)
+{
+    struct sockaddr_storage ss;
+    socklen_t len = sizeof ss;
+    return 0 == getsockname(fd, (struct sockaddr *)&ss, &len) &&
+           ss.ss_family == AF_INET6;
+}
+
 CAMLprim value wrap_set_ttl(value fd_, value ttl_)
 {
     CAMLparam2(fd_, ttl_);
@@ -56,7 +65,9 @@ CAMLprim value wrap_set_ttl(value fd_, value ttl_)
         caml_invalid_argument("Invalid TTL");
     }
 
-    if (0 != setsockopt(fd, IPPROTO_IP, IP_TTL, &ttl, sizeof ttl))
+    if (0 != (is_v6(fd) ?
+                setsockopt(fd, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &ttl, sizeof ttl) :
+                setsockopt(fd, IPPROTO_IP, IP_TTL, &ttl, sizeof ttl)))
         fail_setsockopt();
 
     CAMLreturn(Val_unit);
@@ -68,7 +79,9 @@ CAMLprim value wrap_set_tos(value fd_, value tos_)
     int fd = Int_val(fd_);
     int tos = Int_val(tos_);
 
-    if (0 != setsockopt(fd, IPPROTO_IP, IP_TOS, &tos, sizeof tos))
+    if (0 != (is_v6(fd) ?
+                setsockopt(fd, IPPROTO_IPV6, IPV6_TCLASS, &tos, sizeof tos) :
+                setsockopt(fd, IPPROTO_IP, IP_TOS, &tos, sizeof tos)))
         fail_setsockopt();
 
     CAMLreturn(Val_unit);

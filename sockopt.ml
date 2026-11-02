@@ -1,6 +1,7 @@
 (* setsockopts missing from the stdlib: *)
 open Tools
 
+(* The hop limit and traffic class on an IPv6 socket: *)
 external set_ttl : Unix.file_descr -> int (* TTL *) -> unit = "wrap_set_ttl"
 
 external set_tos : Unix.file_descr -> int (* TOS *) -> unit = "wrap_set_tos"
