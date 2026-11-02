@@ -318,8 +318,14 @@ module Addr = struct
     let is_local t =
         match%bitstring (to_bitstring t) with
         | {| 127 : 8 ; _ : 24 |} -> true
-        | {| 0L : 64 ; 1L : 64 |} -> false
+        | {| 0L : 64 ; 1L : 64 |} -> true
         | {| _ |} -> false
+    (*$T is_local
+       is_local (of_string "127.0.0.1")
+       is_local (of_string "::1")
+       not (is_local (of_string "10.0.0.1"))
+       not (is_local (of_string "::2"))
+     *)
 
     let is_broadcast t =
         match%bitstring (to_bitstring t) with
