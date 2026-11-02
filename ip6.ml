@@ -993,29 +993,58 @@ module TRX = struct
                power : Simulation.power ;
                src : Ip.Addr.t ; dst : Ip.Addr.t ;
                proto : Ip.Proto.t ;
+               (* Hosts do not fragment: a larger packet is dropped. *)
+               mtu : int ;
+               (* The traffic class, as [Ip.TRX]'s type of service, and the
+                * hop limit of all emitted packets unless [tx] is told
+                * otherwise: *)
+               tos : Ip.ToS.t ;
+               ttl : int ;
                mutable emit : bitstring -> unit ;
                mutable emit_busy_for : unit -> Clock.Interval.t ;
                mutable recv : bitstring -> unit ;
                mutable recv_busy_for : unit -> Clock.Interval.t }
 
-    let tx t bits =
-        let pdu = Pdu.make t.proto t.src t.dst bits in
-        if debug then Printf.printf "Ip6: Emitting an IPv6 packet from %s to %s of length %d (content '%s')\n%!" (Ip.Addr.to_dotted_string t.src) (Ip.Addr.to_dotted_string t.dst) (bytelength bits) (hexstring_of_bitstring bits) ;
-        Simulation.asap t.power t.emit (Pdu.pack pdu)
+    let tx ?tos ?ttl t bits =
+        let tos = (tos |? t.tos :> int) and ttl = ttl |? t.ttl in
+        let pdu = Pdu.make ~ttl ~diff_serv:(tos lsr 2) ~ecn:(tos land 3)
+                           t.proto t.src t.dst bits in
+        let bits = Pdu.pack pdu in
+        if bytelength bits > t.mtu then
+            Log.(log t.logger Warning (lazy (Printf.sprintf
+                "Ip6: Dropping a packet of %d bytes to %s, larger than the MTU of %d"
+                (bytelength bits) (Ip.Addr.to_dotted_string t.dst) t.mtu)))
+        else (
+            Log.(log t.logger Debug (lazy (Printf.sprintf
+                "Ip6: Emitting an IPv6 packet from %s to %s of length %d (content '%s')"
+                (Ip.Addr.to_dotted_string t.src) (Ip.Addr.to_dotted_string t.dst)
+                (Payload.length pdu.payload) (hexstring_of_bitstring bits)))) ;
+            Simulation.asap t.power t.emit bits)
 
-    let rx (t : t) bits = (match Pdu.unpack bits with
+    (* Fragments are dropped, there being no reassembly: *)
+    let rx (t : t) bits =
+        match Pdu.unpack bits with
         | Error s ->
             Log.(log t.logger Warning s)
+        | Ok ip when Pdu.is_fragment ip ->
+            Log.(log t.logger Debug (lazy (Printf.sprintf
+                "Ip6: Ignoring a fragment from %s to %s"
+                (Ip.Addr.to_dotted_string ip.src) (Ip.Addr.to_dotted_string ip.dst))))
         | Ok ip ->
-            if Payload.bitlength ip.Pdu.payload > 0 then Simulation.asap t.power t.recv (ip.Pdu.payload :> bitstring))
+            if Payload.bitlength ip.payload > 0 then
+                Simulation.asap t.power t.recv (ip.payload :> bitstring)
 
     (* Note: In Eth we do not require dst addr since the trx knows (using ARP) how to get dest addr itself.
      *       IP cannot do this since the application layer won't tell him the destination hostname. Or
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
-    let make power src dst proto logger =
-        let t = { logger ; power ; src ; dst ; proto ;
-                  emit = ignore ; emit_busy_for = never_busy ; recv = ignore ; recv_busy_for = never_busy } in
+    let create power ?(mtu=1500) ?(tos=Ip.ToS.o 0) ?(ttl=64) src dst proto logger =
+        ensure (mtu >= 1280) "Ip6: MTU must be at least 1280 bytes" ;
+        { logger ; power ; src ; dst ; proto ; mtu ; tos ; ttl ;
+          emit = ignore_bits ~logger ; emit_busy_for = never_busy ;
+          recv = ignore_bits ~logger ; recv_busy_for = never_busy }
+
+    let trx_of t =
         { ins = { write = tx t ;
                   busy_for = (fun () -> t.emit_busy_for ()) ;
                   set_read = fun f busy_for ->
@@ -1024,4 +1053,42 @@ module TRX = struct
                   busy_for = (fun () -> t.recv_busy_for ()) ;
                   set_read = fun f busy_for ->
                       t.emit <- f ; t.emit_busy_for <- busy_for } }
+
+    let make power ?mtu ?tos ?ttl src dst proto logger =
+        trx_of (create power ?mtu ?tos ?ttl src dst proto logger)
+
+    (*$< TRX *)
+    (*$inject
+      let sim = Simulation.make ~realtime:false "ip6-trx"
+      let a = Ip.Addr.of_string "2001:db8::1" and b = Ip.Addr.of_string "2001:db8::2"
+
+      let emitted ?tos ?ttl n =
+        let t = create sim.root.power ?tos ?ttl a b Ip.Proto.udp sim.root.logger in
+        let out = ref [] in
+        (trx_of t).out --> sink (fun bits -> out := bits :: !out) ;
+        tx t (randbs n) ;
+        Simulation.run sim false ;
+        List.map (fun bits -> Result.get_ok (Pdu.unpack bits)) !out
+
+      let received pkts =
+        let trx = make sim.root.power b a Ip.Proto.udp sim.root.logger in
+        let got = ref [] in
+        trx.ins --> sink (fun bits -> got := Bitstring.string_of_bitstring bits :: !got) ;
+        List.iter (fun p -> trx.out.write (Pdu.pack p)) pkts ;
+        Simulation.run sim false ;
+        List.rev !got
+    *)
+    (*$T emitted
+      match emitted ~tos:(Ip.ToS.o 0xb9) ~ttl:7 10 with \
+      | [ p ] -> p.ttl = 7 && p.diff_serv = 0x2e && p.ecn = 1 \
+      | _ -> false
+      emitted (1500 - 40) |> List.length = 1
+      emitted (1500 - 39) = []
+    *)
+    (*$T received
+      received [ Pdu.make Ip.Proto.udp a b (Bitstring.bitstring_of_string "x") ; \
+                 Pdu.make ~extensions:[ Extension.Fragment { offset = 0 ; more = true ; id = 1l } ] \
+                          Ip.Proto.udp a b (Bitstring.bitstring_of_string "y") ] = [ "x" ]
+    *)
+    (*$>*)
 end
