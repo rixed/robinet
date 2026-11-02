@@ -270,7 +270,8 @@ module Pdu = struct
                                       (udp.Udp.Pdu.dst_port :> int)
                                       (udp.Udp.Pdu.payload :> bitstring))) in
         let unpack_ip6 = try_unpack Ip6.Pdu.unpack (fun ip -> Ip6 ip ::
-                    ((if ip.Ip6.Pdu.proto = Ip.Proto.tcp then unpack_tcp
+                    ((if Ip6.Pdu.is_later_fragment ip then unpack_raw
+                      else if ip.Ip6.Pdu.proto = Ip.Proto.tcp then unpack_tcp
                       else if ip.Ip6.Pdu.proto = Ip.Proto.udp then unpack_udp
                       else if ip.Ip6.Pdu.proto = Ip.Proto.icmp then unpack_icmp
                       else unpack_raw) (ip.Ip6.Pdu.payload :> bitstring))) in
@@ -536,7 +537,15 @@ module Pdu = struct
                     if ip.options <> [] then
                         add " (options %s)" (Ip.Pdu.Opt.list_to_string ip.options)
                 | Ip6 ip :: rest ->
-                    layer_4 ip.Ip6.Pdu.src ip.dst ip.proto ip.payload rest
+                    if Ip6.Pdu.is_later_fragment ip then
+                        add "%s > %s IP proto %d len %d"
+                            (Ip.Addr.to_dotted_string ip.src)
+                            (Ip.Addr.to_dotted_string ip.dst)
+                            (ip.proto :> int) (Payload.length ip.payload)
+                    else
+                        layer_4 ip.Ip6.Pdu.src ip.dst ip.proto ip.payload rest ;
+                    if ip.extensions <> [] then
+                        add " (%s)" (Ip6.Extension.list_to_string ip.extensions)
                 | Eth e :: _ ->
                     (* Only when what it carries could not be decoded: *)
                     add "%s > %s proto 0x%04x len %d"
@@ -609,6 +618,24 @@ module Pdu = struct
                         ~seq_num:(Tcp.SeqNum.o 1l) \
                         ~options:Opt.[ Mss 1460 ; Nop ; Wscale 7 ] \
                         Bitstring.empty_bitstring)))))))))))
+          "2001:db8::1:1000 > 2001:db8::2:80 UDP len 1 (HBH [PadN 4], frag id 7 off 0+)" \
+            (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip6 \
+                (Eth.Addr.of_string "02:00:00:00:00:01") \
+                (Eth.Addr.of_string "02:00:00:00:00:02") \
+                (Ip6.Pdu.(pack (make Ip.Proto.udp \
+                    ~extensions:Ip6.Extension.[ Hop_by_hop [ Options.PadN 4 ] ; \
+                                   Fragment { offset = 0 ; more = true ; id = 7l } ] \
+                    (Ip.Addr.of_string "2001:db8::1") (Ip.Addr.of_string "2001:db8::2") \
+                    (Udp.Pdu.(pack (make ~src_port:(Udp.Port.o 1000) \
+                        (Bitstring.bitstring_of_string "x"))))))))))))
+          "2001:db8::1 > 2001:db8::2 IP proto 17 len 3 (frag id 7 off 8)" \
+            (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip6 \
+                (Eth.Addr.of_string "02:00:00:00:00:01") \
+                (Eth.Addr.of_string "02:00:00:00:00:02") \
+                (Ip6.Pdu.(pack (make Ip.Proto.udp \
+                    ~extensions:Ip6.Extension.[ Fragment { offset = 1 ; more = false ; id = 7l } ] \
+                    (Ip.Addr.of_string "2001:db8::1") (Ip.Addr.of_string "2001:db8::2") \
+                    (Bitstring.bitstring_of_string "abc")))))))))
           "02:00:00:00:00:01 > FF:FF:FF:FF:FF:FF proto 0x88b5 len 3" \
             (oneline (of_frame (Eth.Pdu.(pack (make (Eth.Proto.o 0x88b5) \
                 (Eth.Addr.of_string "02:00:00:00:00:01") Eth.Addr.broadcast \

@@ -20,14 +20,435 @@
 (**
  * Everything related to IPv6 packets.
  * For addresses and CIDR, see ip.ml.
- *
- * TODO: Some usual IP options should be understood.
  *)
 open Batteries
 open Bitstring
 open Tools
 
 let debug = false
+
+(** {2 Extension headers (RFC 8200)}
+ *
+ * Decoded to be shown and packed back to the very same bytes: whatever would
+ * not pack back identically (non-zero reserved bits, padding that is not
+ * zeroes...) is kept as [Other]. Nothing pads by itself. *)
+
+module Extension = struct
+    (*$< Extension *)
+
+    (* Unpacks TLVs of the format shared by IPv6 options and SRH TLVs, where
+     * [pad1] is the type of the one octet long padding: *)
+    let rec unpack_tlvs pad1 decode bits =
+        match%bitstring bits with
+        | {| typ : 8 ; rest : -1 : bitstring |} when typ = pad1 ->
+            `Pad1 :: unpack_tlvs pad1 decode rest
+        | {| _ : 8 ; len : 8 |} when 8 * (2 + len) <= bitstring_length bits ->
+            decode (takebytes (2 + len) bits) ::
+                unpack_tlvs pad1 decode (dropbytes (2 + len) bits)
+        | {| _ |} ->
+            if bitstring_length bits = 0 then [] else [ `Other bits ]
+
+    let is_zeroes bits =
+        Bitstring.equals bits (zeroes_bitstring (bitstring_length bits))
+
+    let hex bits = hexstring ~sep:"" (string_of_bitstring bits)
+
+    (** The options of the hop-by-hop and destination options headers. *)
+    module Options =
+    struct
+        (*$< Options *)
+
+        type t =
+            | Pad1
+            | PadN of int (* that many zero octets *)
+            (* RFC 8250: *)
+            | Pdm of { scale_dtlr : int ; scale_dtls : int (* signed *) ;
+                       psn_this : int ; psn_last : int ;
+                       delta_last_recv : int ; delta_last_sent : int }
+            (* RFC 9343: *)
+            | Alt_mark of { flow_mon_id : int ; loss : bool ; delay : bool }
+            (* RFC 9268; [rtn_pmtu] is even, its lowest bit being [r]: *)
+            | Min_pmtu of { min_pmtu : int ; rtn_pmtu : int ; r : bool }
+            | Other of bitstring (* type, length and data *)
+
+        let pack_one = function
+            | Pad1 ->
+                [%bitstring {| 0 : 8 |}]
+            | PadN n ->
+                concat [ [%bitstring {| 1 : 8 ; n : 8 |}] ; zeroes_bitstring (8 * n) ]
+            | Pdm p ->
+                [%bitstring {| 0x0f : 8 ; 10 : 8 ;
+                               p.scale_dtlr : 8 ; p.scale_dtls land 0xff : 8 ;
+                               p.psn_this : 16 ; p.psn_last : 16 ;
+                               p.delta_last_recv : 16 ; p.delta_last_sent : 16 |}]
+            | Alt_mark a ->
+                [%bitstring {| 0x12 : 8 ; 4 : 8 ; a.flow_mon_id : 20 ;
+                               a.loss : 1 ; a.delay : 1 ; 0 : 10 |}]
+            | Min_pmtu m ->
+                [%bitstring {| 0x30 : 8 ; 4 : 8 ; m.min_pmtu : 16 ;
+                               m.rtn_pmtu lsr 1 : 15 ; m.r : 1 |}]
+            | Other bits ->
+                bits
+
+        let pack opts = concat (List.map pack_one opts)
+
+        (* [tlv] is a whole option, of the length it says: *)
+        let decode tlv =
+            match%bitstring tlv with
+            | {| 1 : 8 ; n : 8 ; pad : -1 : bitstring |} when is_zeroes pad ->
+                PadN n
+            | {| 0x0f : 8 ; 10 : 8 ; scale_dtlr : 8 ; scale_dtls : 8 : signed ;
+                 psn_this : 16 ; psn_last : 16 ;
+                 delta_last_recv : 16 ; delta_last_sent : 16 |} ->
+                Pdm { scale_dtlr ; scale_dtls ; psn_this ; psn_last ;
+                      delta_last_recv ; delta_last_sent }
+            | {| 0x12 : 8 ; 4 : 8 ; flow_mon_id : 20 ;
+                 loss : 1 ; delay : 1 ; 0 : 10 |} ->
+                Alt_mark { flow_mon_id ; loss ; delay }
+            | {| 0x30 : 8 ; 4 : 8 ; min_pmtu : 16 ; rtn : 15 ; r : 1 |} ->
+                Min_pmtu { min_pmtu ; rtn_pmtu = rtn lsl 1 ; r }
+            | {| _ |} ->
+                Other tlv
+
+        (* Past an option whose length overflows, all is [Other]: *)
+        let unpack bits =
+            unpack_tlvs 0 (fun tlv -> `Opt (decode tlv)) bits |>
+            List.map (function `Pad1 -> Pad1 | `Opt o -> o | `Other b -> Other b)
+
+        let to_string = function
+            | Pad1 -> "Pad1"
+            | PadN n -> Printf.sprintf "PadN %d" n
+            | Pdm p ->
+                Printf.sprintf "PDM psn %d/%d delta %d<<%d/%d<<%d"
+                    p.psn_this p.psn_last
+                    p.delta_last_recv p.scale_dtlr p.delta_last_sent p.scale_dtls
+            | Alt_mark a ->
+                Printf.sprintf "AltMark %d%s%s" a.flow_mon_id
+                    (if a.loss then " L" else "") (if a.delay then " D" else "")
+            | Min_pmtu m ->
+                Printf.sprintf "MinPMTU %d rtn %d%s" m.min_pmtu m.rtn_pmtu
+                    (if m.r then " R" else "")
+            | Other bits -> "opt " ^ hex bits
+
+        let list_to_string opts =
+            String.concat ", " (List.map to_string opts)
+
+        (*$= unpack & ~printer:identity
+          "Pad1, PadN 2, AltMark 74565 L" \
+            (list_to_string (unpack (bitstring_of_string \
+              "\x00\x01\x02\x00\x00\x12\x04\x12\x34\x58\x00")))
+          "PDM psn 1/2 delta 3<<0/4<<-1, MinPMTU 1280 rtn 1500 R" \
+            (list_to_string (unpack (bitstring_of_string \
+              ("\x0f\x0a\x00\xff\x00\x01\x00\x02\x00\x03\x00\x04" ^ \
+               "\x30\x04\x05\x00\x05\xdd"))))
+          "opt 010107, opt 120412345801" \
+            (list_to_string (unpack (bitstring_of_string \
+              "\x01\x01\x07\x12\x04\x12\x34\x58\x01")))
+          "opt 3E0501" \
+            (list_to_string (unpack (bitstring_of_string "\x3e\x05\x01")))
+         *)
+        (*$Q unpack
+          Q.(int_bound 40) (fun n -> \
+            let b = randbs n in Bitstring.equals b (pack (unpack b)))
+         *)
+
+        let random () =
+            let one () =
+                match Random.int 6 with
+                | 0 -> Pad1
+                | 1 -> PadN (Random.int 6)
+                | 2 -> Pdm { scale_dtlr = randi 8 ; scale_dtls = randi 7 - 64 ;
+                             psn_this = randi 16 ; psn_last = randi 16 ;
+                             delta_last_recv = randi 16 ;
+                             delta_last_sent = randi 16 }
+                | 3 -> Alt_mark { flow_mon_id = randi 20 ;
+                                  loss = Random.bool () ; delay = Random.bool () }
+                | 4 -> Min_pmtu { min_pmtu = randi 16 ;
+                                  rtn_pmtu = randi 15 lsl 1 ; r = Random.bool () }
+                | _ ->
+                    let len = Random.int 6 in
+                    (* An experimental type (RFC 4727), to be skipped: *)
+                    Other (concat [ [%bitstring {| 0x1e : 8 ; len : 8 |}] ;
+                                    randbs len ]) in
+            List.init (Random.int 4) (fun _ -> one ())
+
+        (*$>*)
+    end
+
+    (** The routing header. *)
+    module Routing =
+    struct
+        (*$< Routing *)
+
+        (* The TLVs of a segment routing header: *)
+        type tlv =
+            | Pad1
+            | PadN of int (* that many zero octets *)
+            | Hmac of { d : bool ; key_id : int32 ; hmac : bitstring }
+            | Other_tlv of bitstring (* type, length and data *)
+
+        type t =
+            (* RFC 8754. [segments] are in the header's order, the final
+             * destination first: *)
+            | Srh of { segments_left : int ; flags : int ; tag : int ;
+                       segments : Ip.Addr.t list ; tlvs : tlv list }
+            | Other of { typ : int ; segments_left : int ; data : bitstring }
+
+        let pack_tlv = function
+            | Pad1 ->
+                [%bitstring {| 0 : 8 |}]
+            | PadN n ->
+                concat [ [%bitstring {| 4 : 8 ; n : 8 |}] ; zeroes_bitstring (8 * n) ]
+            | Hmac h ->
+                concat [ [%bitstring {| 5 : 8 ; 6 + bytelength h.hmac : 8 ;
+                                        h.d : 1 ; 0 : 15 ; h.key_id : 32 |}] ;
+                         h.hmac ]
+            | Other_tlv bits ->
+                bits
+
+        let decode_tlv tlv =
+            match%bitstring tlv with
+            | {| 4 : 8 ; n : 8 ; pad : -1 : bitstring |} when is_zeroes pad ->
+                PadN n
+            | {| 5 : 8 ; len : 8 ; d : 1 ; 0 : 15 ; key_id : 32 ;
+                 hmac : -1 : bitstring |} when len >= 6 ->
+                Hmac { d ; key_id ; hmac }
+            | {| _ |} ->
+                Other_tlv tlv
+
+        let unpack_tlvs bits =
+            unpack_tlvs 0 (fun tlv -> `Tlv (decode_tlv tlv)) bits |>
+            List.map (function `Pad1 -> Pad1 | `Tlv t -> t | `Other b -> Other_tlv b)
+
+        (* What follows the length octet: *)
+        let pack = function
+            | Srh s ->
+                let last_entry = List.length s.segments - 1 in
+                if last_entry < 0 then
+                    invalid_arg "Ip6.Extension.Routing.pack: no segment" ;
+                concat ([%bitstring {| 4 : 8 ; s.segments_left : 8 ;
+                                       last_entry : 8 ; s.flags : 8 ; s.tag : 16 |}] ::
+                        List.map Ip.Addr.to_bitstring s.segments @
+                        List.map pack_tlv s.tlvs)
+            | Other o ->
+                concat [ [%bitstring {| o.typ : 8 ; o.segments_left : 8 |}] ;
+                         o.data ]
+
+        let rec addrs n bits =
+            if n = 0 then Some ([], bits) else
+            match%bitstring bits with
+            | {| a : 128 : bitstring ; rest : -1 : bitstring |} ->
+                Option.map (fun (l, rest) -> Ip.Addr.of_bitstring a :: l, rest)
+                           (addrs (n - 1) rest)
+            | {| _ |} -> None
+
+        let unpack bits =
+            let other () =
+                match%bitstring bits with
+                | {| typ : 8 ; segments_left : 8 ; data : -1 : bitstring |} ->
+                    Other { typ ; segments_left ; data }
+                | {| _ |} ->
+                    invalid_arg "Ip6.Extension.Routing.unpack: too short" in
+            match%bitstring bits with
+            | {| 4 : 8 ; segments_left : 8 ; last_entry : 8 ; flags : 8 ;
+                 tag : 16 ; rest : -1 : bitstring |} ->
+                (match addrs (last_entry + 1) rest with
+                | Some (segments, tlvs) ->
+                    Srh { segments_left ; flags ; tag ; segments ;
+                          tlvs = unpack_tlvs tlvs }
+                | None -> other ())
+            | {| _ |} -> other ()
+
+        let tlv_to_string = function
+            | Pad1 -> "Pad1"
+            | PadN n -> Printf.sprintf "PadN %d" n
+            | Hmac h ->
+                Printf.sprintf "HMAC%s key %lu %s" (if h.d then " D" else "")
+                    h.key_id (hex h.hmac)
+            | Other_tlv bits -> "tlv " ^ hex bits
+
+        let to_string = function
+            | Srh s ->
+                Printf.sprintf "SRH left %d%s%s [%s]%s" s.segments_left
+                    (if s.flags <> 0 then Printf.sprintf " flags 0x%02x" s.flags else "")
+                    (if s.tag <> 0 then Printf.sprintf " tag %d" s.tag else "")
+                    (String.concat ", " (List.map Ip.Addr.to_dotted_string s.segments))
+                    (if s.tlvs = [] then "" else
+                     " "^ String.concat ", " (List.map tlv_to_string s.tlvs))
+            | Other o ->
+                Printf.sprintf "routing type %d left %d %s"
+                    o.typ o.segments_left (hex o.data)
+
+        let random () =
+            let segments =
+                List.init (1 + Random.int 3) (fun _ -> Ip.Addr.random ~v4:false ()) in
+            let tlv () =
+                match Random.int 4 with
+                | 0 -> Pad1
+                | 1 -> PadN (Random.int 6)
+                | 2 -> Hmac { d = Random.bool () ; key_id = rand32 () ;
+                              hmac = randbs (8 * Random.int 5) }
+                | _ ->
+                    let len = Random.int 6 in
+                    Other_tlv (concat [ [%bitstring {| 0x7e : 8 ; len : 8 |}] ;
+                                        randbs len ]) in
+            if Random.int 4 = 0 then
+                Other { typ = Random.int 4 ; segments_left = randi 8 ;
+                        data = randbs (4 + 8 * Random.int 3) }
+            else
+                Srh { segments_left = Random.int (List.length segments + 1) ;
+                      flags = randi 8 ; tag = randi 16 ; segments ;
+                      tlvs = List.init (Random.int 3) (fun _ -> tlv ()) }
+
+        (*$>*)
+    end
+
+    type t =
+        | Hop_by_hop of Options.t list
+        | Dest_opts of Options.t list
+        | Routing of Routing.t
+        (* [offset] in 8 octets units: *)
+        | Fragment of { offset : int ; more : bool ; id : int32 }
+        (* [body] is the whole header but its next header octet: *)
+        | Other of { typ : int ; body : bitstring }
+
+    let hop_by_hop = 0 and routing = 43 and fragment = 44 and dest_opts = 60
+
+    let typ = function
+        | Hop_by_hop _ -> hop_by_hop
+        | Dest_opts _ -> dest_opts
+        | Routing _ -> routing
+        | Fragment _ -> fragment
+        | Other { typ ; _ } -> typ
+
+    (* The IANA list of extension headers, but ESP that ends the chain: *)
+    let is_extension typ =
+        List.mem typ [ 0 ; 43 ; 44 ; 51 ; 60 ; 135 ; 139 ; 140 ; 253 ; 254 ]
+
+    (* [data] is what follows the length octet: *)
+    let pack_generic next data =
+        let len = 2 + bytelength data in
+        if len land 7 <> 0 then
+            invalid_arg "Ip6.Extension.pack: not a multiple of 8 octets" ;
+        concat [ [%bitstring {| next : 8 ; len / 8 - 1 : 8 |}] ; data ]
+
+    let pack_one next = function
+        | Hop_by_hop opts | Dest_opts opts ->
+            pack_generic next (Options.pack opts)
+        | Routing r ->
+            pack_generic next (Routing.pack r)
+        | Fragment f ->
+            [%bitstring {| next : 8 ; 0 : 8 ; f.offset : 13 ; 0 : 2 ;
+                           f.more : 1 ; f.id : 32 |}]
+        | Other o ->
+            concat [ [%bitstring {| next : 8 |}] ; o.body ]
+
+    (** The next header field of the IPv6 header and the extensions [exts]
+     * packed, for an upper-layer protocol [proto]. *)
+    let pack exts proto =
+        let rec loop = function
+            | [] -> []
+            | [ e ] -> [ pack_one proto e ]
+            | e :: (e' :: _ as rest) -> pack_one (typ e') e :: loop rest in
+        (match exts with [] -> proto | e :: _ -> typ e),
+        concat (loop exts)
+
+    (* [hdr] is a whole header of type [typ]: *)
+    let decode typ hdr =
+        match%bitstring hdr with
+        | {| _ : 8 ; _ : 8 ; data : -1 : bitstring |} when typ = hop_by_hop ->
+            Hop_by_hop (Options.unpack data)
+        | {| _ : 8 ; _ : 8 ; data : -1 : bitstring |} when typ = dest_opts ->
+            Dest_opts (Options.unpack data)
+        | {| _ : 8 ; _ : 8 ; data : -1 : bitstring |} when typ = routing ->
+            Routing (Routing.unpack data)
+        | {| _ : 8 ; 0 : 8 ; offset : 13 ; 0 : 2 ; more : 1 ; id : 32 |}
+          when typ = fragment ->
+            Fragment { offset ; more ; id }
+        | {| _ : 8 ; body : -1 : bitstring |} ->
+            Other { typ ; body }
+
+    (** The extensions starting [bits], which follow a header announcing
+     * [typ], the upper-layer protocol and its payload. The chain ends at
+     * the first header that is not an extension or that is truncated. *)
+    let rec unpack typ bits =
+        let stop () = [], typ, bits in
+        if not (is_extension typ) then stop () else
+        match%bitstring bits with
+        | {| next : 8 ; len : 8 |} ->
+            let len =
+                if typ = fragment then 8
+                else if typ = 51 then 4 * (len + 2) (* AH *)
+                else 8 * (len + 1) in
+            if 8 * len > bitstring_length bits then stop () else
+            let exts, proto, payload = unpack next (dropbytes len bits) in
+            decode typ (takebytes len bits) :: exts, proto, payload
+        | {| _ |} ->
+            stop ()
+
+    let to_string = function
+        | Hop_by_hop opts -> "HBH ["^ Options.list_to_string opts ^"]"
+        | Dest_opts opts -> "DSTOPT ["^ Options.list_to_string opts ^"]"
+        | Routing r -> Routing.to_string r
+        | Fragment f ->
+            Printf.sprintf "frag id %lu off %d%s" f.id (f.offset * 8)
+                (if f.more then "+" else "")
+        | Other o -> Printf.sprintf "ext %d %s" o.typ (hex o.body)
+
+    let list_to_string exts =
+        String.concat ", " (List.map to_string exts)
+
+    let random () =
+        let one () =
+            match Random.int 5 with
+            | 0 -> Hop_by_hop (Options.random ())
+            | 1 -> Dest_opts (Options.random ())
+            | 2 -> Routing (Routing.random ())
+            | 3 -> Fragment { offset = randi 13 ; more = Random.bool () ;
+                              id = rand32 () }
+            | _ ->
+                (* An AH, which counts in 4 octets units: *)
+                let len = Random.int 4 in
+                Other { typ = 51 ;
+                        body = concat [ [%bitstring {| len : 8 |}] ;
+                                        randbs (4 * (len + 2) - 2) ] } in
+        (* Padded with PadN, as [pack_generic] wants it: *)
+        let pad_opts opts =
+            match (2 + bytelength (Options.pack opts)) land 7 with
+            | 0 -> opts
+            | 7 -> opts @ [ Options.Pad1 ]
+            | r -> opts @ [ Options.PadN (6 - r) ] in
+        let pad_tlvs = function
+            | Routing.Srh s as r ->
+                (match (2 + bytelength (Routing.pack r)) land 7 with
+                | 0 -> r
+                | 7 -> Routing.Srh { s with tlvs = s.tlvs @ [ Routing.Pad1 ] }
+                | n -> Routing.Srh { s with tlvs = s.tlvs @ [ Routing.PadN (6 - n) ] })
+            | Routing.Other o as r ->
+                (match (2 + bytelength (Routing.pack r)) land 7 with
+                | 0 -> r
+                | n -> Routing.Other { o with data = concat [ o.data ; randbs (8 - n) ] }) in
+        List.init (Random.int 4) (fun _ ->
+            match one () with
+            | Hop_by_hop opts -> Hop_by_hop (pad_opts opts)
+            | Dest_opts opts -> Dest_opts (pad_opts opts)
+            | Routing r -> Routing (pad_tlvs r)
+            | e -> e)
+
+    (*$Q pack
+      (Q.make ~print:list_to_string (fun _ -> random ())) (fun exts -> \
+        let next, bits = pack exts 6 in \
+        let exts', proto, rest = unpack next bits in \
+        list_to_string exts' = list_to_string exts && proto = 6 && Bitstring.bitstring_length rest = 0)
+      Q.(pair (int_bound 255) (int_bound 64)) (fun (typ, n) -> \
+        let b = randbs n in \
+        let exts, proto, rest = unpack typ b in \
+        let next, bits = pack exts proto in \
+        next = typ && Bitstring.equals b (Bitstring.concat [ bits ; rest ]))
+     *)
+
+    (*$>*)
+end
 
 (** {2 IPv6 Packet} *)
 
@@ -36,15 +457,17 @@ let debug = false
 module Pdu = struct
     (*$< Pdu *)
 
+    (* [proto] is the upper-layer protocol, which follows the extensions: *)
     type t = { ttl : int ; proto : Ip.Proto.t ;
                diff_serv : int ; ecn : int ; flow_label : int ;
                src : Ip.Addr.t ; dst : Ip.Addr.t ;
+               extensions : Extension.t list ;
                payload : Payload.t }
 
     let make ?(ttl=64) ?(diff_serv=0) ?(ecn=0) ?(flow_label=0)
-             proto src dst payload =
+             ?(extensions=[]) proto src dst payload =
         { ttl ; proto ; diff_serv ; ecn ; flow_label ; src ; dst ;
-          payload = Payload.o payload }
+          extensions ; payload = Payload.o payload }
 
     let random () =
         make (Ip.Proto.random ())
@@ -52,41 +475,70 @@ module Pdu = struct
              (Ip.Addr.random ~v4:false ())
              (randbs (Random.int 10 + 20))
 
+    (* The offset and more fragments flag of the fragment header, if any: *)
+    let fragment t =
+        List.find_map_opt (function
+            | Extension.Fragment f -> Some (f.offset, f.more)
+            | _ -> None) t.extensions
+
+    (** Whether the payload is a part only of the upper-layer packet. *)
+    let is_fragment t =
+        match fragment t with
+        | Some (offset, more) -> offset > 0 || more
+        | None -> false
+
+    (** Whether the payload is a part of the upper-layer packet but its
+     * first. *)
+    let is_later_fragment t =
+        match fragment t with
+        | Some (offset, _) -> offset > 0
+        | None -> false
+
+    (** Where the upper-layer packet goes (RFC 8200, 8.1). *)
+    let final_dst t =
+        List.find_map_opt (function
+            | Extension.Routing (Srh { segments = d :: _ ; _ }) -> Some d
+            | _ -> None) t.extensions |? t.dst
+
     let pseudo_header t () =
         let%bitstring hdr = {|
             Ip.Addr.to_bitstring t.src : 128 : bitstring ;
-            Ip.Addr.to_bitstring t.dst : 128 : bitstring ;
+            Ip.Addr.to_bitstring (final_dst t) : 128 : bitstring ;
             Payload.length t.payload : 16 ;
             0 : 24 ;
             (t.proto :> int) : 8 |} in
         hdr
 
     let pack t =
+        let next, extensions = Extension.pack t.extensions (t.proto :> int) in
         let%bitstring header = {|
             6 : 4 ; t.diff_serv : 6 ; t.ecn : 2 ; t.flow_label : 20 ;
-            Payload.length t.payload : 16 ;
-            (t.proto :> int) : 8 ; t.ttl : 8 ;
+            bytelength extensions + Payload.length t.payload : 16 ;
+            next : 8 ; t.ttl : 8 ;
             Ip.Addr.to_bitstring t.src : 128 : bitstring ;
             Ip.Addr.to_bitstring t.dst : 128 : bitstring |} in
-        (* must we patch some checksum? *)
+        (* must we patch some checksum? Not of a fragment, which has only a
+         * part of what it covers. *)
         let payload =
             let fix_udp_checksum = function 0 -> 0xffff | x -> x in (* As per rfc2460, 8.1 *)
-            if t.proto = Ip.Proto.tcp then Ip.Pdu.patch_checksum 128 (pseudo_header t) t.payload
+            if is_fragment t then t.payload
+            else if t.proto = Ip.Proto.tcp then Ip.Pdu.patch_checksum 128 (pseudo_header t) t.payload
             else if t.proto = Ip.Proto.udp then Ip.Pdu.patch_checksum 48 (pseudo_header t) ~fixit:fix_udp_checksum t.payload
             else if t.proto = Ip.Proto.icmpv6 then Ip.Pdu.patch_checksum 16 (pseudo_header t) t.payload
             else t.payload in
-        concat [ header ; (payload :> bitstring) ]
+        concat [ header ; extensions ; (payload :> bitstring) ]
 
     let unpack bits = match%bitstring bits with
         | {| 6 : 4 ; diff_serv : 6 ; ecn : 2 ; flow_label : 20 ;
-             payload_len : 16 ; proto : 8 ; ttl : 8 ;
+             payload_len : 16 ; next : 8 ; ttl : 8 ;
              src : 128 : bitstring ; dst : 128 : bitstring ;
              payload : payload_len*8 : bitstring |} ->
+            let extensions, proto, payload = Extension.unpack next payload in
             Ok { diff_serv ; ecn ; flow_label ;
                  proto = Ip.Proto.o proto ; ttl ;
                  src = Ip.Addr.of_bitstring src ;
                  dst = Ip.Addr.of_bitstring dst ;
-                 payload = Payload.o payload }
+                 extensions ; payload = Payload.o payload }
         | {| 4 : 4 ; _ |} ->
             Error (lazy "IPv6 looks like v4")
         | {| _ |} ->
@@ -94,6 +546,26 @@ module Pdu = struct
 
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
+      (Q.make (fun _ -> { (random ()) with extensions = Extension.random () } |> pack)) \
+        (fun t -> t = pack (Result.get_ok (unpack t)))
+     *)
+    (* The checksum is patched for the final destination, and not in
+     * fragments: *)
+    (*$T pack
+      let udp = Udp.Pdu.(pack (make (Bitstring.bitstring_of_string "x"))) \
+      and a = Ip.Addr.of_string "2001:db8::1" \
+      and b = Ip.Addr.of_string "2001:db8::2" \
+      and c = Ip.Addr.of_string "2001:db8::3" in \
+      let chk exts dst = \
+        match unpack (pack (make ~extensions:exts Ip.Proto.udp a dst udp)) with \
+        | Ok t -> Bitstring.takebits 16 (Bitstring.dropbits 48 (t.payload :> Bitstring.bitstring)) \
+        | Error _ -> Bitstring.empty_bitstring in \
+      let srh = Extension.(Routing (Routing.Srh { segments_left = 1 ; flags = 0 ; tag = 0 ; \
+                                                  segments = [ c ; b ] ; tlvs = [] })) in \
+      Bitstring.equals (chk [ srh ] b) (chk [] c) && \
+      not (Bitstring.equals (chk [] b) (chk [] c)) && \
+      Bitstring.equals (chk [ Extension.Fragment { offset = 0 ; more = true ; id = 1l } ] b) \
+                       (Bitstring.zeroes_bitstring 16)
      *)
 
     (* TODO: unpack with ports a la ip.ml? *)
@@ -171,6 +643,7 @@ module Pdu = struct
           ttl = int Field.ttl ~auto:(fun () -> 64) Kinds.ttl identity ;
           src = addr Field.src ;
           dst = addr Field.dst ;
+          extensions = [] ;
           payload = Payload.o (payload_of_nth ?upper r Field.payload
                                               gen_values Kinds.payload) }
 

@@ -171,7 +171,9 @@ let is_syn bits =
         | Error _ -> false in
     let ip6 bits =
         match Ip6.Pdu.unpack bits with
-        | Ok ip -> ip.proto = Ip.Proto.tcp && tcp (ip.payload :> bitstring)
+        | Ok ip when not (Ip6.Pdu.is_later_fragment ip) ->
+            ip.proto = Ip.Proto.tcp && tcp (ip.payload :> bitstring)
+        | Ok _ -> false
         | Error _ -> false in
     let ip bits =
         match Ip.Pdu.unpack bits with
