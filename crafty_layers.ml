@@ -233,7 +233,7 @@ let next_mac (st : Eth.State.t) proto payload =
         else (match Eth.TRX.gw_for_ip st (Ip.Addr.of_bitstring dst) with
             | None -> arp dst
             | Some (Eth.Gateway.Mac mac) -> mac
-            | Some (Eth.Gateway.IPv4 gw) -> arp (Ip.Addr.to_bitstring gw))
+            | Some (Eth.Gateway.Ip gw) -> arp (Ip.Addr.to_bitstring gw))
     | _ -> V.fail "Eth! needs a dst"
 
 let unpack_eth _ bits =

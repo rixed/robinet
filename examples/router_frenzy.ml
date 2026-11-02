@@ -181,7 +181,7 @@ let build_network (widget : Widget.t) router_specs fst_router_name delays err_de
                     if debug then Printf.printf "\tBuild host %s\n%!" dest_name ;
                     (* If not a router, then create a host *)
                     let gw_ip = Eth.State.find_ip4 iface.eth in
-                    let gateways = [ Eth.State.gw_selector (), Some Eth.Gateway.(IPv4 gw_ip) ]
+                    let gateways = [ Eth.State.gw_selector (), Some Eth.Gateway.(Ip gw_ip) ]
                     and netmask = Ip.Cidr.to_netmask cidr
                     and ip = try Ip.Addr.of_string dest_name
                              with Invalid_argument _ -> Ip.Cidr.second_addr cidr in

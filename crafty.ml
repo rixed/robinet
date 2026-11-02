@@ -512,7 +512,7 @@ let () =
     let dev, h =
         Crafty_interp.run ~parent:sim.root ~mac:iface.mac ~ip ~netmask
             ~speed ~full_duplex ~mtu
-            ?gateway:(Option.map (fun gw -> Eth.Gateway.IPv4 gw) iface.gateway)
+            ?gateway:(Option.map (fun gw -> Eth.Gateway.Ip gw) iface.gateway)
             (* The kernel answers for its own address: *)
             ~answer_arp:(!own_ip <> None) ~promisc:!promisc
             ~limits

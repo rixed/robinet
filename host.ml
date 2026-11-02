@@ -790,7 +790,7 @@ let ip_recv t bits =
  * is not a lease's to remove. *)
 let drop_leased_gateway t =
     Option.may (fun gw ->
-        let route = Eth.State.gw_selector (), Some (Eth.Gateway.IPv4 gw) in
+        let route = Eth.State.gw_selector (), Some (Eth.Gateway.Ip gw) in
         t.eth_state.gateways <- List.remove t.eth_state.gateways route
     ) t.leased_gateway ;
     t.leased_gateway <- None
@@ -841,7 +841,8 @@ let power_off t =
 
 let set_ip t my_ip netmask =
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string my_ip)))) ;
-    t.eth_state.my_addresses <- [ Eth.State.make_my_ip_address ~netmask my_ip ] ;
+    t.eth_state.my_addresses <-
+        [ Eth.State.make_my_ip_address ~prefix_len:(Ip.Cidr.width_of_netmask netmask) my_ip ] ;
     sink (ip_recv t) <-= t.eth_trx |> ignore
 
 (* What a host is built from belongs within it, which is what the interface
@@ -910,7 +911,7 @@ let apply_lease t (dhcp : Dhcp.Pdu.t) =
        again. *)
     drop_leased_gateway t ;
     Option.may (fun gw ->
-        let route = Eth.State.gw_selector (), Some (Eth.Gateway.IPv4 gw) in
+        let route = Eth.State.gw_selector (), Some (Eth.Gateway.Ip gw) in
         t.eth_state.gateways <- t.eth_state.gateways @ [ route ] ;
         t.leased_gateway <- Some gw
     ) dhcp.router ;

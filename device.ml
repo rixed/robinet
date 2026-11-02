@@ -221,7 +221,7 @@ let gateway_addr name v =
     match Eth.Addr.of_string s with
     | exception _ ->
         (match Ip.Addr.of_dotted_string_opt s with
-        | Some ip -> Eth.Gateway.IPv4 ip
+        | Some ip -> Eth.Gateway.Ip ip
         | None ->
             Widget.bad_value "%s: %S is neither a MAC nor an IP address" name s)
     | mac -> Eth.Gateway.Mac mac
@@ -749,7 +749,7 @@ let to_params =
               (match public_gw with
               | None -> `Null
               | Some (Eth.Gateway.Mac m) -> `String (Eth.Addr.to_hexstring m)
-              | Some (Eth.Gateway.IPv4 ip) ->
+              | Some (Eth.Gateway.Ip ip) ->
                   `String (Ip.Addr.to_dotted_string ip)) ;
           "LAN", `String (Ip.Cidr.to_string lan) ;
           "max connections", `Int max_cnxs ;
@@ -807,7 +807,7 @@ let build ~parent name = function
             match gateway with
             | None -> []
             | Some gw ->
-                [ Eth.State.gw_selector (), Some (Eth.Gateway.IPv4 gw) ] in
+                [ Eth.State.gw_selector (), Some (Eth.Gateway.Ip gw) ] in
         let t =
             Host.make ~parent ~gateways ?search_sfx ?nameserver ?static_ip
                       ?netmask ?mac name in

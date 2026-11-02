@@ -379,18 +379,33 @@ end
 module Gateway =
 struct
     (** The address of a gateway, which can be given either as an Ethernet address
-     * of as an IP address. *)
-    type t = Mac of Addr.t | IPv4 of Ip.Addr.t
+     * or as an IP address of either family. *)
+    type t = Mac of Addr.t | Ip of Ip.Addr.t
 
     (** Converts a {!Eth.Addr} to a string. *)
     let to_string = function
         | Mac mac -> Addr.to_string mac
-        | IPv4 ip -> Ip.Addr.to_string ip
+        | Ip ip -> Ip.Addr.to_string ip
 
     (** Converts the other way around. *)
     let of_string str =
         try Mac (Addr.of_string str)
-        with _ -> IPv4 (Ip.Addr.of_string str)
+        with _ -> Ip (Ip.Addr.of_string str)
+
+    (** As what can be typed back: plain hex and dotted, never a name. *)
+    let to_json = function
+        | Mac mac -> `String (Addr.to_hexstring mac)
+        | Ip ip -> `String (Ip.Addr.to_dotted_string ip)
+
+    (** A MAC when [s] reads as one, an IP otherwise. No name is resolved,
+     * which would hold the simulation's lock across a DNS lookup. *)
+    let of_typed s =
+        match Addr.of_string s with
+        | exception _ ->
+            (match Ip.Addr.of_dotted_string_opt s with
+            | Some ip -> Ip ip
+            | None -> Widget.bad_value "%S is neither a MAC nor an IP address" s)
+        | mac -> Mac mac
 
     (** And print. *)
     let print oc a =
@@ -711,35 +726,35 @@ end
 
 module State =
 struct
+    (*$< State *)
+    (* An address of this adapter and the length of the prefix that is on
+     * its link; a prefix of 0 puts every address of that family on it: *)
     type my_address =
-        { addr : bitstring ; netmask : bitstring }
+        { addr : bitstring ; prefix_len : int }
 
     let my_address_equal a1 a2 =
-        bits_equal a1.addr a2.addr &&
-        bits_equal a1.netmask a2.netmask
+        bits_equal a1.addr a2.addr && a1.prefix_len = a2.prefix_len
 
-    let make_my_address ?(netmask=Ip.Addr.(to_bitstring zero)) addr =
-        { addr ; netmask }
+    let make_my_address ?(prefix_len=0) addr =
+        { addr ; prefix_len }
 
-    let make_my_ip_address ?netmask ip =
-        let netmask = Option.map Ip.Addr.to_bitstring netmask
-        and addr = Ip.Addr.to_bitstring ip in
-        make_my_address ?netmask addr
+    let make_my_ip_address ?prefix_len ip =
+        make_my_address ?prefix_len (Ip.Addr.to_bitstring ip)
 
     let print_my_address oc my_addr =
-        Printf.fprintf oc "%s (netmask %s)"
-            (hexstring_of_bitstring my_addr.addr)
-            (hexstring_of_bitstring my_addr.netmask)
+        Printf.fprintf oc "%s/%d"
+            (Ip.Addr.to_dotted_string (Ip.Addr.of_bitstring my_addr.addr))
+            my_addr.prefix_len
 
-    type gw_selector = { dest_ip : Ip.Addr.t ; mask : Ip.Addr.t }
+    (* Which destinations a gateway is for: *)
+    type gw_selector = Ip.Cidr.t
 
-    let gw_selector ?(dest_ip=Ip.Addr.zero) ?(mask=Ip.Addr.zero) () =
-        { dest_ip ; mask }
+    (* Every destination of a family, IPv4 unless [v6]: *)
+    let gw_selector ?(v6=false) () =
+        Ip.Cidr.o ((if v6 then Ip.Addr.zero6 else Ip.Addr.zero), 0)
 
     let print_selector oc sel =
-        Printf.fprintf oc "%s/%s"
-            (Ip.Addr.to_string sel.dest_ip)
-            (Ip.Addr.to_string sel.mask)
+        String.print oc (Ip.Cidr.to_string sel)
 
     let print_gw oc (selector, gw_opt) =
         Printf.fprintf oc "%a: " print_selector selector ;
@@ -792,13 +807,23 @@ struct
         ) t.my_addresses
 
     (* Add this IPv4 in the list of my addresses: *)
-    let add_ip4 t ?netmask ip =
-        t.my_addresses <- make_my_ip_address ?netmask ip :: t.my_addresses
+    let add_ip4 t ?prefix_len ip =
+        t.my_addresses <- make_my_ip_address ?prefix_len ip :: t.my_addresses
+
+    let on_subnet my_addr addr =
+        bitstring_length my_addr.addr = bitstring_length addr &&
+        bits_equal (takebits my_addr.prefix_len my_addr.addr)
+                   (takebits my_addr.prefix_len addr)
 
     let on_my_subnet t addr =
-        List.exists (fun my_addr ->
-            match_mask my_addr.netmask my_addr.addr addr
-        ) t.my_addresses
+        List.exists (fun my_addr -> on_subnet my_addr addr) t.my_addresses
+    (*$T on_subnet
+      let a = make_my_ip_address ~prefix_len:24 (Ip.Addr.of_string "10.0.0.1") \
+      and b = make_my_ip_address ~prefix_len:64 (Ip.Addr.of_string "2001:db8::1") in \
+      let on s = List.exists (fun m -> on_subnet m (Ip.Addr.(to_bitstring (of_string s)))) [ a ; b ] in \
+      on "10.0.0.254" && not (on "10.0.1.1") && on "2001:db8::ff" && \
+      not (on "2001:db8:1::1") && not (on "a00::1")
+     *)
 
     let set_arp (t : t) iaddr = function
         | None      ->
@@ -833,6 +858,38 @@ struct
             Pdu.pack |>
             Simulation.asap t.iface.widget.power t.iface.emit
         ) t.my_addresses
+
+    (* The destination of a row of the gateways property: a CIDR, or an
+     * address beside a dotted mask. Which field it was about is added by
+     * [to_field]. *)
+    let selector_of_row row =
+        let ip s =
+            match Ip.Addr.of_dotted_string_opt s with
+            | Some ip -> ip
+            | None -> Widget.bad_value "%S is not an IP address" s in
+        let dest = Widget.to_field "destination" Widget.to_string row in
+        match row with
+        | `Assoc fields when List.mem_assoc "mask" fields ->
+            let mask = Widget.to_field "mask" (fun v -> ip (Widget.to_string v)) row in
+            Ip.Cidr.of_netmask (ip dest) mask
+        | _ ->
+            (match String.split_on_char '/' dest with
+            | [ addr ; width ] ->
+                let addr = ip addr in
+                (match int_of_string_opt width with
+                | Some w when w >= 0 && w <= Ip.Addr.length addr ->
+                    Ip.Cidr.o (addr, w)
+                | _ -> Widget.bad_value "destination: %S is not a CIDR" dest)
+            | _ -> Widget.bad_value "destination: %S is not a CIDR" dest)
+    (*$= selector_of_row & ~printer:identity
+      "10.0.0.0/8" (Ip.Cidr.to_string (selector_of_row \
+        (`Assoc [ "destination", `String "10.0.0.0/8" ; "via", `Null ])))
+      "2001:db8::/32" (Ip.Cidr.to_string (selector_of_row \
+        (`Assoc [ "destination", `String "2001:db8::/32" ; "via", `Null ])))
+      "192.168.0.0/16" (Ip.Cidr.to_string (selector_of_row \
+        (`Assoc [ "destination", `String "192.168.1.2" ; \
+                  "mask", `String "255.255.0.0" ; "via", `Null ])))
+     *)
 
     (** Create the state machine for an Ethernet communication.
      * @param mtu the maximum transmit unit (ie. you won't be able to send longer payloads)
@@ -882,57 +939,27 @@ struct
             property "gateways"
                 ~descr:"Where to send what is not on this LAN."
                 ~kind:(list (row [| "destination", String ;
-                                    "mask", String ;
                                     "via", optional String |]))
                 ~getter:(fun () ->
-                    (* Dotted rather than [Ip.Addr.to_string], and plain hex
-                       rather than [Addr.to_string]: both of those may hand
+                    (* Dotted rather than [Ip.Addr.to_string]: that may hand
                        back a name, and a name is not something the setter can
                        read again. *)
                     `List (
-                        List.map (fun ({ dest_ip ; mask }, gw) ->
+                        List.map (fun (sel, gw) ->
                             `Assoc [
-                                "destination",
-                                    `String (Ip.Addr.to_dotted_string dest_ip) ;
-                                "mask",
-                                    `String (Ip.Addr.to_dotted_string mask) ;
-                                "via",
-                                    (match gw with
-                                    | None -> `Null
-                                    | Some (Gateway.Mac mac) ->
-                                        `String (Addr.to_hexstring mac)
-                                    | Some (Gateway.IPv4 ip) ->
-                                        `String (Ip.Addr.to_dotted_string ip)) ]
+                                "destination", `String (Ip.Cidr.to_string sel) ;
+                                "via", Option.map_default Gateway.to_json `Null gw ]
                         ) t.gateways))
                 ~setter:(fun v ->
                     (* Every row is read before any of them is installed, so
                        that a table with one bad row leaves the old one alone
                        rather than a half-replaced one behind. *)
-                    (* Which field it was about is added by [to_field]. *)
-                    let ip s =
-                        match Ip.Addr.of_dotted_string_opt s with
-                        | Some ip -> ip
-                        | None -> bad_value "%S is not an IP address" s in
                     let gateways =
                         to_list (fun row ->
-                            let addr what =
-                                to_field what (fun v -> ip (to_string v)) row in
                             let via =
                                 to_field "via" (to_option (fun v ->
-                                    let s = to_string v in
-                                    (* A MAC when it reads as one, an IP
-                                       otherwise: that is the choice
-                                       [Gateway.t] offers. *)
-                                    match Addr.of_string s with
-                                    | exception _ ->
-                                        (match Ip.Addr.of_dotted_string_opt s with
-                                        | Some ip -> Gateway.IPv4 ip
-                                        | None ->
-                                            bad_value "%S is neither a MAC nor \
-                                                       an IP address" s)
-                                    | mac -> Gateway.Mac mac)) row in
-                            { dest_ip = addr "destination" ;
-                              mask = addr "mask" }, via
+                                    Gateway.of_typed (to_string v))) row in
+                            selector_of_row row, via
                         ) v in
                     t.gateways <- gateways) ;
             property "delay" ~kind:Float ~units:"secs"
@@ -977,6 +1004,7 @@ struct
                     iface.widget.power.on && t.my_addresses <> [])
                 ~handler:(fun s -> emit_gratuitous_arp t ; Action.stop s) ] ;
         t
+    (*$>*)
 end
 
 (** {2 Transceiver} *)
@@ -995,8 +1023,8 @@ struct
              * the interface configuration: *)
             let rec loop = function
                 | [] -> None
-                | (State.{ dest_ip ; mask }, addr) :: rest ->
-                    if Ip.Addr.in_mask ip dest_ip mask then addr
+                | (sel, addr) :: rest ->
+                    if Ip.Cidr.mem sel ip then addr
                     else loop rest in
             loop st.gateways
         )
@@ -1091,7 +1119,7 @@ struct
             | Some (Mac addr) ->
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Using GW MAC %s" (Addr.to_string addr)))) ;
                 Ok (Dst addr)
-            | Some (IPv4 ip)  ->
+            | Some (Ip ip)  ->
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Using GW IP %s" (Ip.Addr.to_string ip)))) ;
                 let sender_ip = match st.my_addresses with
                     | my_ip::_ -> my_ip.addr
@@ -1220,13 +1248,12 @@ struct
      * received; [send st dst] emits an IP packet from [st] to [dst]. *)
     (*$inject
       let ip n = Ip.Addr.of_string ("10.0.0."^ string_of_int n)
-      let mask = Ip.Addr.of_string "255.255.255.0"
       let pair ~answer_arp =
           let sim = Simulation.make ~realtime:false "eth-outside-host" in
           let adapter ?answer_arp mac n =
               State.make ~parent:sim.root ~name:mac ?answer_arp
                          ~mac:(Addr.of_string mac)
-                         ~my_addresses:[ State.make_my_ip_address ~netmask:mask
+                         ~my_addresses:[ State.make_my_ip_address ~prefix_len:24
                                                                   (ip n) ] () in
           let a = adapter "02:00:00:00:00:01" 1
           and b = adapter ~answer_arp "02:00:00:00:00:02" 2 in

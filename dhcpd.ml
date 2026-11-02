@@ -475,7 +475,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
             (Host.cur_nameserver clt)) ;
     assert_equal ~printer:identity "example.com"
         (Host.cur_search_sfx clt |? "none") ;
-    let default_route = Eth.State.gw_selector (), Some (Eth.Gateway.IPv4 gw) in
+    let default_route = Eth.State.gw_selector (), Some (Eth.Gateway.Ip gw) in
     let has_default_route () =
         List.mem default_route Eth.State.(clt.eth_state.gateways) in
     assert_bool "and a default route to the offered gateway"
@@ -483,9 +483,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
     (* The netmask reaches the adapter, and not merely the host: it is what
        tells apart a neighbour from something to send to that gateway. *)
     assert_bool "the adapter holds that netmask"
-        (List.exists (fun (a : Eth.State.my_address) ->
-            Bitstring.equals a.Eth.State.netmask
-                (Ip.Addr.to_bitstring (Ip.Addr.of_dotted_string "255.255.255.0")))
+        (List.exists (fun (a : Eth.State.my_address) -> a.Eth.State.prefix_len = 24)
             Eth.State.(clt.eth_state.my_addresses)) ;
     (* The name the client gave is the one the server knows it by, and the
        lease table is where a reader of the interface sees it. *)

@@ -628,11 +628,9 @@ let my_addresses_of routes n =
         | Some (addr, _test) ->
             if r.target = Admin &&
                (r.in_iface = None || r.in_iface = Some n) then
-                let addr = Ip.Cidr.subnet addr |>
-                           Ip.Addr.to_bitstring
-                and netmask = Ip.Cidr.to_netmask addr |>
-                              Ip.Addr.to_bitstring in
-                Some [ Eth.State.{ addr ; netmask } ]
+                let prefix_len = Ip.Cidr.width addr
+                and addr = Ip.Cidr.subnet addr |> Ip.Addr.to_bitstring in
+                Some [ Eth.State.{ addr ; prefix_len } ]
             else
                 None
         | _ -> None
@@ -848,11 +846,7 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                             "via",
                                 (match r.target with
                                 | Forward { via = Some v ; _ } ->
-                                    (match v with
-                                    | Eth.Gateway.Mac mac ->
-                                        `String (Eth.Addr.to_hexstring mac)
-                                    | IPv4 ip ->
-                                        `String (Ip.Addr.to_dotted_string ip))
+                                    Eth.Gateway.to_json v
                                 | _ -> `Null) ]
                     ) t.routes))
             ~setter:(fun v ->
@@ -886,17 +880,7 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                                 bad_value "%S is not a network \
                                            (address/width)" s
                             | cidr -> cidr, Ip.Cidr.mem cidr in
-                        (* A MAC when it reads as one, an IP otherwise: the
-                           two things a gateway can be named by. *)
-                        let gateway s =
-                            match Eth.Addr.of_string s with
-                            | exception _ ->
-                                (match Ip.Addr.of_dotted_string_opt s with
-                                | Some ip -> Eth.Gateway.IPv4 ip
-                                | None ->
-                                    bad_value "%S is neither a MAC nor an \
-                                               IP address" s)
-                            | mac -> Eth.Gateway.Mac mac in
+                        let gateway = Eth.Gateway.of_typed in
                         let in_iface = iface "input port"
                         and src_mask = text "src mask" cidr
                         and dst_mask = text "dst mask" cidr

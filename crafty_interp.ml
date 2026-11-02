@@ -1394,7 +1394,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         Eth.State.make ~parent ~name ~mac ~gateways ?answer_arp
             ?promisc:(if promisc then Some ignore else None)
             ~speeds:[ speed ] ~full_duplex ?mtu
-            ~my_addresses:[ Eth.State.make_my_ip_address ?netmask ip ] () in
+            ~my_addresses:[ Eth.State.make_my_ip_address
+                ?prefix_len:(Option.map Ip.Cidr.width_of_netmask netmask) ip ] () in
     (* No cable to negotiate with: the link is what the interface supports. *)
     eth.iface.widget.ports.set_capabilities 0 Capabilities.Any ;
     eth.iface.rx_wire <- rx_wire ;
@@ -1456,8 +1457,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
           Eth.State.make ~parent:sim.SimTypes.root ~name:"crafty" ?promisc
               ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
               ~gateways:[ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw_mac) ]
-              ~my_addresses:[ Eth.State.make_my_ip_address
-                                  ~netmask:(Ip.Addr.of_string "255.255.255.0")
+              ~my_addresses:[ Eth.State.make_my_ip_address ~prefix_len:24
                                   (Ip.Addr.of_string "10.0.0.1") ] () in
       Tools.BitHash.replace eth.Eth.State.arp_cache
           (Ip.Addr.to_bitstring (Ip.Addr.of_string "10.0.0.2"))
@@ -2149,7 +2149,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 
   let crafty_peer sim n =
       Eth.State.make ~parent:sim.SimTypes.root ~name:(Printf.sprintf "crafty%d" n) ~mac:(mac n)
-          ~my_addresses:[ Eth.State.make_my_ip_address ~netmask (address n) ] ()
+          ~my_addresses:[ Eth.State.make_my_ip_address ~prefix_len:24 (address n) ] ()
 
   let knows (eth : Eth.State.t) n =
       Tools.BitHash.replace eth.arp_cache (Ip.Addr.to_bitstring (address n)) (Some (mac n))
@@ -2510,7 +2510,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
                wait dur=1s\n/IP(dst=1.2.3.4)/UDP(dst=7)/Raw(\"x\")") in
   let dev, h =
       run ~parent:sim.SimTypes.root ~mac:(mac "02:00:00:00:00:01") ~ip:(ip "10.0.0.1")
-          ~netmask:(ip "255.255.255.0") ~gateway:(Eth.Gateway.IPv4 (ip "10.0.0.254"))
+          ~netmask:(ip "255.255.255.0") ~gateway:(Eth.Gateway.Ip (ip "10.0.0.254"))
           ~answer_arp:false p in
   let frames = ref [] in
   Tools.(dev --> sink (fun bits ->

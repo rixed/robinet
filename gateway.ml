@@ -212,14 +212,16 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     (* 1st iface is for the GW: *)
     let gw_mac = router.ifaces.(0).eth.mac in
     let gw_ip = Enum.get_exn local_ips in   (* first IP of the subnet is the GW *)
-    Eth.State.add_ip4 router.ifaces.(0).eth ~netmask gw_ip ;
+    Eth.State.add_ip4 router.ifaces.(0).eth
+        ~prefix_len:(Ip.Cidr.width_of_netmask netmask) gw_ip ;
     (* FIXME: the server shares [gw_ip] with this adapter, which can then
      * reach it only by learning its MAC from the frames it sends: an ARP for
      * [gw_ip] is one for itself, that nobody answers. The server should have
      * an address of its own, or be delivered to as the admin host is. *)
     router.ifaces.(0).eth.learn_neighbors_from_incoming <- Eth.Learn.Subnet ;
     (* The second iface of our router (facing internet) is the NAT *)
-    Eth.State.add_ip4 router.ifaces.(1).eth ?netmask:public_netmask public_ip ;
+    Eth.State.add_ip4 router.ifaces.(1).eth
+        ?prefix_len:(Option.map Ip.Cidr.width_of_netmask public_netmask) public_ip ;
     let nat_state =
         Nat.State.make ~num_max_cnxs ~parent:widget ?port_forwards public_ip in
     let nat_trx = Nat.TRX.make nat_state in

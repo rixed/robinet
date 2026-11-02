@@ -469,7 +469,10 @@ under:
 one with an IP stack above it also `MTU` (68…65535), `gateways`, `delay`, `loss`, `answer
 ARP`, `accept gratuitous ARP` and `learn neighbors from incoming` — a loss of 0.01 drops one
 frame in a hundred, which is how a machine is made to misbehave without
-touching the cable. An adapter learns a neighbour's hardware address when it
+touching the cable. `gateways` rows are `{"destination": "0.0.0.0/0",
+"via": "10.0.0.1"}`, IPv4 or IPv6, `via` an IP or a MAC, or `null` for
+reaching the destination directly; a `destination` address beside a dotted
+`mask`, as older simulations have it, still reads. An adapter learns a neighbour's hardware address when it
 asks for it, or when the neighbour asks for its own; with `accept gratuitous
 ARP` it also learns one that merely announces itself (see `emit gratuitous ARP`
 below), which is what spares the first frame to a neighbour the wait of an ARP
