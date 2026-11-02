@@ -87,6 +87,9 @@ let concat bss =
 
 let is_byte_aligned (_, off, len) = off land 7 = 0 && len land 7 = 0
 
+let is_zeroes bits =
+    Bitstring.equals bits (zeroes_bitstring (bitstring_length bits))
+
 (* Whether the [n] bytes from [o1] in [d1] and from [o2] in [d2] are equal. *)
 let rec bytes_equal d1 o1 d2 o2 n =
     if n >= 2 then
@@ -223,6 +226,9 @@ let hexstring ?(sep=" ") s =
 let hexstring_of_bitstring =
     hexstring % string_of_bitstring
 
+(* Like the above, but more compact *)
+let hex_of_bitstring =
+    hexstring ~sep:"" % string_of_bitstring
 
 let hexstring_of_bitstring_abbrev ?(bits=64) bs =
     if bitstring_length bs <= bits then hexstring_of_bitstring bs

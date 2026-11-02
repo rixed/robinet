@@ -954,7 +954,7 @@ module Pdu = struct
                         String.concat "" (List.map (Printf.sprintf " %lu") l)
                     | Addr_stamps l -> " addr" ^ addr_stamps l
                     | Prespecified l -> " prespec" ^ addr_stamps l)
-            | Other bits -> "opt " ^ hexstring ~sep:"" (string_of_bitstring bits)
+            | Other bits -> "opt " ^ hex_of_bitstring bits
 
         let list_to_string opts =
             String.concat ", " (List.map to_string opts)

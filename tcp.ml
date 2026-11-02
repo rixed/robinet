@@ -163,7 +163,7 @@ struct
                     (String.concat " " (List.map (fun (l, r) ->
                         Printf.sprintf "{%lu:%lu}" l r) blocks))
             | Timestamps (v, e) -> Printf.sprintf "TS val %lu ecr %lu" v e
-            | Other bits -> "opt " ^ hexstring ~sep:"" (string_of_bitstring bits)
+            | Other bits -> "opt " ^ hex_of_bitstring bits
 
         let list_to_string opts =
             String.concat "," (List.map to_string opts)

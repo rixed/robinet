@@ -37,7 +37,7 @@ module Extension = struct
     (*$< Extension *)
 
     (* Unpacks TLVs of the format shared by IPv6 options and SRH TLVs, where
-     * [pad1] is the type of the one octet long padding: *)
+     * [pad1] is the type of the one byte long padding: *)
     let rec unpack_tlvs pad1 decode bits =
         match%bitstring bits with
         | {| typ : 8 ; rest : -1 : bitstring |} when typ = pad1 ->
@@ -48,11 +48,6 @@ module Extension = struct
         | {| _ |} ->
             if bitstring_length bits = 0 then [] else [ `Other bits ]
 
-    let is_zeroes bits =
-        Bitstring.equals bits (zeroes_bitstring (bitstring_length bits))
-
-    let hex bits = hexstring ~sep:"" (string_of_bitstring bits)
-
     (** The options of the hop-by-hop and destination options headers. *)
     module Options =
     struct
@@ -60,7 +55,7 @@ module Extension = struct
 
         type t =
             | Pad1
-            | PadN of int (* that many zero octets *)
+            | PadN of int (* that many zero bytes *)
             (* RFC 8250: *)
             | Pdm of { scale_dtlr : int ; scale_dtls : int (* signed *) ;
                        psn_this : int ; psn_last : int ;
@@ -128,7 +123,7 @@ module Extension = struct
             | Min_pmtu m ->
                 Printf.sprintf "MinPMTU %d rtn %d%s" m.min_pmtu m.rtn_pmtu
                     (if m.r then " R" else "")
-            | Other bits -> "opt " ^ hex bits
+            | Other bits -> "opt " ^ hex_of_bitstring bits
 
         let list_to_string opts =
             String.concat ", " (List.map to_string opts)
@@ -267,7 +262,7 @@ module Extension = struct
         (*$>*)
     end
 
-    (** The routing header. *)
+    (** The Segment Routing Header (SRH, cf RFC8754). *)
     module Routing =
     struct
         (*$< Routing *)
@@ -275,7 +270,7 @@ module Extension = struct
         (* The TLVs of a segment routing header: *)
         type tlv =
             | Pad1
-            | PadN of int (* that many zero octets *)
+            | PadN of int (* that many zero bytes *)
             | Hmac of { d : bool ; key_id : int32 ; hmac : bitstring }
             | Other_tlv of bitstring (* type, length and data *)
 
@@ -312,7 +307,7 @@ module Extension = struct
             unpack_tlvs 0 (fun tlv -> `Tlv (decode_tlv tlv)) bits |>
             List.map (function `Pad1 -> Pad1 | `Tlv t -> t | `Other b -> Other_tlv b)
 
-        (* What follows the length octet: *)
+        (* What follows the length byte: *)
         let pack = function
             | Srh s ->
                 let last_entry = List.length s.segments - 1 in
@@ -356,8 +351,8 @@ module Extension = struct
             | PadN n -> Printf.sprintf "PadN %d" n
             | Hmac h ->
                 Printf.sprintf "HMAC%s key %lu %s" (if h.d then " D" else "")
-                    h.key_id (hex h.hmac)
-            | Other_tlv bits -> "tlv " ^ hex bits
+                    h.key_id (hex_of_bitstring h.hmac)
+            | Other_tlv bits -> "tlv " ^ hex_of_bitstring bits
 
         let to_string = function
             | Srh s ->
@@ -369,7 +364,7 @@ module Extension = struct
                      " "^ String.concat ", " (List.map tlv_to_string s.tlvs))
             | Other o ->
                 Printf.sprintf "routing type %d left %d %s"
-                    o.typ o.segments_left (hex o.data)
+                    o.typ o.segments_left (hex_of_bitstring o.data)
 
         let random () =
             let segments =
@@ -416,7 +411,7 @@ module Extension = struct
                     "tag", tag ;
                     "segments", Widget.list addr ;
                     "TLVs", Widget.list tlv |]
-            (* So that the header is at most 2048 octets long: *)
+            (* So that the header is at most 2048 bytes long: *)
             let data = BRange (0, 2044)
             let other =
                 Widget.record [| "type", u8 ; "segments left", u8 ; "data", data |]
@@ -511,9 +506,9 @@ module Extension = struct
         | Hop_by_hop of Options.t list
         | Dest_opts of Options.t list
         | Routing of Routing.t
-        (* [offset] in 8 octets units: *)
+        (* [offset] in 8 bytes units: *)
         | Fragment of { offset : int ; more : bool ; id : int32 }
-        (* [body] is the whole header but its next header octet: *)
+        (* [body] is the whole header but its next header byte: *)
         | Other of { typ : int ; body : bitstring }
 
     let hop_by_hop = 0 and routing = 43 and fragment = 44 and dest_opts = 60
@@ -527,13 +522,13 @@ module Extension = struct
 
     (* The IANA list of extension headers, but ESP that ends the chain: *)
     let is_extension typ =
-        List.mem typ [ 0 ; 43 ; 44 ; 51 ; 60 ; 135 ; 139 ; 140 ; 253 ; 254 ]
+        Array.mem typ [| 0 ; 43 ; 44 ; 51 ; 60 ; 135 ; 139 ; 140 ; 253 ; 254 |]
 
-    (* [data] is what follows the length octet: *)
+    (* [data] is what follows the length byte: *)
     let pack_generic next data =
         let len = 2 + bytelength data in
         if len land 7 <> 0 then
-            invalid_arg "Ip6.Extension.pack: not a multiple of 8 octets" ;
+            invalid_arg "Ip6.Extension.pack: not a multiple of 8 bytes" ;
         concat [ [%bitstring {| next : 8 ; len / 8 - 1 : 8 |}] ; data ]
 
     let pack_one next = function
@@ -597,12 +592,12 @@ module Extension = struct
         | Fragment f ->
             Printf.sprintf "frag id %lu off %d%s" f.id (f.offset * 8)
                 (if f.more then "+" else "")
-        | Other o -> Printf.sprintf "ext %d %s" o.typ (hex o.body)
+        | Other o -> Printf.sprintf "ext %d %s" o.typ (hex_of_bitstring o.body)
 
     let list_to_string exts =
         String.concat ", " (List.map to_string exts)
 
-    (* The padding that makes [len] octets of data after the length octet a
+    (* The padding that makes [len] bytes of data after the length byte a
      * multiple of 8: *)
     let padding len pad1 padn =
         match (2 + len) land 7 with
@@ -610,7 +605,7 @@ module Extension = struct
         | 7 -> [ pad1 ]
         | r -> [ padn (6 - r) ]
 
-    (** [e] padded to a multiple of 8 octets, as [pack] wants it, with Pad1
+    (** [e] padded to a multiple of 8 bytes, as [pack] wants it, with Pad1
      * or PadN, or zeroes after the data of an unknown routing header. *)
     let pad e =
         let pad_opts opts =
@@ -639,7 +634,7 @@ module Extension = struct
             | 3 -> Fragment { offset = randi 13 ; more = Random.bool () ;
                               id = rand32 () }
             | _ ->
-                (* An AH, which counts in 4 octets units: *)
+                (* An AH, which counts in 4 bytes units: *)
                 let len = Random.int 4 in
                 Other { typ = 51 ;
                         body = concat [ [%bitstring {| len : 8 |}] ;
