@@ -804,6 +804,26 @@ module Pdu = struct
         | Some (offset, _) -> offset > 0
         | None -> false
 
+    (** The TCP or UDP ports, unless the payload is a later fragment: *)
+    let get_ports t =
+        if is_later_fragment t then Error (lazy "Not the first fragment")
+        else Ip.Pdu.ports_of t.proto t.payload
+
+    (** [bits], an IPv6 packet, with a hop limit one less: *)
+    let decr_hop_limit bits =
+        let b = Bytes.of_string (string_of_bitstring bits) in
+        if Bytes.length b < 8 then invalid_arg "Ip6.Pdu.decr_hop_limit" ;
+        Bytes.set_uint8 b 7 ((Bytes.get_uint8 b 7 - 1) land 0xff) ;
+        bitstring_of_string (Bytes.unsafe_to_string b)
+    (*$T decr_hop_limit
+      let bits = make ~ttl:9 Ip.Proto.udp (Ip.Addr.of_string "::1") \
+                    (Ip.Addr.of_string "::2") (Bitstring.zeroes_bitstring 64) |> pack in \
+      let bits' = decr_hop_limit bits in \
+      Bitstring.equals (Bitstring.takebits 56 bits) (Bitstring.takebits 56 bits') && \
+      Bitstring.equals (Bitstring.dropbits 64 bits) (Bitstring.dropbits 64 bits') && \
+      (match unpack bits' with Ok ip -> ip.ttl = 8 | Error _ -> false)
+     *)
+
     (** Where the upper-layer packet goes (RFC 8200, 8.1). *)
     let final_dst t =
         List.find_map_opt (function

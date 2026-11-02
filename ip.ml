@@ -1362,18 +1362,21 @@ module Pdu = struct
      *)
 
     (* Returns the source/dest ports from an IP PDU: *)
-    let get_ports ip =
-        if ip.proto = Proto.tcp then (
-            Result.bind (Tcp.Pdu.unpack (ip.payload :> bitstring))
+    (* The ports of a [proto] header at the start of [payload]: *)
+    let ports_of proto (payload : Payload.t) =
+        if proto = Proto.tcp then (
+            Result.bind (Tcp.Pdu.unpack (payload :> bitstring))
             (fun tcp ->
                 Ok ((tcp.Tcp.Pdu.src_port :> int),
                     (tcp.Tcp.Pdu.dst_port :> int)))
-        ) else if ip.proto = Proto.udp then (
-            Result.bind (Udp.Pdu.unpack (ip.payload :> bitstring))
+        ) else if proto = Proto.udp then (
+            Result.bind (Udp.Pdu.unpack (payload :> bitstring))
             (fun udp ->
                 Ok ((udp.Udp.Pdu.src_port :> int),
                     (udp.Udp.Pdu.dst_port :> int)))
         ) else Error (lazy "Not TCP nor UDP")
+
+    let get_ports ip = ports_of ip.proto ip.payload
 
     (** Unpack an ip packets and return the ip PDU, source port and dest port. *)
     let unpack_with_ports bits =

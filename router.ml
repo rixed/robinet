@@ -366,7 +366,12 @@ mutable can_forward_after : int option ;
   (** Whether a refresh of [buffered] is scheduled: *)
   mutable refresh_pending : bool ;
              (** Count the frames dropped for out of RAM *)
-             tail_dropped : Metric.Counter.t }
+             tail_dropped : Metric.Counter.t ;
+  (** Drop, rather than forward unchanged, the IPv6 packets with a
+   * hop-by-hop options header, or a segment routing header: *)
+  mutable drop_hop_by_hop : bool ;
+         mutable drop_srh : bool ;
+        extension_dropped : Metric.Counter.t }
 
 type Widget.device += T of t
 
@@ -474,34 +479,117 @@ let buffer_alloc t n len =
         true
     )
 
-(* Either [Ok] the packets to emit on [iface] in place of [bits], or [Error ip]
- * if [ip] does not fit the MTU and cannot be fragmented. What is not an IPv4
- * packet is left whole for Eth to deal with. *)
+(* What routing reads of an IP packet, of either version: *)
+type packet = V4 of Ip.Pdu.t | V6 of Ip6.Pdu.t
+
+let unpack_packet bits =
+    match%bitstring bits with
+    | {| 6 : 4 ; _ |} -> Result.map (fun ip -> V6 ip) (Ip6.Pdu.unpack bits)
+    | {| _ |} -> Result.map (fun ip -> V4 ip) (Ip.Pdu.unpack bits)
+
+let packet_src = function V4 ip -> ip.Ip.Pdu.src | V6 ip -> ip.Ip6.Pdu.src
+let packet_dst = function V4 ip -> ip.Ip.Pdu.dst | V6 ip -> ip.Ip6.Pdu.dst
+let packet_ttl = function V4 ip -> ip.Ip.Pdu.ttl | V6 ip -> ip.Ip6.Pdu.ttl
+let packet_proto = function V4 ip -> ip.Ip.Pdu.proto | V6 ip -> ip.Ip6.Pdu.proto
+let packet_ports = function
+    | V4 ip -> Ip.Pdu.get_ports ip
+    | V6 ip -> Ip6.Pdu.get_ports ip
+
+(* Link-local unicast and multicast of link or node scope, which no router
+ * forwards (RFC 4291, 2.5.6 and 2.7): *)
+let is_link_scoped a =
+    Ip.Addr.is_v6 a &&
+    (Ip.Addr.is_link_local a ||
+     Ip.Addr.is_multicast a &&
+     Char.code (Bytes.get (Ip.Addr.to_bytes a) 1) land 0xf <= 2)
+(*$T is_link_scoped
+  is_link_scoped (Ip.Addr.of_string "fe80::1")
+  is_link_scoped (Ip.Addr.of_string "ff02::1")
+  not (is_link_scoped (Ip.Addr.of_string "ff05::1"))
+  not (is_link_scoped (Ip.Addr.of_string "2001:db8::1"))
+  not (is_link_scoped (Ip.Addr.of_string "169.254.0.1"))
+ *)
+
+(* Whether [ip] carries an extension header that [t] is told to drop: *)
+let unwelcome t (ip : Ip6.Pdu.t) =
+    List.exists (function
+        | Ip6.Extension.Hop_by_hop _ -> t.drop_hop_by_hop
+        | Routing (Srh _) -> t.drop_srh
+        | _ -> false) ip.extensions
+
+(* The errors a router reports: *)
+type error =
+    | No_route
+    | Expired
+    | Too_big of int (* the MTU of the next hop *)
+
+(* No ICMPv6 error about an ICMPv6 error, nor about a packet whose source does
+ * not single out its sender, nor, unless it is too big, about one sent to a
+ * multicast group (RFC 4443, 2.4 (e)): *)
+let may_report_v6 err (ip : Ip6.Pdu.t) =
+    let is_error =
+        ip.proto = Ip.Proto.icmpv6 && not (Ip6.Pdu.is_later_fragment ip) &&
+        match%bitstring (ip.payload :> bitstring) with
+        | {| typ : 8 ; _ |} -> typ < 128
+        | {| _ |} -> false in
+    not is_error &&
+    not Ip.Addr.(is_multicast ip.src || compare ip.src zero6 = 0) &&
+    (match err with Too_big _ -> true | _ -> not (Ip.Addr.is_multicast ip.dst))
+
+(* Either [Ok] the packets to emit on [iface] in place of [bits], or [Error p]
+ * if [p] does not fit the MTU and cannot be fragmented, which IPv6 packets
+ * never are. What is not an IP packet is left whole for Eth to deal with. *)
 let maybe_fragment iface bits =
     if bytelength bits <= iface.eth.mtu then Ok [ bits ]
-    else match Ip.Pdu.unpack bits with
+    else match unpack_packet bits with
         | Error _ -> Ok [ bits ]
-        | Ok ip ->
-            if ip.dont_frag || not iface.link_fragmentation then Error ip
+        | Ok (V6 _ as p) -> Error p
+        | Ok (V4 ip as p) ->
+            if ip.dont_frag || not iface.link_fragmentation then Error p
             else match Ip.Pdu.fragment iface.eth.mtu ip with
-                | exception Invalid_argument _ -> Error ip
+                | exception Invalid_argument _ -> Error p
                 | frags -> Ok frags
 
-(* Sending will perform routing again *)
-let rec maybe_send_icmp t n ip icmp_maker =
-    match Eth.State.find_ip4 t.ifaces.(n).eth with
-    | exception Not_found ->
+(* Report [err] about [p], received at interface [n], from the address of
+ * that interface [p]'s source is reached from. Sending performs routing
+ * again. *)
+let rec maybe_send_icmp t n p err =
+    let src = packet_src p in
+    match Eth.State.src_for t.ifaces.(n).eth src with
+    | None ->
         Log.(log t.widget.logger Debug (lazy "Cannot send an ICMP error: I have no IP!"))
-    | my_ip ->
+    | Some my_ip ->
         let iface_errs = t.ifaces.(n).notify_errs in
-        if Random.float 1. <
+        if (match p with V6 ip -> may_report_v6 err ip | V4 _ -> true) &&
+           Random.float 1. <
            t.notify_errs.probability *. iface_errs.probability then
             let delay =
                 jitter 0.1 (t.notify_errs.delay +. iface_errs.delay) in
-            let icmp = icmp_maker ip in
-            let ip_pld = Icmp.Pdu.pack icmp in
-            let ip_pkt = Ip.Pdu.make Ip.Proto.icmp my_ip ip.Ip.Pdu.src ip_pld in
-            let bits = Ip.Pdu.pack ip_pkt in
+            let bits =
+                match p with
+                | V4 ip ->
+                    let icmp =
+                        match err with
+                        | No_route -> Icmp.Pdu.make_host_unreachable ip
+                        | Expired -> Icmp.Pdu.make_ttl_expired_in_transit ip
+                        | Too_big mtu ->
+                            Icmp.(Pdu.make_destination_unreachable
+                                ~next_hop_mtu:mtu
+                                Unreachable.fragmentation_needed ip) in
+                    Icmp.Pdu.pack icmp |>
+                    Ip.Pdu.make Ip.Proto.icmp my_ip src |>
+                    Ip.Pdu.pack
+                | V6 ip ->
+                    let icmp =
+                        match err with
+                        | No_route ->
+                            Icmp6.(Pdu.make_destination_unreachable
+                                Unreachable.no_route ip)
+                        | Expired -> Icmp6.Pdu.make_hop_limit_exceeded ip
+                        | Too_big mtu -> Icmp6.Pdu.make_packet_too_big mtu ip in
+                    Icmp6.Pdu.pack icmp |>
+                    Ip6.Pdu.make Ip.Proto.icmpv6 my_ip src |>
+                    Ip6.Pdu.pack in
             Simulation.delay t.widget.power
                          (Clock.Interval.sec delay) (route None t) bits
 
@@ -512,28 +600,33 @@ and route in_iface_opt t bits =
     Log.(log t.widget.logger Debug (lazy (match in_iface_opt with
         | Some n -> Printf.sprintf "rx from iface %d" n
         | None -> "generated traffic"))) ;
-    let ip_opt, src_opt, dst_opt, ttl_opt, proto_opt =
-        match Ip.Pdu.unpack bits with
-        | Error _ ->
-            None, None, None, None, None
-        | Ok ip ->
-            Some ip, Some ip.Ip.Pdu.src, Some ip.dst, Some ip.ttl, Some ip.proto in
+    let p_opt = Result.to_option (unpack_packet bits) in
+    let src_opt = Option.map packet_src p_opt
+    and dst_opt = Option.map packet_dst p_opt
+    and ttl_opt = Option.map packet_ttl p_opt
+    and proto_opt = Option.map packet_proto p_opt in
     let src_port_opt, dst_port_opt =
-        match Option.bind ip_opt (Result.to_option % Ip.Pdu.get_ports) with
+        match Option.bind p_opt (Result.to_option % packet_ports) with
         | Some (src_port, dst_port) -> Some src_port, Some dst_port
         | None -> None, None in
+    let link_scoped =
+        match p_opt with
+        | Some (V6 ip) -> is_link_scoped ip.src || is_link_scoped ip.dst
+        | _ -> false in
     match target_routes ?in_iface:in_iface_opt
                         ?src_ip:src_opt ?dst_ip:dst_opt ?proto:proto_opt
                         ?src_port:src_port_opt ?dst_port:dst_port_opt t with
     | [] ->
-        (match in_iface_opt, ip_opt with
+        (match in_iface_opt, p_opt with
         | None, _ ->
             Log.(log t.widget.logger Warning (lazy "Cannot route my own packet"))
         | _, None ->
             Log.(log t.widget.logger Debug (lazy "Dropping non-routable non IP packet"))
-        | Some n, Some ip ->
+        | Some _, Some _ when link_scoped ->
+            Log.(log t.widget.logger Debug (lazy "No route match that link-scoped packet"))
+        | Some n, Some p ->
             Log.(log t.widget.logger Debug (lazy "No route match that packet")) ;
-            maybe_send_icmp t n ip Icmp.Pdu.make_host_unreachable)
+            maybe_send_icmp t n p No_route)
     | targets ->
         (* Forward the packet to that target: *)
         let forward = function
@@ -554,24 +647,28 @@ and route in_iface_opt t bits =
                                 tx iface.trx bits
                             )
                         ) frags
-                    | Error ip ->
+                    | Error p ->
                         Log.(log t.widget.logger Debug (lazy "Dropping a packet larger than the MTU")) ;
                         Option.may (fun n ->
-                            maybe_send_icmp t n ip
-                                Icmp.(Pdu.make_destination_unreachable
-                                    ~next_hop_mtu:iface.eth.mtu
-                                    Unreachable.fragmentation_needed)
+                            maybe_send_icmp t n p (Too_big iface.eth.mtu)
                         ) in_iface_opt in
-                (match in_iface_opt, ttl_opt with
-                | None, _ ->
+                (match in_iface_opt, ttl_opt, p_opt with
+                | None, _, _ ->
                     do_forward bits
-                | Some n, Some (0 | 1) ->
+                | Some _, _, _ when link_scoped ->
+                    Log.(log t.widget.logger Debug (lazy "Not forwarding a link-scoped packet"))
+                | Some _, _, Some (V6 ip) when unwelcome t ip ->
+                    Log.(log t.widget.logger Debug (lazy "Dropping a packet for its extension headers")) ;
+                    Metric.Counter.inc t.extension_dropped
+                                       ~now:(Simulation.Widget.now t.widget)
+                | Some n, Some (0 | 1), Some p ->
                     Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Expiring packet from %d" n))) ;
-                    let ip = Option.get ip_opt in
-                    maybe_send_icmp t n ip Icmp.Pdu.make_ttl_expired_in_transit
-                | Some _, Some _ ->
+                    maybe_send_icmp t n p Expired
+                | Some _, _, Some (V4 _) ->
                     do_forward (Ip.Pdu.decr_ttl bits)
-                | Some _, None ->
+                | Some _, _, Some (V6 _) ->
+                    do_forward (Ip6.Pdu.decr_hop_limit bits)
+                | Some _, _, None ->
                     do_forward bits)
             | Admin ->
                 (match in_iface_opt with
@@ -615,29 +712,29 @@ and route in_iface_opt t bits =
                 t.lb_cursor <- t.lb_cursor + 1 ;
                 forward targets.(n)
 
-(* The address the routing table gives interface [n]: the one an [Admin]
- * route names it by, since a route to the router itself is how the table
+(* The addresses the routing table gives interface [n]: those its [Admin]
+ * routes name it by, since a route to the router itself is how the table
  * says which address is the router's.
  *
  * The CIDR is read as the address and the netmask that goes with it, such
  * as 34.35.36.37/16, and not as the network 34.35.0.0/16. *)
 let my_addresses_of routes n =
-    List.find_map_opt (fun (r : Route.t) ->
+    List.filter_map (fun (r : Route.t) ->
         match r.dst_mask with
         | Some (addr, _test) ->
             if r.target = Admin &&
                (r.in_iface = None || r.in_iface = Some n) then
                 let prefix_len = Ip.Cidr.width addr
                 and addr = Ip.Cidr.subnet addr |> Ip.Addr.to_bitstring in
-                Some [ Eth.State.{ addr ; prefix_len } ]
+                Some Eth.State.{ addr ; prefix_len }
             else
                 None
         | _ -> None
     ) routes
 
-(* Give interface [n] the address its routing table names, and the host
- * that answers for it -- or take both away, when the table has stopped
- * naming one.
+(* Give interface [n] the addresses its routing table names, and the host
+ * that answers for them -- or take both away, when the table has stopped
+ * naming any.
  *
  * Called whenever the table is set and not only when the router is built,
  * because a router the catalogue builds arrives with an empty table: every
@@ -645,7 +742,7 @@ let my_addresses_of routes n =
  * errors from is one a later [routes] gave it. *)
 let configure_iface t n =
     let iface = t.ifaces.(n) in
-    let my_addresses = my_addresses_of t.routes n |? [] in
+    let my_addresses = my_addresses_of t.routes n in
     let same_addresses =
         List.equal Eth.State.my_address_equal
             my_addresses iface.eth.my_addresses in
@@ -788,7 +885,8 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
               widget ; notify_errs ; admin_reroute ;
               can_forward_after ; load_balancing ; lb_cursor = 0 ;
               buffer_capacity ; buffered ; refresh_pending = false ;
-              tail_dropped } in
+              tail_dropped ; drop_hop_by_hop = false ; drop_srh = false ;
+              extension_dropped = Metric.Counter.make () } in
     (* The reserves are taken from the start: *)
     Metric.Gauge.set buffered ~now:(Simulation.Widget.now widget)
                      (buffer_used t) ;
@@ -955,6 +1053,19 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
         metric_property "tail-dropped"
             ~descr:"Number of frames dropped due to memory constraints."
             (Metric.Counter.T t.tail_dropped) ;
+        property "drop hop-by-hop" ~kind:Bool
+            ~descr:"Drop the IPv6 packets to forward that have a hop-by-hop \
+                    options header, rather than forward them unchanged."
+            ~getter:(fun () -> `Bool t.drop_hop_by_hop)
+            ~setter:(fun v -> t.drop_hop_by_hop <- to_bool v) ;
+        property "drop segment routing" ~kind:Bool
+            ~descr:"Drop the IPv6 packets to forward that have a segment \
+                    routing header, rather than forward them unchanged."
+            ~getter:(fun () -> `Bool t.drop_srh)
+            ~setter:(fun v -> t.drop_srh <- to_bool v) ;
+        metric_property "extension-dropped"
+            ~descr:"Number of IPv6 packets dropped for their extension headers."
+            (Metric.Counter.T t.extension_dropped) ;
         property "tot ports" ~kind:Int ~descr:"Total number of ports."
             ~getter:(fun () -> `Int num_ifaces) ] ;
     let addressed () =
@@ -975,68 +1086,39 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
     ) t.ifaces ;
     t
 
-(* Assuming the network addresses are reachable from different ifaces of a
- * switch, output a trivial routing table that selects the output according
- * to the destination IP only.
- * Assume an admin interface on every network reachable without gateway. *)
+(* Assuming the networks are reachable from different ifaces of a switch,
+ * output a trivial routing table that selects the output according to the
+ * destination IP only. A network reached without a gateway and written with
+ * host bits set, such as 10.0.0.1/24, has that address as the router's
+ * own on that iface. *)
 let routes_of_addrs addrs =
-    (* The address of a directly reached network is ours when it has host
-     * bits set: *)
-    let is_my_address dest_ip mask addr =
-        addr = None &&
-        Ip.Addr.compare (Ip.Cidr.zero_addr (Ip.Cidr.of_netmask dest_ip mask))
-                        dest_ip <> 0 in
-    Array.fold_lefti (fun tbl i (gws, _) ->
-        List.fold_left (fun tbl (dest_ip, mask, addr) ->
-            (* First route: to reach that network: *)
-            let open Route in
-            let target = Forward { out_iface = i ;
-                                   via = addr } in
-            let cidr_test cidr = Some (cidr, Ip.Cidr.mem cidr) in
-            let route =
-                { in_iface = None ;
-                  src_mask = None ;
-                  (* [of_netmask] will clear non masked bits: *)
-                  dst_mask = cidr_test (Ip.Cidr.of_netmask dest_ip mask) ;
-                  ip_proto = None ;
-                  src_port = None ;
-                  dst_port = None ;
-                  target } in
-            let tbl = route :: tbl in
-            let tbl =
-                (* Second route: to the admin interface: *)
-                if is_my_address dest_ip mask addr then (
-                    { route with
-                        in_iface = Some i ;
-                        dst_mask = cidr_test Ip.Cidr.(single dest_ip) ;
-                        target = Admin } :: tbl
-                ) else tbl
-                in
-            tbl
-        ) tbl gws
+    let is_my_address cidr via =
+        via = None &&
+        Ip.Addr.compare (Ip.Cidr.zero_addr cidr) (Ip.Cidr.subnet cidr) <> 0 in
+    Array.fold_lefti (fun tbl i (nets, _) ->
+        List.fold_left (fun tbl (cidr, via) ->
+            let dst_mask =
+                Ip.Cidr.o (Ip.Cidr.zero_addr cidr, Ip.Cidr.width cidr) in
+            let tbl = Route.forward ~dst_mask ?via i :: tbl in
+            if is_my_address cidr via then
+                Route.admin ~in_iface:i (Ip.Cidr.subnet cidr) :: tbl
+            else tbl
+        ) tbl nets
     ) [] addrs |>
     List.rev
 (*$= routes_of_addrs & ~printer:string_of_int
-  2 (let a = Ip.Addr.of_string in \
-     List.length (routes_of_addrs \
-        [| [ a "10.0.0.1", a "255.255.255.0", None ], Eth.Addr.random () |]))
-  1 (let a = Ip.Addr.of_string in \
-     List.length (routes_of_addrs \
-        [| [ a "10.0.0.0", a "255.255.255.0", None ], Eth.Addr.random () |]))
-  2 (let a = Ip.Addr.of_string in \
-     List.length (routes_of_addrs \
-        [| [ a "2001:db8::1", a "ffff:ffff:ffff:ffff::", None ], \
-           Eth.Addr.random () |]))
+  2 (List.length (routes_of_addrs \
+        [| [ Ip.Cidr.of_string "10.0.0.1/24", None ], Eth.Addr.random () |]))
+  1 (List.length (routes_of_addrs \
+        [| [ Ip.Cidr.of_string "10.0.0.0/24", None ], Eth.Addr.random () |]))
+  4 (List.length (routes_of_addrs \
+        [| [ Ip.Cidr.of_string "10.0.0.1/24", None ; \
+             Ip.Cidr.of_string "2001:db8::1/64", None ], Eth.Addr.random () |]))
  *)
 
-(* [addrs] is an array (one entry for each iface of the router) of list of
- * networks reachable via this iface (as an Etx.Gateway.t, which has an
- * optional gateway addr).
- * The router address on each iface is given by the subnet address itself
- * (if it's not a mere network address with all masked bits zeroed, and
- * if no ethernet gateway is defined for this route).  *)
-(* [addrs] also, for each iface, has the MAC address of the router on that
- * iface. *)
+(* [addrs] is an array (one entry for each iface of the router) of the
+ * networks reachable via this iface, each with an optional gateway, and the
+ * MAC address of the router on that iface. *)
 let make_from_addrs
         ~parent ?notify_errs ?admin_reroute ?load_balancing ?delay ?loss
         addrs name =
@@ -1049,9 +1131,9 @@ let make_from_addrs
 (*$R make_from_addrs
     (* Suppose we have a router for these 3 networks: *)
     let addrs =
-        [| [ Ip.Addr.of_string "192.168.1.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
-           [ Ip.Addr.of_string "192.168.2.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
-           [ Ip.Addr.of_string "192.168.3.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () |] in
+        [| [ Ip.Cidr.of_string "192.168.1.254/24", None ], Eth.Addr.random () ;
+           [ Ip.Cidr.of_string "192.168.2.254/24", None ], Eth.Addr.random () ;
+           [ Ip.Cidr.of_string "192.168.3.254/24", None ], Eth.Addr.random () |] in
     let sim = Simulation.make ~realtime:false "test-router" in
     let router = make_from_addrs ~parent:sim.root addrs "test" in
 
@@ -1198,6 +1280,142 @@ let make_from_addrs
     Simulation.run sim false ;
     "a port can be silenced alone" @? (counts = [| 0;0;0 |]) ;
 *)
+
+(* IPv6 is forwarded with its hop limit one less, and never fragmented; what
+ * cannot be forwarded is reported with ICMPv6, from the receiving port's
+ * address. Link-scoped packets stay on their link, and the unwelcome
+ * extension headers can be dropped. *)
+(*$R make_from_addrs
+    let a = Ip.Addr.of_string in
+    let macs = [| Eth.Addr.random () ; Eth.Addr.random () |] in
+    let addrs = [| [ Ip.Cidr.of_string "2001:db8:1::fe/64", None ], macs.(0) ;
+                   [ Ip.Cidr.of_string "2001:db8:2::fe/64", None ], macs.(1) |] in
+    let sim = Simulation.make ~realtime:false "router-v6" in
+    let r = make_from_addrs ~parent:sim.root addrs "r" in
+    Simulation.run_startup sim ;
+    let src = a "2001:db8:1::1" and dst = a "2001:db8:2::1" in
+    Eth.State.set_neighbor r.ifaces.(0).eth (Ip.Addr.to_bitstring src)
+                           (Some (Eth.Addr.random ())) ;
+    Eth.State.set_neighbor r.ifaces.(1).eth (Ip.Addr.to_bitstring dst)
+                           (Some (Eth.Addr.random ())) ;
+    let out = Array.make 2 [] in
+    Array.iteri (fun i iface ->
+        iface.trx =-> sink (fun bits ->
+            match Eth.Pdu.unpack bits with
+            | Error _ -> ()
+            | Ok eth ->
+                match Ip6.Pdu.unpack (eth.payload :> bitstring) with
+                | Ok ip -> out.(i) <- ip :: out.(i)
+                | Error _ -> ())) r.ifaces ;
+    let send ?(ttl=9) ?(extensions=[]) ?(len=8) ?(src=src) dst =
+        Array.fill out 0 2 [] ;
+        Ip6.Pdu.make ~ttl ~extensions Ip.Proto.udp src dst
+                     (Bitstring.zeroes_bitstring (len * 8)) |>
+        Ip6.Pdu.pack |>
+        Eth.Pdu.make Arp.HwProto.ip6 (Eth.Addr.random ()) macs.(0) |>
+        Eth.Pdu.pack |>
+        Simulation.delay sim.root.power (Clock.Interval.msec 1.)
+                         r.ifaces.(0).trx.out.write ;
+        Simulation.run sim false in
+    let forwarded () =
+        match out with
+        | [| [] ; [ ip ] |] -> Some ip.Ip6.Pdu.ttl
+        | _ -> None in
+    (* The type, code and parameter of the one error sent back: *)
+    let error () =
+        match out with
+        | [| [ ip ] ; [] |] ->
+            assert_equal ~printer:Ip.Addr.to_string (a "2001:db8:1::fe") ip.src ;
+            (match Icmp6.Pdu.unpack (ip.payload :> bitstring) with
+            | Ok { msg_type ; payload = Err { param ; _ } } ->
+                Some Icmp6.MsgType.(type_of msg_type, code_of msg_type, param)
+            | _ -> None)
+        | _ -> None in
+    let nothing () = out = [| [] ; [] |] in
+    send dst ;
+    assert_equal (Some 8) (forwarded ()) ;
+    send ~ttl:1 dst ;
+    assert_equal (Some (3, 0, 0)) (error ()) ;
+    send (a "2001:db8:3::1") ;
+    assert_equal (Some (1, 0, 0)) (error ()) ;
+    send ~len:1500 dst ;
+    assert_equal (Some (2, 0, 1500)) (error ()) ;
+    send (a "ff02::1") ;
+    "link-scoped destination" @? nothing () ;
+    send ~src:(a "fe80::1") dst ;
+    "link-scoped source" @? nothing () ;
+    let hbh = [ Ip6.Extension.(pad (Hop_by_hop [])) ]
+    and srh = [ Ip6.Extension.(pad (Routing (Routing.Srh {
+                    segments_left = 1 ; flags = 0 ; tag = 0 ;
+                    segments = [ a "2001:db8:2::2" ; dst ] ; tlvs = [] }))) ] in
+    send ~extensions:hbh dst ;
+    assert_equal (Some 8) (forwarded ()) ;
+    send ~extensions:srh dst ;
+    assert_equal (Some 8) (forwarded ()) ;
+    r.drop_hop_by_hop <- true ;
+    send ~extensions:hbh dst ;
+    "hop-by-hop dropped" @? nothing () ;
+    send ~extensions:srh dst ;
+    assert_equal (Some 8) (forwarded ()) ;
+    r.drop_srh <- true ;
+    send ~extensions:srh dst ;
+    "segment routing dropped" @? nothing () ;
+    assert_equal ~printer:string_of_int 2 (Metric.Counter.get r.extension_dropped)
+ *)
+
+(* Dual-stack hosts on two subnets talk through a dual-stack router, which
+ * answers for its address on their side. *)
+(*$R make_from_addrs
+    let a = Ip.Addr.of_string and c = Ip.Cidr.of_string in
+    let sim = Simulation.make ~realtime:false "router-dual-stack" in
+    let r =
+        make_from_addrs ~parent:sim.root
+            [| [ c "10.0.1.254/24", None ; c "2001:db8:1::fe/64", None ],
+               Eth.Addr.random () ;
+               [ c "10.0.2.254/24", None ; c "2001:db8:2::fe/64", None ],
+               Eth.Addr.random () |] "r" in
+    let host n =
+        let gateways =
+            [ Eth.State.gw_selector (),
+              Some (Eth.Gateway.Ip (a (Printf.sprintf "10.0.%d.254" n))) ;
+              Eth.State.gw_selector ~v6:true (),
+              Some (Eth.Gateway.Ip (a (Printf.sprintf "2001:db8:%d::fe" n))) ] in
+        let h =
+            Host.make ~parent:sim.root ~gateways
+                ~static_ip:(a (Printf.sprintf "10.0.%d.1" n))
+                ~netmask:(a "255.255.255.0")
+                ~addresses:[ c (Printf.sprintf "2001:db8:%d::1/64" n) ]
+                ("h" ^ string_of_int n) in
+        let st = Eth.Cable.State.make ~parent:sim.root
+                                      ~name:("c" ^ string_of_int n) () in
+        Eth.Cable.plug st (h.trx.widget, 0) (r.widget, n - 1) ;
+        h in
+    let h1 = host 1 and h2 = host 2 in
+    Simulation.run_startup sim ;
+    let port = Tcp.Port.o 7 in
+    h2.trx.tcp_server_start port (fun (cnx : Tcp.TRX.tcp_trx) ->
+        cnx.trx.ins --> sink (fun bits ->
+            if Bitstring.bitstring_length bits > 0 then tx cnx.trx bits)) ;
+    let echoed dst =
+        let got = ref 0 in
+        h1.trx.tcp_connect (Host.Ip (a dst)) port (function
+            | None -> ()
+            | Some (cnx : Tcp.TRX.tcp_trx) ->
+                cnx.trx.ins --> sink (fun bits ->
+                    got := !got + Bitstring.bitstring_length bits / 8) ;
+                tx cnx.trx (Bitstring.zeroes_bitstring (3000 * 8))) ;
+        Simulation.run sim false ;
+        !got in
+    assert_equal ~printer:string_of_int 3000 (echoed "2001:db8:2::1") ;
+    assert_equal ~printer:string_of_int 3000 (echoed "10.0.2.1") ;
+    let replies = ref [] in
+    Hashtbl.add h1.echo_waiters 7 (fun seq -> replies := seq :: !replies) ;
+    h1.trx.ping ~id:7 ~seq:1 (Host.Ip (a "2001:db8:1::fe")) ;
+    h1.trx.ping ~id:7 ~seq:2 (Host.Ip (a "2001:db8:2::1")) ;
+    Simulation.run sim false ;
+    assert_equal ~printer:(IO.to_string (List.print Int.print))
+        [ 1 ; 2 ] (List.sort Int.compare !replies)
+ *)
 
 (* An interface with no address of its own gets no admin host, so nothing
  * else would clear what its adapter learnt when the box is switched off. *)

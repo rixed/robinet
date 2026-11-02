@@ -451,7 +451,7 @@ under:
 | tap | | *none* |
 | policer | `""` | `max packets`, `max volume`, `max duration`, `max packet rate`, `max throughput`, `max syns`, `max syn rate`; the flags `max packets reached`, `max volume reached`, `max syns reached`, `expired` (which are only reset); and, read only, `start`, `packets`, `volume`, `syns`, `elapsed` |
 | firewall | `""` | `inside rules`, `outside rules`, `uninspectable`, `MAC` |
-| router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin`, `buffer capacity` |
+| router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin`, `buffer capacity`, `drop hop-by-hop`, `drop segment routing` |
 | | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay` |
 | | `#0/admin@0`… | `hostname`, `search suffix`, `prefer IPv6` — the stack answering for the address that interface holds |
 | gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
@@ -494,7 +494,16 @@ A router's interface also has `link fragmentation`, on unless set otherwise: an
 IPv4 packet longer than the interface's MTU leaves in fragments, unless it says
 not to fragment it. One that is not fragmented, either way, is dropped and
 reported with an ICMP *fragmentation needed* giving that MTU — as the router's
-`errors probability` allows, which at 0 makes it a silent black hole.
+`errors probability` allows, which at 0 makes it a silent black hole. An IPv6
+packet is never fragmented, and is reported with an ICMPv6 *packet too big*.
+
+IPv6 is routed as IPv4 is, its hop limit standing for the TTL and its errors
+reported with ICMPv6, except for link-local addresses and link-scoped
+multicast, which are never forwarded. A router's `drop hop-by-hop` and `drop
+segment routing`, off unless set, drop silently the IPv6 packets to forward
+that carry a hop-by-hop options header or a segment routing header, as many
+networks do; counted under `extension-dropped`. Otherwise they are forwarded
+unchanged, their options left unread.
 
 A router's interface also has its own `errors probability` and `errors delay`,
 1 and 0 unless set otherwise. An error about a packet that came in through
@@ -543,8 +552,8 @@ of the tests may be `null`, which is no test at all:
 | field | |
 | --- | --- |
 | `input port` | Only packets that came in there. |
-| `src mask`, `dst mask` | CIDR the address must fall in. |
-| `ip proto` | 0…255 (6 TCP, 17 UDP, 1 ICMP). |
+| `src mask`, `dst mask` | CIDR the address must fall in, IPv4 or IPv6. |
+| `ip proto` | 0…255 (6 TCP, 17 UDP, 1 ICMP, 58 ICMPv6), past IPv6 extension headers. |
 | `src port`, `dst port` | `"80"`, `"1024-65535"`, `"1024-"`, `"-1023"`. |
 | `output port` | Where it goes… |
 | `via` | …and through which gateway, as an IP or a MAC. `null` for directly. |
@@ -556,9 +565,9 @@ destination several times, once per outgoing link, and that is how a router is
 given more than one way there.
 
 **`"output port": null` is not a route to nowhere: it is a route to the router
-itself** — and it is where a router gets its address. The first such row that
+itself** — and it is where a router gets its addresses. The first such row that
 applies to an interface gives that interface the address *and the netmask* of
-its `dst mask`. So `"dst mask": "10.0.1.1/24"` with `"input port": 0` makes
+its `dst mask`, and each further one another address, of either family. So `"dst mask": "10.0.1.1/24"` with `"input port": 0` makes
 interface 0 answer for 10.0.1.1 and treat 10.0.1.0/24 as directly reachable,
 while `"10.0.1.1/32"` would make it answer for the same address and need a
 `via` to reach anything at all. That is the shape to use between routers, where

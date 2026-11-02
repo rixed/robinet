@@ -54,21 +54,13 @@ let forward_traffic (widget : Widget.t) ifname input_dev =
  * Hosts must have been created beforehand with as many interfaces as
  * required. *)
 let make_router parent name interfaces router_specs delays err_delays losses err_losses lb_configs =
-    let addr_of_interface ?via cidr =
-        (* [make_from_addrs] wants ip address, ip mask and MAC: *)
-        match String.split ~by:"/" cidr with
-        | exception Not_found ->
-            failwith ("Invalid CIDR "^ cidr)
-        | my_ip, _ ->
-            let dest_ip = Ip.Addr.of_string my_ip in
-            let mask = Ip.Cidr.(of_string cidr |> to_netmask) in
-            dest_ip, mask, via in
+    let addr_of_interface ?via cidr = Ip.Cidr.of_string cidr, via in
     (* Store all routes in a hash indexed by destination CIDR (as a string), with
      * values = the output MAC (aka iface of that router, the depth of that route,
      * then the route itself.
      * Later this hash is going to be converted into the array of lists as required
      * by [Router.make_from_addrs]. *)
-    let tbl : (Ip.Cidr.t, (Eth.Addr.t * int * (Ip.Addr.t * Ip.Addr.t * Eth.Gateway.t option))) Hashtbl.t = Hashtbl.create 10 in
+    let tbl : (Ip.Cidr.t, (Eth.Addr.t * int * (Ip.Cidr.t * Eth.Gateway.t option))) Hashtbl.t = Hashtbl.create 10 in
     List.iter (fun (mac, lan_cidr, peer_routers) ->
         let depth = 1 in
         let lan_cidr' = Ip.Cidr.of_string lan_cidr in
@@ -129,12 +121,11 @@ let make_router parent name interfaces router_specs delays err_delays losses err
     Printf.printf "tbl=\n%a\n%!"
         (Hashtbl.print
             Ip.Cidr.printf
-            (fun oc (mac, depth, (ip, mask, via)) ->
-                Printf.fprintf oc "mac=%a, depth=%d, dest %a/%a via %a"
+            (fun oc (mac, depth, (cidr, via)) ->
+                Printf.fprintf oc "mac=%a, depth=%d, dest %a via %a"
                     Eth.Addr.printf mac
                     depth
-                    Ip.Addr.printf ip
-                    Ip.Addr.printf mask
+                    Ip.Cidr.printf cidr
                     (Option.print Eth.Gateway.print) via)) tbl ;
     let lst =
         List.map (fun (mac, _lan_cidr, _peer_routers) ->

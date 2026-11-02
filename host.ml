@@ -198,19 +198,7 @@ let my_addresses t =
 let is_mine t ip =
     List.exists (fun (a, _) -> Ip.Addr.compare a ip = 0) (my_addresses t)
 
-(* The address to reach [dst] from, of its family: one on its subnet, or else
- * one that is not link-local, or else any. *)
-let src_for t dst =
-    let same =
-        List.filter (fun (a, _) -> Ip.Addr.is_v6 a = Ip.Addr.is_v6 dst)
-                    (my_addresses t) in
-    let dst_bits = Ip.Addr.to_bitstring dst in
-    match List.find_opt (fun (_, m) -> Eth.State.on_subnet m dst_bits) same with
-    | Some (a, _) -> Some a
-    | None ->
-        match List.find_opt (fun (a, _) -> not (Ip.Addr.is_link_local a)) same with
-        | Some (a, _) -> Some a
-        | None -> (match same with (a, _) :: _ -> Some a | [] -> None)
+let src_for t dst = Eth.State.src_for t.eth_state dst
 
 let print oc trx = String.print oc trx.widget.name
 

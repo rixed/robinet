@@ -886,6 +886,22 @@ struct
 
     let on_my_subnet t addr =
         List.exists (fun my_addr -> on_subnet my_addr addr) t.my_addresses
+
+    (* The address to reach [dst] from, of its family: one on its subnet, or
+     * else one that is not link-local, or else any. *)
+    let src_for t dst =
+        let same =
+            List.filter_map (fun my_addr ->
+                let a = Ip.Addr.of_bitstring my_addr.addr in
+                if Ip.Addr.is_v6 a = Ip.Addr.is_v6 dst then Some (a, my_addr)
+                else None) t.my_addresses in
+        let dst_bits = Ip.Addr.to_bitstring dst in
+        match List.find_opt (fun (_, m) -> on_subnet m dst_bits) same with
+        | Some (a, _) -> Some a
+        | None ->
+            match List.find_opt (fun (a, _) -> not (Ip.Addr.is_link_local a)) same with
+            | Some (a, _) -> Some a
+            | None -> (match same with (a, _) :: _ -> Some a | [] -> None)
     (*$T on_subnet
       let a = make_my_ip_address ~prefix_len:24 (Ip.Addr.of_string "10.0.0.1") \
       and b = make_my_ip_address ~prefix_len:64 (Ip.Addr.of_string "2001:db8::1") in \
