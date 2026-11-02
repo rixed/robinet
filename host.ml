@@ -105,6 +105,14 @@ and udp_server = {
     mutable udp_peers : sock_key list ;
 }
 
+(* A name being resolved: the types of records still awaited, the addresses
+   the others brought, and who waits for them. *)
+and dns_query = {
+    mutable awaited : Dns.QType.t list ;
+    mutable found : Ip.Addr.t list ;
+    mutable waiters : (Ip.Addr.t list option -> unit) list ;
+    stop : Metric.Timed.stop_func }
+
 and t = {
     mutable trx : host_trx ;
     eth_state   : Eth.State.t ;
@@ -143,7 +151,9 @@ and t = {
     mutable leased_search_sfx : string option ;
     mutable leased_host_name : string option ;
     mutable resolv_trx : trx option ;
-    dns_queries : (string, ((Ip.Addr.t list option -> unit) * Metric.Timed.stop_func option)) Hashtbl.t ;
+    (* Whether resolved IPv6 addresses come before IPv4 ones: *)
+    mutable prefer_v6 : bool ;
+    dns_queries : (string, dns_query) Hashtbl.t ;
     dns_cache   : (string, Ip.Addr.t list) Hashtbl.t ;
     resolutions : Metric.Timed.t ;
     (* Who is waiting for an ICMP echo reply.
@@ -403,41 +413,58 @@ let connect_from t cont connect dst_ip =
             "No address to reach %s from" (Ip.Addr.to_string dst_ip)))) ;
         cont None
 
+(* The record types to ask for: those of the families this host has an
+ * address of, the preferred one first. *)
+let dns_qtypes t =
+    let has v6 = List.exists (fun (a, _) -> Ip.Addr.is_v6 a = v6) (my_addresses t) in
+    let qtypes = (if has true then [ Dns.QType.aaaa ] else []) @
+                 (if has false then [ Dns.QType.a ] else []) in
+    if t.prefer_v6 then qtypes else List.rev qtypes
+
+(* Hand the waiters of [q] the addresses found, of the preferred family
+ * first, or [None] if none was. Only a query answered for every type is
+ * cached. *)
+let finish_query t name q =
+    Hashtbl.remove t.dns_queries name ;
+    let complete = q.awaited = [] in
+    let now = Simulation.Widget.now t.trx.widget in
+    q.stop ~now Metric.(Params.singleton "status"
+                            (Param.String (if complete then "ok" else "timeout"))) ;
+    let v6, v4 = List.partition Ip.Addr.is_v6 (List.rev q.found) in
+    let ips = if t.prefer_v6 then v6 @ v4 else v4 @ v6 in
+    if complete then (
+        if Hashtbl.length t.dns_cache > 10 then Hashtbl.clear t.dns_cache ; (* FIXME *)
+        Hashtbl.replace t.dns_cache name ips
+    ) ;
+    let res = if complete || ips <> [] then Some ips else None in
+    Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Awakening %d clients that were waiting for the address of '%s'" (List.length q.waiters) name))) ;
+    List.iter (fun cont -> cont res) (List.rev q.waiters)
+
+let dns_recv t _trx bits =
+    match Dns.Pdu.unpack bits with
+    | Error s ->
+        Log.(log t.trx.widget.logger Warning s)
+    | Ok pdu ->
+        Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Received DNS %s, opcode %d" (if pdu.Dns.Pdu.is_query then "query" else "response") pdu.Dns.Pdu.opcode))) ;
+        match pdu.Dns.Pdu.questions with
+        | [ name, qtype, qclass ] when not pdu.is_query &&
+                                       pdu.opcode = Dns.std_query (* status? *) &&
+                                       qclass = Dns.qclass_inet ->
+            Hashtbl.find_option t.dns_queries name |>
+            Option.may (fun q ->
+                if List.mem qtype q.awaited then (
+                    (* TODO: use the CNAME results to feed the cache? *)
+                    List.iter (fun (_name, rr_type, rr_class, _ttl, data) ->
+                        if rr_class = Dns.qclass_inet && rr_type = qtype then
+                            match Ip.Addr.of_bitstring (bitstring_of_bytes data) with
+                            | exception _ -> ()
+                            | ip -> q.found <- ip :: q.found
+                    ) pdu.answer_rrs ;
+                    q.awaited <- List.remove q.awaited qtype ;
+                    if q.awaited = [] then finish_query t name q))
+        | _ -> () (* Else the waiters will eventually be timeouted *)
+
 let rec with_resolver_trx t cont =
-    let dns_recv _trx bits = (match Dns.Pdu.unpack bits with
-        | Error s ->
-            Log.(log t.trx.widget.logger Warning s)
-        | Ok pdu ->
-            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Received DNS %s, opcode %d" (if pdu.Dns.Pdu.is_query then "query" else "response") pdu.Dns.Pdu.opcode))) ;
-            if not pdu.Dns.Pdu.is_query &&
-               pdu.Dns.Pdu.opcode = Dns.std_query (* status? *) &&
-               List.length pdu.Dns.Pdu.questions = 1
-            then (
-                let name, qtype, qclass = List.hd pdu.Dns.Pdu.questions in
-                if qtype = Dns.QType.a && qclass = Dns.qclass_inet then (
-                    (* TODO: use the A and CNAME results to feed the cache? *)
-                    let ips =
-                        List.filter_map (fun (_name, qtype, qclass, _ttl, data) ->
-                            if qclass = Dns.qclass_inet && qtype = Dns.QType.a then
-                                Some (Ip.Addr.of_bitstring (bitstring_of_bytes data))
-                            else None
-                        ) pdu.Dns.Pdu.answer_rrs in
-                    let conts = Hashtbl.find_all t.dns_queries name in
-                    Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Awakening %d clients that were waiting for the address of '%s'" (List.length conts) name))) ;
-                    List.iter (fun (cont, timer_stop_opt) ->
-                        Option.may (fun f ->
-                            let now = Simulation.Widget.now t.trx.widget in
-                            f ~now Metric.(Params.singleton "status" (Param.String "ok"))
-                        ) timer_stop_opt ;
-                        cont (Some ips)) conts ;
-                    Hashtbl.remove_all t.dns_queries name ;
-                    (* cache the result *)
-                    if Hashtbl.length t.dns_cache > 10 then Hashtbl.clear t.dns_cache ; (* FIXME *)
-                    Hashtbl.add t.dns_cache name ips
-                )
-            ) (* Else the waiters will eventually be timeouted *)
-        )
-    in
     match t.resolv_trx, cur_nameserver t with
     | Some trx, _    ->
         Log.(log t.trx.widget.logger Debug (lazy "Use previous resolver trx")) ;
@@ -447,7 +474,7 @@ let rec with_resolver_trx t cont =
         cont None
     | None, Some srv ->
         Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Create a resolving TRX to DNS %s" (Ip.Addr.to_string srv)))) ;
-        udp_connect t (Ip srv) (Udp.Port.o 53) ~src_port:(Udp.Port.o 53) dns_recv (function
+        udp_connect t (Ip srv) (Udp.Port.o 53) ~src_port:(Udp.Port.o 53) (dns_recv t) (function
         | None -> cont None
         | Some (trx : Udp.TRX.udp_trx) ->
             t.resolv_trx <- Some trx.trx ;
@@ -466,51 +493,41 @@ and do_gethostbyname t name cont =
     let is_complete n = is_fqdn n || String.exists n "." in
     let name = match cur_search_sfx t with
     | Some sfx ->
-        (* send the query using host IPv4 stack, with as recv a decoding function *)
         if is_complete name then name else name ^ "." ^ sfx
     | None -> name in
     let name = if is_fqdn name then name else name ^ "." in
-    let dns_timeout () = (* use the name redefined above *)
-        let conts = Hashtbl.find_all t.dns_queries name in
-        let num_conts = List.length conts in
-        if num_conts > 0 then (
-            Log.(log t.trx.widget.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" num_conts name))) ;
-            (* Metric.Atomic.fire resolution_timeouts ; *)
-            List.iter (fun (cont, timer_stop_opt) ->
-                Option.may (fun f ->
-                    let now = Simulation.Widget.now t.trx.widget in
-                    f ~now (Metric.Params.singleton "status" (Metric.Param.String "timeout"))
-                ) timer_stop_opt ;
-                cont None) conts ;
-            Hashtbl.remove_all t.dns_queries name
-        ) in
     (* Try to find the IP in the cache *)
     match Hashtbl.find_option t.dns_cache name with
         | Some ips ->
             (* Metric.Atomic.fire resolution_cachehits ; *)
             cont (Some ips)
         | None ->
-            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Start resolver..."))) ;
-            with_resolver_trx t (function
+            match Hashtbl.find_option t.dns_queries name with
+            | Some q ->
+                Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (one was already pending)" name))) ;
+                q.waiters <- cont :: q.waiters
             | None ->
-                cont None
-            | Some resolv_trx ->
-                let pending = Hashtbl.mem t.dns_queries name in
-                Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (%s)" name (if pending then "one was already pending" else "first one")))) ;
-                if not pending then (
-                    (* add a timeout event that will awake all waiters for this name after some time *)
-                    Simulation.delay t.trx.widget.power
-                                     dns_timeout_delay dns_timeout () ;
-                    (* Then actually sends the query *)
+                Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Start resolver..."))) ;
+                with_resolver_trx t (function
+                | None ->
+                    cont None
+                | Some resolv_trx ->
                     let now = Simulation.Widget.now t.trx.widget in
                     let params = Metric.(Params.singleton "name" (Param.String name)) in
-                    let stop = Metric.Timed.start ~now ~params t.resolutions in
-                    Hashtbl.add t.dns_queries name (cont, Some stop) ;
-                    Dns.Pdu.make_query name |> Dns.Pdu.pack |> tx resolv_trx
-                ) else (
-                    Hashtbl.add t.dns_queries name (cont, None)
-                )
-            )
+                    let q = { awaited = dns_qtypes t ; found = [] ; waiters = [ cont ] ;
+                              stop = Metric.Timed.start ~now ~params t.resolutions } in
+                    Hashtbl.add t.dns_queries name q ;
+                    (* Whoever waits for this name then is woken up with what
+                       was found so far: *)
+                    Simulation.delay t.trx.widget.power dns_timeout_delay (fun () ->
+                        match Hashtbl.find_option t.dns_queries name with
+                        | Some q' when q' == q ->
+                            Log.(log t.trx.widget.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" (List.length q.waiters) name))) ;
+                            finish_query t name q
+                        | _ -> ()) () ;
+                    List.iter (fun qtype ->
+                        Dns.Pdu.make_query ~qtype name |> Dns.Pdu.pack |> tx resolv_trx
+                    ) q.awaited)
 
 and tcp_connect t dst ?src_port ?snd_buf ?rcv_buf (dst_port : Tcp.Port.t) cont =
     (* Fail if we do not have an IP yet *)
@@ -1237,6 +1254,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
         leased_search_sfx = None ;
         leased_host_name = None ;
         resolv_trx    = None ;
+        prefer_v6     = true ;
         search_sfx    = search_sfx ;
         dns_queries   = Hashtbl.create 3 ;
         dns_cache     = Hashtbl.create 3 ;
@@ -1301,6 +1319,11 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
             ~descr:"Search suffix (a DHCP lease may override it)."
             ~getter:(fun () -> `String (cur_search_sfx t |? ""))
             ~setter:(fun v -> t.search_sfx <- match to_string v with "" -> None | s -> Some s) ;
+        property "prefer IPv6" ~kind:Bool
+            ~descr:"Whether a name with addresses of both families is reached \
+                    at its IPv6 one."
+            ~getter:(fun () -> `Bool t.prefer_v6)
+            ~setter:(fun v -> t.prefer_v6 <- to_bool v) ;
         metric_property "DNS resolutions" ~descr:"DNS resolution times."
             (Metric.Timed.T t.resolutions) ] ;
     (* What this host does when its supply is switched: boot, and forget what

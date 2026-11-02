@@ -152,3 +152,36 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
     Simulation.run sim false ;
     assert_bool "Client got popo's IP" !got_ip
  *)
+
+(* A dual-stack client asks for both families, of a server reached over
+ * IPv6, and gets its preferred one first. *)
+(*$R serve
+    let sim = Simulation.make ~realtime:false "test-named-v6" in
+    let a s = Ip.Addr.of_string s in
+    let host ?nameserver n =
+        Host.make ~parent:sim.root ?nameserver
+                  ~static_ip:(a ("10.0.0." ^ n)) ~netmask:(a "255.255.255.0")
+                  ~addresses:[ Ip.Cidr.of_string ("2001:db8::" ^ n ^ "/64") ]
+                  ("h" ^ n) in
+    let srv = host "1" in
+    let st = State.make ~parent:sim.root (function
+        | "v4" -> Some (a "10.0.0.9")
+        | "v6" -> Some (a "2001:db8::9")
+        | _ -> None) in
+    serve st srv.trx ;
+    let clt = host ~nameserver:(a "2001:db8::1") "2" in
+    let c = Eth.Cable.State.make ~parent:sim.root ~name:"c" () in
+    Eth.Cable.plug c (srv.trx.widget, 0) (clt.trx.widget, 0) ;
+    Simulation.run_startup sim ;
+    let resolve name =
+        let res = ref None in
+        clt.trx.gethostbyname name (fun ips -> res := ips) ;
+        Simulation.run sim false ;
+        Option.map (List.map Ip.Addr.to_string) !res in
+    let printer = function
+        | None -> "None"
+        | Some l -> String.concat "," l in
+    assert_equal ~printer (Some [ "2001:db8::9" ]) (resolve "v6") ;
+    assert_equal ~printer (Some [ "10.0.0.9" ]) (resolve "v4") ;
+    assert_equal ~printer (Some []) (resolve "nope")
+ *)

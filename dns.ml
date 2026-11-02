@@ -130,7 +130,7 @@ struct
 
     let make_query =
         let id = ref 0 in
-        (fun name ->
+        (fun ?(qtype=QType.a) name ->
             let name = fqdn name in
             incr id ;
             { id = !id ; is_query = true ; opcode = std_query ;
@@ -138,7 +138,7 @@ struct
               rec_desired = true ; rec_avlb = false ;
               authentic_data = false ; checking_disabled = true ;
               status = 0 ;
-              questions = [ name, QType.a, qclass_inet ] ;
+              questions = [ name, qtype, qclass_inet ] ;
               answer_rrs = [] ; authority_rrs = [] ; additional_rrs = [] })
 
     let make_answer id questions answer_rrs =

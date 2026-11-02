@@ -160,7 +160,7 @@ is configured statically; with neither it goes looking for a DHCP server.
 | `netmask` | optional string | `"255.255.255.0"` | What it can reach without a gateway. A DHCP client is told by its lease and has this only to fall back on. |
 | `addresses` | list of strings | `[]` | Its other addresses, of either family, each with its prefix length: `["2001:db8::1/64"]`. One without is alone on its subnet. |
 | `gateway` | optional string | `null` | Where to send what is not on its subnets, for the family of that gateway. Both families need the adapter's `gateways`. |
-| `nameserver` | optional string | `null` | Which DNS server to ask. |
+| `nameserver` | optional string | `null` | Which DNS server to ask, of either family. It is asked for the addresses of the families the host has one of. |
 | `search suffix` | optional string | `null` | Appended to the names it resolves. |
 | `MAC` | optional string | `null` | Drawn at random when left out. |
 
@@ -443,7 +443,7 @@ under:
 
 | device | path | properties |
 | --- | --- | --- |
-| host | `""` | `static-ip`, `static-netmask`, `addresses`, `nameserver`, `hostname`, `search suffix` |
+| host | `""` | `static-ip`, `static-netmask`, `addresses`, `nameserver`, `hostname`, `search suffix`, `prefer IPv6` |
 | | `eth` | *its adapter* |
 | switch | `""` | `cut-through` |
 | | `#0`… | *its ports* |
@@ -453,7 +453,7 @@ under:
 | firewall | `""` | `inside rules`, `outside rules`, `uninspectable`, `MAC` |
 | router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin`, `buffer capacity` |
 | | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay` |
-| | `#0/admin@0`… | `hostname`, `search suffix` — the stack answering for the address that interface holds |
+| | `#0/admin@0`… | `hostname`, `search suffix`, `prefer IPv6` — the stack answering for the address that interface holds |
 | gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
 | | `nat` | `min port`, `port forwards`, `NAT pings`, `send errors`, `answer pings` |
 | | `srv`, `srv/eth` | *the host it serves DHCP and DNS from* |
