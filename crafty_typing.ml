@@ -1030,8 +1030,16 @@ let bridged base ws =
     and bridge base w =
         let max = if base = [] then 5 else 1 in
         let rec search depth paths =
-            match List.filter_map (fun (path, base) ->
-                      Option.map (fun stack -> List.rev path, stack) (on base w)) paths with
+            let found =
+                List.filter_map (fun (path, base) ->
+                    Option.map (fun stack -> List.rev path, stack) (on base w)) paths in
+            (* Of a way through IP and one through IP6, the first: *)
+            let found =
+                match List.filter (fun (path, _) ->
+                          not (List.exists (fun (l, _) -> l == L.ip6) path)) found with
+                | [ _ ] as v4 when List.length found = 2 -> v4
+                | _ -> found in
+            match found with
             | [ found ] -> Some found
             | _ :: _ -> None
             | [] when depth >= max -> None
@@ -2061,17 +2069,18 @@ and stack_layers ~hint env base over (layers : A.layer list) =
                 ) tl.layer.fields ;
             (* The type and code of ICMP are those of the message on top, but
              * for Raw: *)
-            if tl.layer == L.icmp then
+            if tl.layer == L.icmp || tl.layer == L.icmp6 then
+                let name = L.to_string tl.layer in
                 match List.nth_opt tls (j + 1) with
                 | Some up when up.layer == L.raw ->
                     if j >= n && not (List.exists (fun (i, _) ->
                                          tl.layer.fields.(i).name = "type") tl.options) then
-                        error tl.layer_loc "ICMP needs a type, with Raw on top"
+                        error tl.layer_loc "%s needs a type, with Raw on top" name
                 | Some up ->
                     List.iter (fun (i, (e : expr)) ->
-                        error e.loc "The %s of ICMP is that of the %s on top: \
+                        error e.loc "The %s of %s is that of the %s on top: \
                                      it can be set only with Raw on top"
-                            tl.layer.fields.(i).name (L.to_string up.layer)) tl.options
+                            tl.layer.fields.(i).name name (L.to_string up.layer)) tl.options
                 | None -> ()) tls ;
         base, tls, n
 
@@ -2608,9 +2617,9 @@ let denied_literals ~local ~remote ~mac (b : block) =
         and r = if quoted then "Quoted destination" else "Destination" in
         List.iter (fun (i, e) ->
             match l.layer.L.name, l.layer.L.fields.(i).L.name, e.desc with
-            | A.Layer_name.IP, "src", Lit (A.Ip a) ->
+            | (A.Layer_name.IP | IP6), "src", Lit (A.Ip a) ->
                 ip e (q ^" address") (if quoted then remote else local) a
-            | A.Layer_name.IP, "dst", Lit (A.Ip a) ->
+            | (A.Layer_name.IP | IP6), "dst", Lit (A.Ip a) ->
                 ip e (r ^" address") (if quoted then local else remote) a
             | A.Layer_name.Eth, "src", Lit (A.Mac m) ->
                 Option.may (fun mac ->
@@ -2983,8 +2992,8 @@ let check_patterns (ps : A.patterns) =
   "x: int" (types "if 1 { wait 1s }\nx = 1\nif x > 0 { print(\"a\") } else { x := 2 }")
   "x: ip, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, b: {data: byte[], length: int}, y: byte[]" \
     (types "expect /IP { x = case MATCH[1] IP { MATCH[IP].src } | else { 0.0.0.0 }\n  case var=b MATCH[2] Raw { y = b.data } }")
-  "x: int, I: {dst: mac, length: int, proto: int, src: mac, ts: time}, I: {code: int, length: int, type: int}, I: {id: int, length: int}, I: {payload: byte[], seq: int}, I: {payload: byte[], seq: int}, I: {code: int, length: int, mtu: int}, I: {code: int, length: int}, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, I: {checksum: int, dst: int, length: int, src: int}, I: {ack_num: int, checksum: int, dst: int, flags: int, length: int, mss: int, options: byte[], sack_ok: bool, seq_num: int, src: int, ts_ecr: int, ts_val: int, urg_ptr: int, win_size: int, wscale: int}, I: {id: int, length: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {data: byte[], length: int}" \
-    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } }")
+  "x: int, I: {dst: mac, length: int, proto: int, src: mac, ts: time}, I: {code: int, length: int, type: int}, I: {id: int, length: int}, I: {payload: byte[], seq: int}, I: {payload: byte[], seq: int}, I: {code: int, length: int, mtu: int}, I: {code: int, length: int}, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, I: {checksum: int, dst: int, length: int, src: int}, I: {ack_num: int, checksum: int, dst: int, flags: int, length: int, mss: int, options: byte[], sack_ok: bool, seq_num: int, src: int, ts_ecr: int, ts_val: int, urg_ptr: int, win_size: int, wscale: int}, I: {id: int, length: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {data: byte[], length: int}, I: {dst: ip, flow_label: int, hop_limit: int, is_fragment: bool, length: int, proto: int, src: ip, traffic_class: int}, I: {code: int, length: int, type: int}, I: {code: int, length: int, mtu: int}" \
+    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } | IP6 { 14 } | ICMP6 { 15 } | PacketTooBig { 16 } }")
   "x: int, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, y: int" \
     (types "expect /IP { x = case MATCH[1] IP { wait 1s\n  1 } | else { 2 }\n  y = { expect Raw {}\n  3 } }")
 *)
@@ -3300,16 +3309,16 @@ let check_patterns (ps : A.patterns) =
     (types "on for=1s linger=1s /IP {}")
   "line 1, column 6: The subject of case must be a variant, such as a layer of a packet, not an int" \
     (types "case 3 IP {}")
-  "line 1, column 36: Foo is none of Answer, DNS, DestUnreachable, Echo, Eth, ICMP, IP, Query, Raw, Reply, Request, TCP, TimeExceeded, UDP" \
+  "line 1, column 36: Foo is none of Answer, DNS, DestUnreachable, Echo, Eth, ICMP, ICMP6, IP, IP6, PacketTooBig, Query, Raw, Reply, Request, TCP, TimeExceeded, UDP" \
     (types "expect /IP { case MATCH[0] IP {} | Foo {} }")
   "line 1, column 36: IP already has a block in this case" \
     (types "expect /IP { case MATCH[0] IP {} | ip {} }")
-  "line 1, column 18: This case needs an else, or a block for each of Answer, DNS, DestUnreachable, Echo, Eth, ICMP, Query, Raw, Reply, Request, TimeExceeded, UDP, to have a value" \
+  "line 1, column 18: This case needs an else, or a block for each of Answer, DNS, DestUnreachable, Echo, Eth, ICMP, ICMP6, IP6, PacketTooBig, Query, Raw, Reply, Request, TimeExceeded, UDP, to have a value" \
     (types "expect /IP { x = case MATCH[1] IP { 1 } | TCP { 2 } }")
   "line 1, column 18: The branches of this case are of different types: a string and an int" \
     (types "expect /IP { x = case MATCH[1] Raw { \"a\" } | IP { 1 } | else { 2 } }")
-  "line 1, column 18: This case has a block for each of Answer, DNS, DestUnreachable, Echo, Eth, ICMP, IP, Query, Raw, Reply, Request, TCP, TimeExceeded, UDP: its else is never run" \
-    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } | else { 0 } }")
+  "line 1, column 18: This case has a block for each of Answer, DNS, DestUnreachable, Echo, Eth, ICMP, ICMP6, IP, IP6, PacketTooBig, Query, Raw, Reply, Request, TCP, TimeExceeded, UDP: its else is never run" \
+    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } | IP6 { 14 } | ICMP6 { 15 } | PacketTooBig { 16 } | else { 0 } }")
   "line 1, column 38: Unknown variable l" \
     (types "expect /IP { case MATCH[1] Raw { x = l.data } }")
 *)

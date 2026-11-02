@@ -3,7 +3,8 @@
 Crafty sends traffic from a real interface and reacts to what comes back,
 to check a port is open, find where packets are lost, measure round trips,
 or see how a TCP connection behaves. Packets are crafted to the bit, or built
-by crafty's own stacks (ARP, IPv4, TCP, UDP, ICMP, DNS).
+by crafty's own stacks (ARP and neighbor discovery, IPv4, IPv6, TCP, UDP,
+ICMP, ICMPv6, DNS).
 
 ## 1. Introduction
 
@@ -131,8 +132,8 @@ indeed.
 
 ### Manual layers
 
-So far, streams were *self-driven*: crafty resolves addresses with ARP,
-connects, retransmits, fragments and reassembles. A bang makes a layer
+So far, streams were *self-driven*: crafty resolves addresses with ARP or
+neighbor discovery, connects, retransmits, fragments and reassembles. A bang makes a layer
 *manual*, for packets as on the wire: `TCP!(flags=SYN, ack_num=0)` is a SYN
 packet with this sequence number regardless of the state of the TCP connection.
 On reception, `IP!` sees each fragment and `TCP!` each segment, even without
@@ -180,8 +181,9 @@ Options:
 - `--fw`: crafty shares the interface's address with the host, whose kernel
   would answer what crafty receives with TCP resets and ICMP port
   unreachables. `--fw` keeps the kernel off the ports of `--tcp` and `--udp`.
-- `--ip ADDR`: an address of crafty's own instead, on the interface's network,
-  for which crafty answers ARP. Then `--fw` is not needed, nor allowed.
+- `--ip ADDR`: an address of crafty's own instead (IPv4 or IPv6), on the
+  interface's network, for which crafty answers ARP or neighbor
+  solicitations. Then `--fw` is not needed, nor allowed.
 - `-p [/PATTERN]` (or `--print-packets`): prints the packets à la tcpdump.
 - `--format csv|json`: change the output format to csv or json (json makes -p
   print all available details of every packet).
@@ -240,13 +242,13 @@ permissions deny, 130 when interrupted.
 - `time`: `2026-10-20T22:02:45.25Z`, `2026-10-20T22:02+02:00`,
   `2026-10-20T22:02` (local time). Printed in UTC. `int(t)` and `float(t)`
   give its unix timestamp, `time(secs)` the reverse.
-- `ip`: `192.0.2.1`. IPv4 only.
+- `ip`: `192.0.2.1`, `2001:db8::1`.
 - `mac`: `aa:bb:cc:dd:ee:ff`.
-- `cidr`: `10.0.0.0/8`, no bit set beyond the mask. `ip in net` tells whether
-  an address is in it.
+- `cidr`: `10.0.0.0/8`, `2001:db8::/32`, no bit set beyond the mask. `ip in
+  net` tells whether an address is in it.
 - arrays: `[1, 2, 3]`. Items of one type, typed lazily (when that fails:
   `[0s] * 0`).
-- maps: `[192.0.2.1: "gw", 192.0.2.2: "dns"]`, a `string[ip]`, in no
+- maps: `[192.0.2.1: "gw", ::1: "lo"]`, a `string[ip]`, in no
   particular order. `map(key=k, default=v)` is an empty map with keys of the
   type of `k`, where missing keys have the value `v`.
 - records: `{name: "gw", ip: 192.0.2.1}`. `{}` is an empty block, not a
@@ -263,7 +265,7 @@ written in hexadecimal (`#68656c6c6f`); bytes passed where a string is
 expected, as to `print`, are text.
 
 **Conversions** happen where needed: an int to a float, a byte to an int, a
-string, an IP address or a MAC address to bytes and back (4 and 6 bytes), an
+string, an IP address or a MAC address to bytes and back (4, 16 and 6 bytes), an
 int to a bool. Bytes compare with the others as bytes. Others use the
 functions `int`, `float`, `bool`, `byte`, `interval`, `time`, `ip_addr`,
 `mac_addr` and `cidr`, which also read a string as a literal: `ip_addr(getenv("SERVER"))`.
@@ -314,7 +316,7 @@ PERMISSIONS = {remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
 - `PERMISSIONS`:
   - `local_ips`, `remote_ips`: rules `Accept(cidr)` or `Deny(cidr)`; the first
     that matches an address decides, and none matching denies. Unset,
-    `local_ips` accepts the interface's address and `remote_ips` any.
+    `local_ips` accepts the interface's addresses (or `--ip`'s) and `remote_ips` any.
   - `mac_spoofing`: allows sending from another MAC than the interface's.
   - `exfiltration`: allows sending a payload  made of the payload of a received
     packet.
@@ -476,7 +478,7 @@ what their engine computes (checksums).
 - `getenv(name, default=s)`: fails if unset and no default.
 - `arg(n, default=s)`: the n-th argument after the program, from 0; fails if
   missing and no default. `nargs()`: how many there are.
-- `resolve(name)`: the IPv4 addresses of a name, as an array, from the system's
+- `resolve(name)`: the addresses of a name, IPv4 first, as an array, from the system's
   resolver; an address resolves to itself. `hostname(ip, default=s)`: the name of an address. Blocking, so
   better resolved before sending.
 - `rand(max)`: an int or a float in `[0, max)` (default 1.0), or a bool if
@@ -513,18 +515,20 @@ too: the bytes of its data.
 
 - `src`: mac; set M; read M, S. Default: the interface's.
 - `dst`: mac; set M; read M, S. Default: what the interface knows of the
-  destination (ARP cache, gateway), without asking.
+  destination (neighbors, gateway), without asking.
 - `proto`: int; set M; read M, S. Default: the layer on top.
 - `ts`: time; read M, S. When the frame was captured; for what is
   reassembled, the frame that completed it. Unset in `LAST`.
 
-Self-driven, it carries only IPv4, and finds destinations with ARP. It
-answers ARP for an address of its own (`--ip`); the host's kernel answers for
-the interface's. `Eth!` frames go out as they are.
+Self-driven, it carries `IP` and `IP6`, and finds destinations with ARP and
+neighbor discovery. It answers both for an address of its own (`--ip`); the
+host's kernel answers for the interface's. Neighbor discovery never reaches
+the program. `Eth!` frames go out as they are.
 
 #### `IP`: IPv4
 
-- `src` (key): ip; set M, S; read M, S. Default: the interface's address.
+- `src` (key): ip; set M, S; read M, S. Default: the interface's address
+  (that reaches `dst`).
 - `dst` (key): ip; set M, S; read M, S. Required.
 - `proto`: int; set M, S; read M, S. Default: the layer on top.
 - `tos`: int; set M, S; read M, S.
@@ -541,7 +545,23 @@ the interface's. `Eth!` frames go out as they are.
 Self-driven IP fragments to the MTU and reassembles. `tos`, `ttl`,
 `dont_frag` and `options` apply to what it sends, but for the segments of a
 self-driven TCP connection. `IP!` sends the header as given, but for the
-checksum.
+checksum. Its addresses are IPv4 ones, and those of `IP6` IPv6 ones.
+
+#### `IP6`: IPv6
+
+- `src` (key): ip; set M, S; read M, S. Default: the interface's IPv6
+  address that reaches `dst`.
+- `dst` (key): ip; set M, S; read M, S. Required.
+- `proto`: int; set M, S; read M, S. Default: the layer on top. Received,
+  that past the extension headers.
+- `traffic_class`: int; set M, S; read M, S. Default 0.
+- `hop_limit`: int; set M, S; read M, S. Default 64.
+- `flow_label`: int; set M; read M, S. Default 0.
+- `is_fragment`: bool; read M.
+
+It sends no extension header and does not fragment: self-driven, a packet
+over the MTU is an error. Fragments received are seen by `IP6!` only, there
+being no reassembly.
 
 #### `TCP`
 
@@ -563,7 +583,7 @@ checksum.
 
 The fields of the options cannot be given with `options`. A missing `ts_val` or
 `ts_ecr` is 0. Self-driven, `mss` and `wscale` are what the connection
-offers (default: the MTU less 40, and what fits the receive buffer; -1
+offers (default: the MTU less 40, or 60 over `IP6`, and what fits the receive buffer; -1
 offers no window scaling, which caps its window at 64KiB); a `TCP!` over it
 does not send them.
 
@@ -588,7 +608,13 @@ not retransmitted.
 - `type`, `code`: int; set M; read M. Set by the message on top, but for
   `Raw`: `ICMP(type=13)/Raw(...)` needs a `type` (`code` defaults to 0).
 
-#### `Echo` (on `ICMP`)
+#### `ICMP6`
+
+- `type`, `code`: int; set M; read M. As those of `ICMP`. On top: `Echo`
+  (128, 129), `DestUnreachable` (1), `PacketTooBig` (2), `TimeExceeded` (3),
+  else `Raw`. `IP6` computes the checksum.
+
+#### `Echo` (on `ICMP` or `ICMP6`)
 
 - `id` (key): int; set M; read M. Default: a free random id.
 
@@ -600,21 +626,25 @@ their sequence numbers per stream.
 - `seq`: int; set M; read M. Default: the stream's counter, from 1.
 - `payload`: bytes; set M; read M. Default field.
 
-#### `DestUnreachable` and `TimeExceeded` (on `ICMP`)
+#### `DestUnreachable` and `TimeExceeded` (on `ICMP` or `ICMP6`), `PacketTooBig` (on `ICMP6`)
 
 - `code`: int; set M; read M. Default 0. Constants: `NET_UNREACHABLE`,
   `HOST_UNREACHABLE`, `PROTOCOL_UNREACHABLE`, `PORT_UNREACHABLE`,
   `FRAG_NEEDED`, `SOURCE_ROUTE_FAILED`; `TTL_EXCEEDED`, `REASSEMBLY_TIMEOUT`.
-- `mtu`: int; set M; read M. `DestUnreachable` only; default 0.
+  Under `ICMP6`: `NO_ROUTE`, `ADMIN_PROHIBITED`, `BEYOND_SCOPE`,
+  `ADDRESS_UNREACHABLE`, `PORT_UNREACHABLE6`; `HOP_LIMIT_EXCEEDED`,
+  `REASSEMBLY_TIMEOUT`.
+- `mtu`: int; set M; read M. Not in `TimeExceeded`; default 0. Always 0 in
+  a `DestUnreachable` of `ICMP6`.
 
-On top is the start of the packet the error is about: a quoted `IP`, or
-`Raw`.
+On top is the start of the packet the error is about: a quoted `IP` (`IP6`
+under `ICMP6`), or `Raw`.
 
-#### Quoted `IP`, `UDP` and `TCP` (on `DestUnreachable` and `TimeExceeded`)
+#### Quoted `IP`, `IP6`, `UDP` and `TCP` (on the errors)
 
-They have the fields of `IP`, `UDP` and `TCP` (but `is_fragment`), all
+They have the fields of `IP`, `IP6`, `UDP` and `TCP` (but `is_fragment`), all
 readable and settable. They are no streams: a quoted TCP segment is no part
-of a connection. Errors print them as `IP?`, `UDP?`, `TCP?`.
+of a connection. Errors print them as `IP?`, `IP6?`, `UDP?`, `TCP?`.
 
 ```
 on for=5s /IP/ICMP/TimeExceeded/IP(dst == target)/UDP(dst == 33434) {
@@ -624,8 +654,15 @@ on for=5s /IP/ICMP/TimeExceeded/IP(dst == target)/UDP(dst == 33434) {
 
 `MATCH[TimeExceeded/IP]` is the quoted packet, `MATCH[/IP]` the error's. A quote is often
 cut 8 bytes after the IP header: of `TCP`, only the ports and `seq_num` are
-then sure, the other fields reading 0. Sent, a quoted `IP` needs a `src` and
-a `dst`; lengths and checksums are computed unless given.
+then sure, the other fields reading 0. Sent, a quoted `IP` or `IP6` needs a
+`src` and a `dst`; lengths and checksums are computed unless given.
+
+```
+/IP6(dst=2001:db8::2)/UDP(src=4000, dst=9)/Raw("anyone?")
+expect timeout=1s /IP6/ICMP6/DestUnreachable(code == PORT_UNREACHABLE6)/IP6/UDP(src == 4000) {
+  print("closed, says ${MATCH[/IP6].src}")
+}
+```
 
 #### `DNS`
 

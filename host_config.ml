@@ -769,8 +769,10 @@ let disable_rx_offloads t ifname =
         change t ~undo:[ "ethtool" ; "-K" ; ifname ; feature ; "on" ]
             "ethtool" [ "-K" ; ifname ; feature ; "off" ])
 
-(** Whether the kernel forwards IPv4 packets. *)
-let ip_forward () =
-    try File.with_file_in "/proc/sys/net/ipv4/ip_forward" IO.read_all |>
-        String.trim <> "0"
+(** Whether the kernel forwards IPv4 packets, or IPv6 ones if [v6]. *)
+let ip_forward ?(v6=false) () =
+    let file =
+        if v6 then "/proc/sys/net/ipv6/conf/all/forwarding"
+        else "/proc/sys/net/ipv4/ip_forward" in
+    try File.with_file_in file IO.read_all |> String.trim <> "0"
     with Sys_error _ -> false

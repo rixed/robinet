@@ -46,7 +46,7 @@ type pick =
     (* Told by the layer on top, as the first message is sent, and else
      * required: *)
     | Told
-    (* The IPv4 address of the interface: *)
+    (* An address of the interface, of the family of the layer: *)
     | Local_address
     (* At random within these bounds, and distinct from the siblings': *)
     | Random_in of int * int
@@ -186,10 +186,14 @@ let bool_of fields name ~def = opt_bool fields name |? def
 let bytes_of (fields : fields) name =
     Option.map_default V.bits_of_bytes empty_bitstring (fields name)
 
-(* Key fields, which a node always has: *)
-let ip_of (fields : fields) name =
+(* Key fields, which a node always has, of the family of [layer]: *)
+let ip_of ~v6 (fields : fields) layer name =
     match fields name with
-    | Some (V.Ip a) -> a
+    | Some (V.Ip a) when Ip.Addr.is_v6 a = v6 -> a
+    | Some (V.Ip a) ->
+        V.fail "%s takes %s addresses, not %s: use %s" layer
+            (if v6 then "IPv6" else "IPv4") (Ip.Addr.to_dotted_string a)
+            (if v6 then "IP" else "IP6")
     | _ -> invalid_arg ("Crafty_layers: no address "^ name)
 
 let not_driven _ _ _ = invalid_arg "Crafty_layers: not a self-driven layer"
@@ -216,24 +220,29 @@ let with_length ~terminal u =
     { u with values = u.values @ [ "length", V.Int (bitstring_length carried / 8) ] }
 
 let ip4 = (Eth.Proto.ip4 :> int)
+and ip6_proto = (Eth.Proto.ip6 :> int)
 
 (* Where a frame of [proto] carrying [payload] goes, from what the interface
- * knows already, as ARP is not asked: *)
+ * knows already, as neighbors are not asked: *)
 let next_mac (st : Eth.State.t) proto payload =
-    let arp ip =
+    let known ip =
         match Tools.BitHash.find st.neighbors ip with
         | Some mac -> mac
         | None | exception Not_found ->
             V.fail "The MAC address of %s is not known: Eth! needs a dst"
                 (Ip.Addr.to_dotted_string (Ip.Addr.of_bitstring ip)) in
-    match Eth.Pdu.extract_dst_proto Eth.Proto.ip4 payload with
-    | Ok dst when proto = ip4 ->
+    match Eth.Pdu.extract_dst_proto (Eth.Proto.o proto) payload with
+    | Ok dst when proto = ip4 || proto = ip6_proto ->
+        let a = Ip.Addr.of_bitstring dst in
+        let v6 = Ip.Addr.is_v6 a in
         if Bitstring.equals dst Eth.TRX.broadcast_bits then Eth.Addr.broadcast
-        else if Eth.State.on_my_subnet st dst then arp dst
-        else (match Eth.TRX.gw_for_ip st (Ip.Addr.of_bitstring dst) with
-            | None -> arp dst
+        else if v6 && Ip.Addr.is_multicast a then Eth.Addr.of_ip6_multicast a
+        else if Eth.State.on_my_subnet st dst || (v6 && Ip.Addr.is_link_local a) then
+            known dst
+        else (match Eth.TRX.gw_for_ip st a with
+            | None -> known dst
             | Some (Eth.Gateway.Mac mac) -> mac
-            | Some (Eth.Gateway.Ip gw) -> arp (Ip.Addr.to_bitstring gw))
+            | Some (Eth.Gateway.Ip gw) -> known (Ip.Addr.to_bitstring gw))
     | _ -> V.fail "Eth! needs a dst"
 
 let unpack_eth _ bits =
@@ -244,22 +253,25 @@ let unpack_eth _ bits =
         (* [ts] is for the receiver to tell: *)
         unpacked [ "src", V.Mac e.src ; "dst", V.Mac e.dst ; "proto", V.Int proto ;
                    "ts", V.Time (Clock.Wall.of_secs 0.) ]
-                 ~upper:(Only (if proto = ip4 then N.IP else N.Raw))
+                 ~upper:(Only (if proto = ip4 then N.IP
+                               else if proto = ip6_proto then N.IP6
+                               else N.Raw))
                  ~payload:(e.payload :> bitstring) bits
 
-(* The root: an Ethernet interface, which a self-driven Eth sends IPv4
- * through, resolving with ARP. It answers ARP itself, and takes the frames
- * for its address, or all of them if promiscuous: *)
+(* The root: an Ethernet interface, which a self-driven Eth sends IP and IP6
+ * through, resolving with ARP and neighbor discovery. It does both itself,
+ * and takes the frames for its addresses (and the multicast groups of its
+ * IPv6 ones), or all of them if promiscuous: *)
 let eth_node ctx =
     let st = ctx.eth in
     let trx = Eth.TRX.make st in
     let receive (u : unpacked) =
         match List.assoc "proto" u.values, List.assoc "dst" u.values with
-        | V.Int p, _ when p = (Eth.Proto.arp :> int) ->
+        | V.Int p, _ when p = (Eth.Proto.arp :> int) ||
+                          (p = ip6_proto && Eth.Ndp.message u.payload <> None) ->
             Eth.TRX.rx st u.bits ;
             []
-        | _, V.Mac dst when st.promisc <> None || Eth.Addr.eq dst st.mac ||
-                            Eth.Addr.eq dst Eth.Addr.broadcast ->
+        | _, V.Mac dst when st.promisc <> None || Eth.State.accepts st dst ->
             pass u
         | _ -> [] in
     { (manual @@ fun fields hints payload ->
@@ -271,9 +283,9 @@ let eth_node ctx =
             | _ -> next_mac st proto payload in
         Eth.Pdu.(pack (make (Eth.Proto.o proto) src dst payload)), []) with
       send = (fun _ hints payload ->
-        if List.assoc_opt "proto" hints <> Some (V.Int ip4) then
-            V.fail "A self-driven Eth carries only IPv4: use Eth!" ;
-        Tools.tx trx payload) ;
+        match List.assoc_opt "proto" hints with
+        | Some (V.Int p) when p = ip4 || p = ip6_proto -> Tools.tx trx payload
+        | _ -> V.fail "A self-driven Eth carries only IP and IP6: use Eth!") ;
       receive ;
       busy_for = Eth.Iface.tx_busy_for st.iface }
 
@@ -324,7 +336,7 @@ let pack_ip next_id fields hints payload =
         ~frag_offset:(int ~def:0 "frag_offset" 0x1fff)
         ~ttl:(int ~def:64 "ttl" 0xff) ~options
         (Ip.Proto.o (ip_proto fields hints))
-        (ip_of fields "src") (ip_of fields "dst") payload |>
+        (ip_of ~v6:false fields "IP" "src") (ip_of ~v6:false fields "IP" "dst") payload |>
     Ip.Pdu.pack, [ "proto", V.Int ip4 ]
 
 (* Both modes share the ids. A self-driven IP has a TRX per protocol. The
@@ -367,7 +379,7 @@ let ip_node ctx =
             | None ->
                 let t =
                     Ip.TRX.create st.iface.widget.power ~mtu:st.mtu ~next_id ~counters
-                        (ip_of fields "src") (ip_of fields "dst")
+                        (ip_of ~v6:false fields "IP" "src") (ip_of ~v6:false fields "IP" "dst")
                         (Ip.Proto.o proto) st.iface.widget.logger in
                 Tools.((Ip.TRX.trx_of t).out -->
                     sink (below.send (fun _ -> None) [ "proto", V.Int ip4 ])) ;
@@ -382,6 +394,77 @@ let ip_node ctx =
         [ "fragmented", V.Int c.fragmented ; "frags_out", V.Int c.frags_out ;
           "frags_in", V.Int c.frags_in ; "reassembled", V.Int c.reassembled ;
           "reasm_timeouts", V.Int c.reasm_timeouts ]) }
+
+let ip6_upper (ip : Ip6.Pdu.t) =
+    if Ip6.Pdu.is_fragment ip then N.Raw
+    else if ip.proto = Ip.Proto.icmpv6 then N.ICMP6
+    else if ip.proto = Ip.Proto.udp then N.UDP
+    else if ip.proto = Ip.Proto.tcp then N.TCP
+    else N.Raw
+
+(* [proto] is that of the upper layer, past the extension headers: *)
+let ip6_values (ip : Ip6.Pdu.t) =
+    [ "src", V.Ip ip.src ; "dst", V.Ip ip.dst ; "proto", V.Int (ip.proto :> int) ;
+      "traffic_class", V.Int (ip.diff_serv lsl 2 lor ip.ecn) ;
+      "hop_limit", V.Int ip.ttl ; "flow_label", V.Int ip.flow_label ;
+      "is_fragment", V.Bool (Ip6.Pdu.is_fragment ip) ]
+
+(* A fragment goes on as Raw: *)
+let unpack_ip6 _ bits =
+    match Ip6.Pdu.unpack bits with
+    | Error _ -> None
+    | Ok ip ->
+        unpacked (ip6_values ip) ~upper:(Only (ip6_upper ip))
+                 ~payload:(ip.payload :> bitstring) bits
+
+let ip6_proto_of fields hints = int_of ~hints fields "IP6" "proto" 0 0xff
+
+(* An IPv6 header, without extensions, as given around [payload]: *)
+let pack_ip6 fields hints payload =
+    let int ~def name hi = int_of ~def fields "IP6!" name 0 hi in
+    if Tools.bytelength payload > 0xffff then V.fail "Too long for an IP6 packet" ;
+    let tc = int ~def:0 "traffic_class" 0xff in
+    Ip6.Pdu.make ~ttl:(int ~def:64 "hop_limit" 0xff) ~diff_serv:(tc lsr 2)
+        ~ecn:(tc land 3) ~flow_label:(int ~def:0 "flow_label" 0xfffff)
+        (Ip.Proto.o (ip6_proto_of fields hints))
+        (ip_of ~v6:true fields "IP6" "src") (ip_of ~v6:true fields "IP6" "dst") payload |>
+    Ip6.Pdu.pack, [ "proto", V.Int ip6_proto ]
+
+(* A self-driven IP6 has a TRX per protocol, and does not fragment. The
+ * fragments received are seen in manual mode only, as there is no
+ * reassembly: *)
+let ip6_node ctx =
+    let st = ctx.eth in
+    let below = Option.get ctx.below in
+    let trxs = Hashtbl.create 3 in
+    let receive (u : unpacked) =
+        if List.assoc "is_fragment" u.values = V.Bool true then [ u, [ Manual ] ]
+        else pass u in
+    { (manual pack_ip6) with
+      send = (fun fields hints payload ->
+        if Tools.bytelength payload = 0 then
+            V.fail "A self-driven IP6 sends no empty packet: use IP6!" ;
+        if 40 + Tools.bytelength payload > st.mtu then
+            V.fail "%d bytes are more than the MTU of %d: IP6 does not fragment"
+                (40 + Tools.bytelength payload) st.mtu ;
+        let proto = ip6_proto_of fields hints in
+        let t =
+            match Hashtbl.find_option trxs proto with
+            | Some t -> t
+            | None ->
+                if st.mtu < 1280 then
+                    V.fail "IP6 needs an MTU of 1280 bytes at least, not %d" st.mtu ;
+                let t =
+                    Ip6.TRX.create st.iface.widget.power ~mtu:st.mtu
+                        (ip_of ~v6:true fields "IP6" "src") (ip_of ~v6:true fields "IP6" "dst")
+                        (Ip.Proto.o proto) st.iface.widget.logger in
+                Tools.((Ip6.TRX.trx_of t).out -->
+                    sink (below.send (fun _ -> None) [ "proto", V.Int ip6_proto ])) ;
+                Hashtbl.add trxs proto t ;
+                t in
+        Ip6.TRX.tx ?tos:(Option.map Ip.ToS.o (opt_int fields "traffic_class" 0 0xff))
+                   ?ttl:(opt_int fields "hop_limit" 0 0xff) t payload) ;
+      receive }
 
 let unpack_udp _ bits =
     match Udp.Pdu.unpack bits with
@@ -534,7 +617,11 @@ let tcp_node ctx =
             s.pending <- [] ;
             removed s ;
             wake () in
-    let new_stream ?(mss=st.mtu - 40) ?wscale () =
+    let hdr_len =
+        match ctx.below_key "src" with
+        | Some (V.Ip a) when Ip.Addr.is_v6 a -> 60
+        | _ -> 40 in
+    let new_stream ?(mss=st.mtu - hdr_len) ?wscale () =
         (match !state with
         | Stream s -> Tcp.TRX.abort s.trx ; removed s
         | _ -> ()) ;
@@ -678,13 +765,20 @@ let icmp_upper = function
     | 11 -> Only N.TimeExceeded
     | _ -> Only N.Raw
 
+let icmp6_upper = function
+    | 128 | 129 -> Only N.Echo
+    | 1 -> Only N.DestUnreachable
+    | 2 -> Only N.PacketTooBig
+    | 3 -> Only N.TimeExceeded
+    | _ -> Only N.Raw
+
 (* What is on top is what follows the checksum, and is told the type and
  * code: *)
-let unpack_icmp _ bits =
+let unpack_icmp ~upper _ bits =
     match%bitstring bits with
     | {| typ : 8 ; code : 8 ; _checksum : 16 ; payload : -1 : bitstring |} ->
         let upper =
-            match icmp_upper typ with
+            match upper typ with
             | Only N.Raw when bitstring_length payload = 0 -> Nothing
             | u -> u in
         unpacked [ "type", V.Int typ ; "code", V.Int code ] ~upper
@@ -692,8 +786,9 @@ let unpack_icmp _ bits =
     | {| _ |} -> None
 
 (* The message on top tells the type and code, but for [Raw], under which
- * they are options; its own bits are what follows them: *)
-let icmp_node _ =
+ * they are options; its own bits are what follows them. The checksum of
+ * ICMPv6, which covers the IPv6 addresses too, is left to IP6: *)
+let icmp_node ~v6 _ =
     manual (fun fields hints payload ->
         let typ, code =
             if List.mem_assoc "type" hints then (
@@ -708,16 +803,17 @@ let icmp_node _ =
         let msg chk =
             let%bitstring hdr = {| typ : 8 ; code : 8 ; chk : 16 |} in
             concat [ hdr ; payload ] in
-        msg (Tools.sum (msg 0)), [ "proto", V.Int (Ip.Proto.icmp :> int) ])
+        if v6 then msg 0, [ "proto", V.Int (Ip.Proto.icmpv6 :> int) ]
+        else msg (Tools.sum (msg 0)), [ "proto", V.Int (Ip.Proto.icmp :> int) ])
 
-(* The message on top is told by the type: *)
-let unpack_echo hints bits =
+(* The message on top is told by the type, [request] or [reply]: *)
+let unpack_echo ~request ~reply hints bits =
     match%bitstring bits with
     | {| id : 16 ; payload : -1 : bitstring |} ->
         let upper =
             match List.assoc_opt "type" hints with
-            | Some (V.Int 8) -> Only N.Request
-            | Some (V.Int 0) -> Only N.Reply
+            | Some (V.Int t) when t = request -> Only N.Request
+            | Some (V.Int t) when t = reply -> Only N.Reply
             | _ -> Nothing in
         unpacked [ "id", V.Int id ] ~upper ~payload bits
     | {| _ |} -> None
@@ -748,21 +844,33 @@ let echo_message_node typ _ =
         concat [ hdr ; bytes_of fields "payload" ],
         [ "type", V.Int typ ; "code", V.Int 0 ])
 
-(* What is on top is the start of the packet it is about: *)
-let unpack_icmp_error ~mtu hints bits =
+(* The 4 bytes after the checksum, of which an MTU can be the last 2
+ * ([`Low], ICMP) or all ([`Whole], ICMPv6): *)
+type mtu_field = [ `None | `Low | `Whole ]
+
+(* What is on top is the start of the packet it is about, of layer [quote]: *)
+let unpack_icmp_error ~(mtu : mtu_field) ~quote hints bits =
     match%bitstring bits with
-    | {| _ : 16 ; mtu_value : 16 ; payload : -1 : bitstring |} ->
-        unpacked ((if mtu then [ "mtu", V.Int mtu_value ] else []) @
-                  [ "code", List.assoc_opt "code" hints |? V.Int 0 ])
-                 ~upper:(if bitstring_length payload > 0 then Any N.IP else Nothing)
+    | {| high : 16 ; low : 16 ; payload : -1 : bitstring |} ->
+        let mtu =
+            match mtu with
+            | `None -> []
+            | `Low -> [ "mtu", V.Int low ]
+            | `Whole -> [ "mtu", V.Int (high lsl 16 lor low) ] in
+        unpacked (mtu @ [ "code", List.assoc_opt "code" hints |? V.Int 0 ])
+                 ~upper:(if bitstring_length payload > 0 then Any quote else Nothing)
                  ~payload bits
     | {| _ |} -> None
 
-let icmp_error_node typ ~mtu _ =
+let icmp_error_node typ ~(mtu : mtu_field) _ =
     manual (fun fields _ payload ->
-        let code = int_of ~def:0 fields "ICMP" "code" 0 0xff
-        and mtu = if mtu then int_of ~def:0 fields "ICMP" "mtu" 0 0xffff else 0 in
-        let%bitstring hdr = {| 0 : 16 ; mtu : 16 |} in
+        let code = int_of ~def:0 fields "ICMP" "code" 0 0xff in
+        let mtu =
+            match mtu with
+            | `None -> 0
+            | `Low -> int_of ~def:0 fields "ICMP" "mtu" 0 0xffff
+            | `Whole -> int_of ~def:0 fields "ICMP6" "mtu" 0 0xffff_ffff in
+        let%bitstring hdr = {| mtu lsr 16 : 16 ; mtu land 0xffff : 16 |} in
         concat [ hdr ; payload ],
         [ "type", V.Int typ ; "code", V.Int code ])
 
@@ -786,6 +894,28 @@ let quoted_ip_node _ =
         List.iter (fun n ->
             if fields n = None then V.fail "A quoted IP needs a %s" n) [ "src" ; "dst" ] ;
         pack_ip next_id fields hints payload)
+
+(* As much of the packet as there is, whatever its length says: *)
+let unpack_quoted_ip6 _ bits =
+    match%bitstring bits with
+    | {| 6 : 4 ; tc : 8 ; flow_label : 20 ; len : 16 ; next : 8 ; ttl : 8 ;
+         src : 128 : bitstring ; dst : 128 : bitstring ; rest : -1 : bitstring |} ->
+        let rest = takebits (min (bitstring_length rest) (len * 8)) rest in
+        let extensions, proto, payload = Ip6.Extension.unpack next rest in
+        let ip =
+            Ip6.Pdu.{ ttl ; proto = Ip.Proto.o proto ; diff_serv = tc lsr 2 ;
+                      ecn = tc land 3 ; flow_label ; src = Ip.Addr.of_bitstring src ;
+                      dst = Ip.Addr.of_bitstring dst ; extensions ;
+                      payload = Payload.o payload } in
+        let upper = match ip6_upper ip with N.ICMP6 -> N.Raw | u -> u in
+        unpacked (ip6_values ip) ~upper:(Only upper) ~payload bits
+    | {| _ |} -> None
+
+let quoted_ip6_node _ =
+    manual (fun fields hints payload ->
+        List.iter (fun n ->
+            if fields n = None then V.fail "A quoted IP6 needs a %s" n) [ "src" ; "dst" ] ;
+        pack_ip6 fields hints payload)
 
 (* Whatever the length says, the payload is what is left: *)
 let unpack_quoted_udp _ bits =
@@ -1052,6 +1182,20 @@ let ip =
               ~driven_default:(V.Array [||]) ;
         field "is_fragment" Type.Bool ~set_in:[] ~about:"whether %s is a fragment" ]
 
+let ip6 =
+    layer N.IP6 ~above:[ eth ] ~driven:true ~node:ip6_node ~unpack:unpack_ip6 [
+        field "src" Type.Ip ~set_in:both ~read_in:both ~discriminant:true
+              ~pick:Local_address ~peer:"dst" ;
+        field "dst" Type.Ip ~set_in:both ~read_in:both ~discriminant:true
+              ~pick:Required ~peer:"src" ;
+        field "proto" Type.Int ~set_in:both ~read_in:both ~discriminant:true ;
+        field "traffic_class" Type.Int ~set_in:both ~read_in:both
+              ~driven_default:(V.Int 0) ;
+        field "hop_limit" Type.Int ~set_in:both ~read_in:both
+              ~driven_default:(V.Int 64) ;
+        field "flow_label" Type.Int ~read_in:both ~driven_default:(V.Int 0) ;
+        field "is_fragment" Type.Bool ~set_in:[] ~about:"whether %s is a fragment" ]
+
 (** What the node of any layer tells of its stream: the packets that went
  * through it, and the bytes of their payloads at that layer. *)
 let stream_stats =
@@ -1059,7 +1203,7 @@ let stream_stats =
       "packets_in", Type.Int ; "bytes_in", Type.Int ]
 
 let tcp =
-    layer N.TCP ~above:[ ip ] ~driven:true ~node:tcp_node ~unpack:unpack_tcp
+    layer N.TCP ~above:[ ip ; ip6 ] ~driven:true ~node:tcp_node ~unpack:unpack_tcp
         ~stats:Type.[
             "bytes_acked", Int ; "bytes_received", Int ; "retrans", Int ;
             "dupacks", Int ; "timeouts", Int ; "holes_in", Int ; "ooo_in", Int ;
@@ -1088,7 +1232,7 @@ let tcp =
         field "ts_ecr" Type.Int ~part_of:"options" ]
 
 let udp =
-    layer N.UDP ~above:[ ip ] ~node:udp_node ~unpack:unpack_udp [
+    layer N.UDP ~above:[ ip ; ip6 ] ~node:udp_node ~unpack:unpack_udp [
         field "src" Type.Int ~discriminant:true ~pick:Local_port ~peer:"dst" ;
         field "dst" Type.Int ~discriminant:true ~pick:Told ~peer:"src" ;
         field "length" Type.Int ;
@@ -1096,57 +1240,89 @@ let udp =
 
 (* The kind of message is told by the layer on top of it, but for [Raw]: *)
 let icmp =
-    layer N.ICMP ~above:[ ip ] ~node:icmp_node ~unpack:unpack_icmp [
+    layer N.ICMP ~above:[ ip ] ~node:(icmp_node ~v6:false)
+          ~unpack:(unpack_icmp ~upper:icmp_upper) [
+        field "type" Type.Int ;
+        field "code" Type.Int ]
+
+let icmp6 =
+    layer N.ICMP6 ~above:[ ip6 ] ~node:(icmp_node ~v6:true)
+          ~unpack:(unpack_icmp ~upper:icmp6_upper) [
         field "type" Type.Int ;
         field "code" Type.Int ]
 
 (* The stream of the requests and replies of an id: *)
-let echo =
-    layer N.Echo ~above:[ icmp ] ~node:echo_node ~unpack:unpack_echo [
+let echo_on icmp ~request ~reply =
+    layer N.Echo ~above:[ icmp ] ~node:echo_node ~unpack:(unpack_echo ~request ~reply) [
         field "id" Type.Int ~discriminant:true ~pick:(Random_in (0, 65535)) ]
 
-let echo_message name typ =
+let echo = echo_on icmp ~request:8 ~reply:0
+and echo6 = echo_on icmp6 ~request:128 ~reply:129
+
+let echo_message ?(echo=echo) name typ =
     layer name ~above:[ echo ] ~terminal:true ~default:"payload"
           ~node:(echo_message_node typ) ~unpack:unpack_echo_message [
         field "seq" Type.Int ;
         field "payload" Type.bytes ]
 
 (* On top of which is the start of the packet it is about, quoted: *)
-let icmp_error name typ codes ~mtu =
+let icmp_error ?(icmp=icmp) ?(quote=N.IP) name typ codes ~mtu =
     layer name ~above:[ icmp ]
-          ~node:(icmp_error_node typ ~mtu) ~unpack:(unpack_icmp_error ~mtu)
+          ~node:(icmp_error_node typ ~mtu) ~unpack:(unpack_icmp_error ~mtu ~quote)
         ~constants:(List.map (fun (n, c) -> n, Int c) codes) (
         field "code" Type.Int ::
-        (if mtu then [ field "mtu" Type.Int ] else []))
+        (if mtu = `None then [] else [ field "mtu" Type.Int ]))
 
 let dest_unreachable =
-    icmp_error N.DestUnreachable 3 ~mtu:true Icmp.Unreachable.[
+    icmp_error N.DestUnreachable 3 ~mtu:`Low Icmp.Unreachable.[
         "NET_UNREACHABLE", network ; "HOST_UNREACHABLE", host ;
         "PROTOCOL_UNREACHABLE", protocol ; "PORT_UNREACHABLE", port ;
         "FRAG_NEEDED", fragmentation_needed ;
         "SOURCE_ROUTE_FAILED", source_route_failed ]
 
 let time_exceeded =
-    icmp_error N.TimeExceeded 11 ~mtu:false
+    icmp_error N.TimeExceeded 11 ~mtu:`None
         [ "TTL_EXCEEDED", 0 ; "REASSEMBLY_TIMEOUT", 1 ]
+
+(* Constants are global, and those of ICMPv6 that ICMP has too are not
+ * repeated (REASSEMBLY_TIMEOUT); but for PORT_UNREACHABLE, of another code.
+ * Layers of a name read the same fields: the mtu of DestUnreachable is the
+ * last 2 of the bytes that ICMPv6 leaves unused. *)
+let dest_unreachable6 =
+    icmp_error ~icmp:icmp6 ~quote:N.IP6 N.DestUnreachable 1 ~mtu:`Low Icmp6.Unreachable.[
+        "NO_ROUTE", no_route ; "ADMIN_PROHIBITED", prohibited ;
+        "BEYOND_SCOPE", beyond_scope ; "ADDRESS_UNREACHABLE", address ;
+        "PORT_UNREACHABLE6", port ]
+
+let packet_too_big =
+    icmp_error ~icmp:icmp6 ~quote:N.IP6 N.PacketTooBig 2 ~mtu:`Whole []
+
+let time_exceeded6 =
+    icmp_error ~icmp:icmp6 ~quote:N.IP6 N.TimeExceeded 3 ~mtu:`None
+        [ "HOP_LIMIT_EXCEEDED", 0 ]
 
 let quoted_ip =
     layer N.IP ~quoted:true ~above:[ dest_unreachable ; time_exceeded ]
         ~node:quoted_ip_node ~unpack:unpack_quoted_ip (quoted_fields ip)
 
+let quoted_ip6 =
+    layer N.IP6 ~quoted:true ~above:[ dest_unreachable6 ; packet_too_big ; time_exceeded6 ]
+        ~node:quoted_ip6_node ~unpack:unpack_quoted_ip6 (quoted_fields ip6)
+
 let quoted_udp =
-    layer N.UDP ~quoted:true ~above:[ quoted_ip ] ~node:udp_node
+    layer N.UDP ~quoted:true ~above:[ quoted_ip ; quoted_ip6 ] ~node:udp_node
         ~unpack:unpack_quoted_udp (quoted_fields udp)
 
 let quoted_tcp =
-    layer N.TCP ~quoted:true ~above:[ quoted_ip ] ~node:quoted_tcp_node
+    layer N.TCP ~quoted:true ~above:[ quoted_ip ; quoted_ip6 ] ~node:quoted_tcp_node
         ~unpack:unpack_quoted_tcp (quoted_fields tcp)
 
 (* What is carried by a layer that is not decoded any further: *)
 let raw =
     layer N.Raw ~terminal:true
-        ~above:[ eth ; ip ; tcp ; udp ; icmp ; dest_unreachable ; time_exceeded ;
-                 quoted_ip ; quoted_udp ; quoted_tcp ]
+        ~above:[ eth ; ip ; ip6 ; tcp ; udp ; icmp ; icmp6 ; dest_unreachable ;
+                 time_exceeded ; dest_unreachable6 ; packet_too_big ; time_exceeded6 ;
+                 quoted_ip ; quoted_ip6 ; quoted_udp ; quoted_tcp ]
         ~node:raw_node ~unpack:unpack_raw
         ~default:"data" [ field "data" Type.bytes ]
 
@@ -1188,9 +1364,11 @@ let dns_message name ~query =
         field "additional" (Type.Array dns_rr) ]
 
 let all =
-    [ eth ; ip ; tcp ; udp ; icmp ; echo ; echo_message N.Request 8 ;
-      echo_message N.Reply 0 ;
-      dest_unreachable ; time_exceeded ; quoted_ip ; quoted_udp ; quoted_tcp ;
+    [ eth ; ip ; ip6 ; tcp ; udp ; icmp ; icmp6 ; echo ; echo_message N.Request 8 ;
+      echo_message N.Reply 0 ; echo6 ; echo_message ~echo:echo6 N.Request 128 ;
+      echo_message ~echo:echo6 N.Reply 129 ;
+      dest_unreachable ; time_exceeded ; dest_unreachable6 ; packet_too_big ;
+      time_exceeded6 ; quoted_ip ; quoted_ip6 ; quoted_udp ; quoted_tcp ;
       dns ; dns_message N.Query ~query:true ; dns_message N.Answer ~query:false ;
       raw ]
 
@@ -1268,6 +1446,12 @@ let record_type (l : layer) mode =
   Option.map_default ((==) quoted_udp) false (find ~below:quoted_ip N.UDP)
   find ~below:quoted_udp N.DNS = None
   find ~below:quoted_ip N.ICMP = None
+  Option.map_default ((==) ip6) false (find ~below:eth N.IP6)
+  Option.map_default ((==) echo6) false (find ~below:icmp6 N.Echo)
+  Option.map_default ((==) quoted_ip6) false (find ~below:packet_too_big N.IP6)
+  Option.map_default ((==) quoted_udp) false (find ~below:quoted_ip6 N.UDP)
+  find ~below:ip6 N.ICMP = None
+  find ~below:ip N.ICMP6 = None
 *)
 (* A message, decoded as sent, its names as written: *)
 (*$T
@@ -1310,6 +1494,7 @@ let record_type (l : layer) mode =
 *)
 (*$T key_fields
   key_fields ip = [ 0 ; 1 ]
+  key_fields ip6 = [ 0 ; 1 ]
   key_fields icmp = []
   key_fields echo = [ 0 ]
   key_fields (echo_message N.Reply 0) = []

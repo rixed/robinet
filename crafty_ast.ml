@@ -37,19 +37,21 @@ let print_location oc loc =
 module Layer_name =
 struct
     type t =
-        | Eth | IP | TCP | UDP | ICMP | Echo | Request | Reply
-        | DestUnreachable | TimeExceeded | DNS | Query | Answer | Raw
+        | Eth | IP | IP6 | TCP | UDP | ICMP | ICMP6 | Echo | Request | Reply
+        | DestUnreachable | TimeExceeded | PacketTooBig | DNS | Query | Answer
+        | Raw
 
     let all =
-        [ Eth ; IP ; TCP ; UDP ; ICMP ; Echo ; Request ; Reply ;
-          DestUnreachable ; TimeExceeded ; DNS ; Query ; Answer ; Raw ]
+        [ Eth ; IP ; IP6 ; TCP ; UDP ; ICMP ; ICMP6 ; Echo ; Request ; Reply ;
+          DestUnreachable ; TimeExceeded ; PacketTooBig ; DNS ; Query ; Answer ;
+          Raw ]
 
     let to_string = function
-        | Eth -> "Eth" | IP -> "IP" | TCP -> "TCP" | UDP -> "UDP"
-        | ICMP -> "ICMP" | Echo -> "Echo" | Request -> "Request"
+        | Eth -> "Eth" | IP -> "IP" | IP6 -> "IP6" | TCP -> "TCP" | UDP -> "UDP"
+        | ICMP -> "ICMP" | ICMP6 -> "ICMP6" | Echo -> "Echo" | Request -> "Request"
         | Reply -> "Reply" | DestUnreachable -> "DestUnreachable"
-        | TimeExceeded -> "TimeExceeded" | DNS -> "DNS" | Query -> "Query"
-        | Answer -> "Answer" | Raw -> "Raw"
+        | TimeExceeded -> "TimeExceeded" | PacketTooBig -> "PacketTooBig"
+        | DNS -> "DNS" | Query -> "Query" | Answer -> "Answer" | Raw -> "Raw"
 
     (* However written: *)
     let of_string s =

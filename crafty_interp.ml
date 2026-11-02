@@ -147,7 +147,10 @@ let int_of loc = function
         else error loc "Cannot convert %s to an int" (A.string_of_float f)
     | Interval i -> int_of_float (Interval.to_secs i)
     | Time t -> int_of_float (Clock.Wall.to_secs t)
-    | Ip a -> Int32.to_int (Ip.Addr.to_int32 a) land 0xffff_ffff
+    | Ip a ->
+        if Ip.Addr.is_v6 a then
+            error loc "Cannot convert IPv6 address %s to an int" (Ip.Addr.to_dotted_string a) ;
+        Int32.to_int (Ip.Addr.to_int32 a) land 0xffff_ffff
     | _ -> assert false
 
 let float_of = function
@@ -169,7 +172,7 @@ let rec convert loc (from : A.Type.t) (typ : A.Type.t) value =
     | Mac, Array Byte, Mac m -> bytes_of_string (Bitstring.string_of_bitstring (mac_bits m))
     | Array Byte, String, Array a -> String (string_of_bytes a)
     | Array Byte, Ip, Array a ->
-        if Array.length a <> 4 then
+        if Array.length a <> 4 && Array.length a <> 16 then
             error loc "%d bytes are no IP address" (Array.length a) ;
         Ip (Ip.Addr.of_bytes (Bytes.of_string (string_of_bytes a)))
     | Array Byte, Mac, Array a ->
@@ -270,18 +273,19 @@ let getenv name =
 let prog_args = ref [||]
 
 (* The system resolver's answers, asked once per name or address for the
- * whole run; [resolve] keeps only the IPv4 addresses: *)
+ * whole run; [resolve] has the IPv4 addresses first: *)
 let resolved = Hashtbl.create 10
 let resolve name =
     match Hashtbl.find_option resolved name with
     | Some addrs -> addrs
     | None ->
         let addrs =
-            Unix.getaddrinfo name "" Unix.[ AI_FAMILY PF_INET ] |>
+            Unix.getaddrinfo name "" [] |>
             List.filter_map (function
                 | Unix.{ ai_addr = ADDR_INET (a, _) ; _ } -> Some (Ip.Addr.o a)
                 | _ -> None) |>
-            List.unique ~eq:(fun a b -> Ip.Addr.compare a b = 0) in
+            List.unique ~eq:(fun a b -> Ip.Addr.compare a b = 0) |>
+            List.stable_sort (fun a b -> Bool.compare (Ip.Addr.is_v6 a) (Ip.Addr.is_v6 b)) in
         Hashtbl.add resolved name addrs ;
         addrs
 
@@ -368,7 +372,7 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
     | T.Nargs, [] -> Int (Array.length !prog_args)
     | T.Resolve, [ String name ] ->
         (match resolve name with
-        | [] -> error loc "%s has no IPv4 address" name
+        | [] -> error loc "%s has no IP address" name
         | addrs -> Array (Array.of_list (List.map (fun a -> Ip a) addrs)))
     | T.Hostname, Ip ip :: default ->
         (match hostname ip, default with
@@ -1364,9 +1368,11 @@ let print_status oc = function
     | Stopped -> String.print oc "stopped"
 
 (** Runs [program] on a new Ethernet interface under [parent], of address
- * [mac] and [ip] (in [netmask]), of link [speed] (default 1Gbps), full
- * duplex unless [full_duplex] is false, and of [mtu], sending beyond its
- * subnet to [gateway], answering ARP for [ip] unless [answer_requests] is false,
+ * [mac] and [addresses] (with their prefix lengths), of link [speed]
+ * (default 1Gbps), full duplex unless [full_duplex] is false, and of [mtu],
+ * sending beyond its subnets to [gateways] (an IP gateway for its family, a
+ * MAC one for both), answering ARP and neighbor solicitations for its
+ * addresses unless [answer_requests] is false,
  * taking the frames for other addresses too if [promisc],
  * picking the local ports it is not given from the ports of [limits] (as
  * {!Crafty_tree.make_root} does), [limits] (default: the program's) being
@@ -1378,7 +1384,7 @@ let print_status oc = function
  * received already (captured) and is taken at once, in order. Returns the device of the interface, and a handle to stop the
  * program, ask its status or tell it what the interface sent. The program starts at the next tick of the
  * simulation, once that device can be connected. *)
-let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
+let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         ?(promisc=false)
         ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu
         ?limits ?format ?report ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
@@ -1388,14 +1394,18 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
         Option.map (fun (p : T.ports) -> [ "TCP", p.tcp ; "UDP", p.udp ])
                    limits.ports in
     let gateways =
-        Option.map_default (fun gw ->
-            [ Eth.State.gw_selector (), Some gw ]) [] gateway in
+        List.concat_map (fun gw ->
+            let sel v6 = Eth.State.gw_selector ~v6 (), Some gw in
+            match gw with
+            | Eth.Gateway.Ip a -> [ sel (Ip.Addr.is_v6 a) ]
+            | Eth.Gateway.Mac _ -> [ sel false ; sel true ]) gateways in
     let eth =
         Eth.State.make ~parent ~name ~mac ~gateways ?answer_requests
             ?promisc:(if promisc then Some ignore else None)
             ~speeds:[ speed ] ~full_duplex ?mtu
-            ~my_addresses:[ Eth.State.make_my_ip_address
-                ?prefix_len:(Option.map Ip.Cidr.width_of_netmask netmask) ip ] () in
+            ~my_addresses:(List.map (fun c ->
+                let a, w = (c : Ip.Cidr.t :> Ip.Addr.t * int) in
+                Eth.State.make_my_ip_address ~prefix_len:w a) addresses) () in
     (* No cable to negotiate with: the link is what the interface supports. *)
     eth.iface.widget.ports.set_capabilities 0 Capabilities.Any ;
     eth.iface.rx_wire <- rx_wire ;
@@ -1724,8 +1734,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
        runs "print(\"${nargs()} ${arg(0)} ${arg(1, default=\"x\")} ${arg(2, default=\"c\")}\")"))
   "0s: failed: line 1, column 5: No argument 0: 0 given" \
     (runs "x = arg(0)")
-  "0s: [127.0.0.1] localhost\n0s: done" \
-    (runs "print(\"${resolve(\"localhost\")} ${hostname(resolve(\"localhost\")[0])}\")")
+  "0s: [127.0.0.1] [::1] localhost\n0s: done" \
+    (runs "print(\"${resolve(\"127.0.0.1\")} ${resolve(\"::1\")} ${hostname(resolve(\"localhost\")[0])}\")")
   "0s: {ip: 10.0.0.2, ok: true, rtt: 1.5ms}\n0s: done" \
     (runs "print(format({ip: 10.0.0.2, rtt: 1.5ms, ok: true}))")
   "0s: {\"data\":\"#0102\",\"ip\":\"10.0.0.2\",\"rtt\":0.0015,\"tags\":[\"a\",\"b\"]}\n0s: done" \
@@ -1846,7 +1856,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
 (*$= runs & ~printer:identity
   "0s: failed: line 1, column 1: The MAC address of 10.0.0.3 is not known: Eth! needs a dst" \
     (runs ~frames:true "/Eth!/IP!(dst=10.0.0.3)/UDP(src=1, dst=2)/Raw(\"x\")")
-  "0s: failed: line 1, column 1: A self-driven Eth carries only IPv4: use Eth!" \
+  "0s: failed: line 1, column 1: A self-driven Eth carries only IP and IP6: use Eth!" \
     (runs ~frames:true "/Eth/Raw(\"x\")")
   "0s: failed: line 1, column 1: IP needs a proto" \
     (runs ~frames:true "/IP(dst=1.2.3.4)/Raw(\"x\")")
@@ -2133,7 +2143,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
  * sends ("a>") and receives ("a<") too, from their IP layer.
  * [without_counts] removes the numbers of packets received from the trees.
  * [with_host] is the same with a simulated host at 10.0.0.2, set up by
- * [setup], which is given a function for the host to print lines. *)
+ * [setup], which is given a function for the host to print lines. With
+ * [v6], the programs and the host also have 2001:db8::N/64. *)
 (*$inject
   let compile text =
       match Crafty_parser.parse text with
@@ -2147,9 +2158,13 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
   let mac n = Eth.Addr.of_string (Printf.sprintf "02:00:00:00:00:%02x" n)
   let netmask = Ip.Addr.of_string "255.255.255.0"
 
-  let crafty_peer sim n =
+  let address6 n = Ip.Addr.of_string (Printf.sprintf "2001:db8::%d" n)
+
+  let crafty_peer ?(v6=false) sim n =
       Eth.State.make ~parent:sim.SimTypes.root ~name:(Printf.sprintf "crafty%d" n) ~mac:(mac n)
-          ~my_addresses:[ Eth.State.make_my_ip_address ~prefix_len:24 (address n) ] ()
+          ~my_addresses:(Eth.State.make_my_ip_address ~prefix_len:24 (address n) ::
+                         if v6 then [ Eth.State.make_my_ip_address ~prefix_len:64 (address6 n) ]
+                         else []) ()
 
   let knows (eth : Eth.State.t) n =
       Tools.BitHash.replace eth.neighbors (Ip.Addr.to_bitstring (address n)) (Some (mac n))
@@ -2201,10 +2216,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
               skip := false ; Stdlib.Buffer.add_char b c)) s ;
       Stdlib.Buffer.contents b
 
-  let two ?(loss=0.) ?(arp=false) ?(frames=false) ?closed a b =
+  let two ?(loss=0.) ?(arp=false) ?(frames=false) ?v6 ?closed a b =
       let sim = Simulation.make ~realtime:false "crafty-pair" in
       let out = ref [] in
-      let ea = crafty_peer sim 1 and eb = crafty_peer sim 2 in
+      let ea = crafty_peer ?v6 sim 1 and eb = crafty_peer ?v6 sim 2 in
       ea.loss <- loss ; eb.loss <- loss ;
       if arp then (knows ea 2 ; knows eb 1) ;
       let log = if frames then Some (frame_line sim out) else None in
@@ -2214,11 +2229,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
       Simulation.run sim false ;
       String.concat "\n" (List.rev !out)
 
-  let with_host ?(setup=fun _ _ -> ()) ?(frames=false) ?closed text =
+  let with_host ?(setup=fun _ _ -> ()) ?(frames=false) ?(v6=false) ?closed text =
       let sim = Simulation.make ~realtime:false "crafty-host" in
       let out = ref [] in
-      let ea = crafty_peer sim 1 in
-      let h = Host.make ~parent:sim.SimTypes.root ~static_ip:(address 2) ~netmask "host" in
+      let ea = crafty_peer ~v6 sim 1 in
+      let addresses = if v6 then [ Ip.Cidr.o (address6 2, 64) ] else [] in
+      let h = Host.make ~parent:sim.SimTypes.root ~static_ip:(address 2) ~netmask ~addresses "host" in
       let log = if frames then Some (frame_line sim out) else None in
       plug sim ?log ea.Eth.State.iface.widget h.Host.trx.Host.widget ;
       Simulation.run_startup sim ;
@@ -2405,6 +2421,27 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
     (with_host ~frames:true \
         "/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=100)/Raw()\nexpect timeout=1s /IP/TCP!(src == 7, flags & RST) { print(MATCH[TCP].ack_num) }")
 *)
+(* IPv6, with neighbor discovery: ping, a UDP echo server, a closed port, a
+ * TCP echo server; an address of the wrong family; a packet too big forged
+ * by a program, quoting the datagram: *)
+(*$= & ~printer:identity
+  "a 0.000s: seq 1 from 2001:db8::2 hop 64\na 0.100s: seq 2 from 2001:db8::2 hop 64\na 0.100s: done Eth#3" \
+    (with_host ~v6:true "/IP6(dst=2001:db8::2)/ICMP6/Echo { repeat count=2 every=100ms { Request(\"hi\")\n    expect timeout=1s Reply { assert(MATCH[Reply].payload == \"hi\")\n      print(\"seq ${MATCH[Reply].seq} from ${MATCH[IP6].src} hop ${MATCH[IP6].hop_limit}\") } } }")
+  "a 0.000s: echo 0\na 0.000s: echo 1\na 0.000s: done Eth#3" \
+    (with_host ~v6:true ~setup:(fun h _ -> h.Host.trx.Host.udp_server_start (Udp.Port.o 7) (fun udp -> \
+        Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
+        "/IP6(dst=2001:db8::2)/UDP(dst=7) { repeat count=2 { Raw(\"echo ${I}\")\n    expect timeout=1s Raw { print(MATCH[Raw].data) } } }")
+  "a 0.000s: port 9 of 2001:db8::2, from 2001:db8::2, length 15\na 0.000s: done Eth#2" \
+    (with_host ~v6:true "/IP6(dst=2001:db8::2)/UDP(src=4000, dst=9)/Raw(\"anyone?\")\nexpect timeout=1s /IP6/ICMP6/DestUnreachable(code == PORT_UNREACHABLE6)/IP6/UDP(src == 4000) {\n  print(\"port ${MATCH[UDP].dst} of ${MATCH[DestUnreachable/IP6].dst}, from ${MATCH[/IP6].src}, length ${MATCH[UDP].length}\") }")
+  "a 0.000s: hello\na 0.000s: 1440\na 0.000s: done Eth#3{IP6(src=2001:db8::1, dst=2001:db8::2)#2{TCP(src=4000, dst=7)#2{Raw#2}}}" \
+    (with_host ~v6:true ~setup:tcp_echo \
+        "/IP6(dst=2001:db8::2)/TCP(src=4000, dst=7) {\n  Raw(\"hello\")\n  expect timeout=1s Raw { print(MATCH[Raw].data)\n    print(stats().snd_mss) } }")
+  "a 0.000s: failed: line 1, column 1: IP takes IPv4 addresses, not 2001:db8::2: use IP6 Eth" \
+    (with_host ~v6:true "/IP(dst=2001:db8::2)/UDP(src=4000, dst=9)/Raw(\"x\")")
+  "a 0.000s: mtu 1280 for 2001:db8::2 port 33434\na 0.000s: done Eth#2\nb 0.000s: done Eth#2" \
+    (two ~v6:true "/IP6(dst=2001:db8::2)/UDP(src=4000, dst=33434)/Raw(\"probe\")\nexpect timeout=1s /IP6/ICMP6/PacketTooBig/IP6/UDP(src == 4000) {\n  print(\"mtu ${MATCH[PacketTooBig].mtu} for ${MATCH[PacketTooBig/IP6].dst} port ${MATCH[UDP].dst}\") }" \
+         "expect timeout=1s /IP6/UDP(dst == 33434)/Raw {\n  /IP6(dst=MATCH[IP6].src)/ICMP6/PacketTooBig(mtu=1280)/IP6(src=MATCH[IP6].src, dst=MATCH[IP6].dst)/UDP(src=MATCH[UDP].src, dst=MATCH[UDP].dst)/Raw(MATCH[Raw].data) }")
+*)
 (* [policed ?limits ?stop_at ?stop text] is what the program in that text prints,
  * each line with the time to the millisecond, how it ends, then how many
  * frames went through a policer with these limits, which stops the program
@@ -2422,8 +2459,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
               out := Printf.sprintf "%.3fs: %s" (Clock.Time.to_secs (Simulation.now sim)) s :: !out in
           let dev, h =
               run ~parent:sim.SimTypes.root ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
-                  ~ip:(Ip.Addr.of_string "10.0.0.1") ~netmask:(Ip.Addr.of_string "255.255.255.0")
-                  ~gateway:(Eth.Gateway.Mac (Eth.Addr.of_string "02:00:00:00:00:fe"))
+                  ~addresses:[ Ip.Cidr.of_string "10.0.0.1/24" ]
+                  ~gateways:[ Eth.Gateway.Mac (Eth.Addr.of_string "02:00:00:00:00:fe") ]
                   ~print:line ~print_err:line
                   ~on_warning:(fun e -> line ("warning "^ IO.to_string print_error e))
                   ~on_exit:(fun s -> line (IO.to_string print_status s)) p in
@@ -2509,8 +2546,9 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
               "PORTS = {udp: [[5000, 5000]]}\n\
                wait dur=1s\n/IP(dst=1.2.3.4)/UDP(dst=7)/Raw(\"x\")") in
   let dev, h =
-      run ~parent:sim.SimTypes.root ~mac:(mac "02:00:00:00:00:01") ~ip:(ip "10.0.0.1")
-          ~netmask:(ip "255.255.255.0") ~gateway:(Eth.Gateway.Ip (ip "10.0.0.254"))
+      run ~parent:sim.SimTypes.root ~mac:(mac "02:00:00:00:00:01")
+          ~addresses:[ Ip.Cidr.of_string "10.0.0.1/24" ]
+          ~gateways:[ Eth.Gateway.Ip (ip "10.0.0.254") ]
           ~answer_requests:false p in
   let frames = ref [] in
   Tools.(dev --> sink (fun bits ->

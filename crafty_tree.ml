@@ -205,10 +205,18 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
                 (match l.fields.(i).pick with
                 | Some L.Told -> None
                 | Some L.Local_address ->
-                    (match Eth.State.find_ip4 parent.eth with
-                    | ip -> Some (Ip ip)
-                    | exception Not_found ->
-                        error loc "No IPv4 address to send %s from" (L.N.to_string l.name))
+                    (* The one that reaches the destination, if given: *)
+                    let v6 = l.name = L.N.IP6 in
+                    let dst =
+                        match Option.bind (L.find_field l "dst")
+                                          (fun j -> List.assoc_opt j options) with
+                        | Some (Ip d) when Ip.Addr.is_v6 d = v6 -> d
+                        | _ -> if v6 then Ip.Addr.zero6 else Ip.Addr.zero in
+                    (match Eth.State.src_for parent.eth dst with
+                    | Some ip -> Some (Ip ip)
+                    | None ->
+                        error loc "No IPv%c address to send %s from"
+                            (if v6 then '6' else '4') (L.N.to_string l.name))
                 | Some (L.Random_in (lo, hi)) ->
                     random := true ;
                     Some (pick_random loc parent l i [ lo, hi ])

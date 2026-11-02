@@ -372,26 +372,25 @@ let () =
                             if proto' = proto && p' = p then
                                 Some (Unix.string_of_inet_addr a)
                             else None) sockets))) ports))) ;
-    let ip, netmask =
-        let ip4 =
-            List.find_map_opt (fun c ->
-                let a, w = (c : Ip.Cidr.t :> Ip.Addr.t * int) in
-                if Ip.Addr.is_v6 a then None
-                else Some (a, Ip.Addr.of_bitstring (Ip.Addr.mask w))) iface.addresses in
-        match ip4, !own_ip with
-        | Some (ip, netmask), None -> ip, netmask
-        | Some (_, netmask), Some ip -> ip, netmask
-        | None, _ -> die "Interface %s has no IPv4 address." !ifname in
-    (* The local addresses accepted unless said otherwise: the program's own,
-     * or else the interface's: *)
+    (* The program's own address, on the network of the interface's first one
+     * of its family (else on no network), or else all of the interface's: *)
+    let addresses =
+        match !own_ip with
+        | Some ip ->
+            let width =
+                List.find_map_opt (fun c ->
+                    let a, w = (c : Ip.Cidr.t :> Ip.Addr.t * int) in
+                    if Ip.Addr.is_v6 a = Ip.Addr.is_v6 ip then Some w else None)
+                    iface.addresses |? Ip.Addr.length ip in
+            [ Ip.Cidr.o (ip, width) ]
+        | None ->
+            if iface.addresses = [] then
+                die "Interface %s has no IP address." !ifname ;
+            iface.addresses in
+    (* The local addresses accepted unless said otherwise: *)
     let limits =
         let local =
-            match !own_ip with
-            | Some ip -> [ ip ]
-            | None ->
-                List.filter_map (fun c ->
-                    let a = fst (c : Ip.Cidr.t :> Ip.Addr.t * int) in
-                    if Ip.Addr.is_v6 a then None else Some a) iface.addresses in
+            List.map (fun c -> fst (c : Ip.Cidr.t :> Ip.Addr.t * int)) addresses in
         { limits with permissions =
             Crafty_typing.resolve_permissions ~program:program.limits.permissions
                                               ~cli:cli_permissions ~local } in
@@ -437,8 +436,10 @@ let () =
                 if !fw then (
                     Host_config.firewall t ~ifname:!ifname ~ports () ;
                     Host_config.reserve_ports t ports) ;
-                if !own_ip <> None && Host_config.ip_forward () then
-                    Host_config.firewall t ~ifname:!ifname ~forward_drop:ip ()
+                Option.may (fun ip ->
+                    if Host_config.ip_forward ~v6:(Ip.Addr.is_v6 ip) () then
+                        Host_config.firewall t ~ifname:!ifname ~forward_drop:ip ()
+                ) !own_ip
             with e ->
                 Printf.eprintf "Cannot configure %s: %s\n" !ifname
                     (Printexc.to_string e) ;
@@ -518,10 +519,9 @@ let () =
     let handle = ref None in
     let idle () = Option.map_default (fun h -> h.Crafty_interp.idle ()) true !handle in
     let dev, h =
-        Crafty_interp.run ~parent:sim.root ~mac:iface.mac ~ip ~netmask
+        Crafty_interp.run ~parent:sim.root ~mac:iface.mac ~addresses
             ~speed ~full_duplex ~mtu
-            ?gateway:(Option.map (fun gw -> Eth.Gateway.Ip gw)
-                        (List.find_opt Ip.Addr.is_v4 iface.gateways))
+            ~gateways:(List.map (fun gw -> Eth.Gateway.Ip gw) iface.gateways)
             (* The kernel answers for its own address: *)
             ~answer_requests:(!own_ip <> None) ~promisc:!promisc
             ~limits

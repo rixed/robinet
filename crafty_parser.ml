@@ -263,27 +263,53 @@ let float_lit =
      (digits ++ exponent >>: fun (i, e) -> i ^ e) |> signed) +- end_of_word >>:
     fun s -> Float (float_of_string s)
 
+(* An IPv6 address: groups of hexadecimal digits (the last of which can be
+ * an IPv4 address), separated by colons, a pair of which stands for the
+ * groups of zeroes left out. A colon that no group follows does not belong
+ * to it ([::1: "lo"] in a map). What is not an IPv6 address is no error, as
+ * it can be a MAC address or anything else with colons: *)
+let ip6_addr =
+    let group = chars_of "hexadecimal digit" (fun c -> is_hex c || c = '.') in
+    let double = item ':' -- item ':' -+ optional ~def:"" group >>: (^) "::"
+    and single = item ':' -+ group >>: (^) ":" in
+    quiet (optional ~def:"" group ++ repeat_greedy ~sep:none ~min:1 (double ||| single)) >>=
+    fun (g, gs) ->
+        match Ip.Addr.of_dotted_string (g ^ String.concat "" gs) with
+        | a when Ip.Addr.is_v6 a -> return a
+        | _ | exception Failure _ -> fail
+
 (* Not followed by a slash and a digit, which make a CIDR: *)
 let ip_lit =
     let octet = chars_of ~max:3 "digit" is_digit in
-    octet ++ times 3 ~sep:none (item '.' -+ octet) +- end_of_word +-
-    quiet (nay (item '/' -- char_if "digit" is_digit)) >>:
-    fun (o, os) ->
+    let not_cidr = quiet (nay (item '/' -- char_if "digit" is_digit)) in
+    (octet ++ times 3 ~sep:none (item '.' -+ octet) +- end_of_word +- not_cidr >>:
+     fun (o, os) ->
         let s = String.concat "." (o :: os) in
         if List.exists (fun o -> int_of_string o > 255) (o :: os) then
             reject "Invalid IP address %s" s ;
-        Ip (Ip.Addr.of_dotted_string s)
+        Ip (Ip.Addr.of_dotted_string s)) |||
+    (ip6_addr +- end_of_word +- not_cidr >>: fun a -> Ip a)
 
 (* A network address: no bit is set beyond the mask. *)
 let cidr_lit =
     let octet = chars_of ~max:3 "digit" is_digit in
-    octet ++ times 3 ~sep:none (item '.' -+ octet) +- item '/' ++
-    chars_of ~max:2 "digit" is_digit +- end_of_word >>:
-    fun ((o, os), w) ->
-        let s = String.concat "." (o :: os) ^"/"^ w in
-        if List.exists (fun o -> int_of_string o > 255) (o :: os) ||
-           int_of_string w > 32 then
-            reject "Invalid CIDR %s" s ;
+    let v4 =
+        octet ++ times 3 ~sep:none (item '.' -+ octet) +- item '/' ++
+        chars_of ~max:2 "digit" is_digit +- end_of_word >>:
+        fun ((o, os), w) ->
+            let s = String.concat "." (o :: os) ^"/"^ w in
+            if List.exists (fun o -> int_of_string o > 255) (o :: os) ||
+               int_of_string w > 32 then
+                reject "Invalid CIDR %s" s ;
+            s
+    and v6 =
+        ip6_addr +- item '/' ++ chars_of ~max:3 "digit" is_digit +- end_of_word >>:
+        fun (a, w) ->
+            let s = Ip.Addr.to_dotted_string a ^"/"^ w in
+            if int_of_string w > 128 then reject "Invalid CIDR %s" s ;
+            s in
+    v4 ||| v6 >>:
+    fun s ->
         let c = Ip.Cidr.of_string s in
         let net, width = (c :> Ip.Addr.t * int) in
         if Ip.Addr.compare (Ip.Addr.higher_bits net width) net <> 0 then
@@ -356,6 +382,14 @@ let parse_literal s =
   (Some (Crafty_ast.Float (-1.5))) (parse_literal "-1.5")
   None (parse_literal "1.2.3.4 x")
   None (parse_literal "")
+  (Some (Crafty_ast.Ip (Ip.Addr.of_string "2001:db8::1"))) (parse_literal "2001:DB8::1")
+  (Some (Crafty_ast.Ip (Ip.Addr.of_string "::"))) (parse_literal "::")
+  (Some (Crafty_ast.Ip (Ip.Addr.of_string "::ffff:1.2.3.4"))) (parse_literal "::ffff:1.2.3.4")
+  (Some (Crafty_ast.Ip (Ip.Addr.of_string "1:2:3:4:5:6:7:8"))) (parse_literal "1:2:3:4:5:6:7:8")
+  (Some (Crafty_ast.Cidr (Ip.Cidr.of_string "2001:db8::/32"))) (parse_literal "2001:db8::/32")
+  (Some (Crafty_ast.Mac (Eth.Addr.of_string "02:00:00:00:00:01"))) (parse_literal "02:00:00:00:00:01")
+  None (parse_literal "dead:beef")
+  None (parse_literal "1::2::3")
 *)
 
 (* One byte, or an array of them when more than two digits: *)
@@ -1091,6 +1125,7 @@ let parse_patterns text =
     "x = 3 & 4 == 4" ; "x = a & 1 << n + 1 < b >> 2" ; "x <<= 1" ; "x = MATCH[IP/IP].src + MATCH[/IP].dst" ; "x = MATCH[ICMP/_/IP].id + MATCH[/_].src + _/UDP.src" ; \
     "x = length(MATCH) * rand(max=3)" ; "x = - -1 - - (2 - 3)" ; \
     "x = 1m30s + 10ms + 1.5\xc2\xb5s" ; "x = [1.2.3.4 == y, aa:bb:cc:dd:ee:ff]" ; \
+    "x = [::1: \"lo\", 2001:db8::1: \"a\"]\ny = a[1:2] + a[x:] + (2001:db8::1 in 2001:db8::/32)" ; \
     "x = #1ee7 # a comment\nx = #f" ; "x = \"a ${x + 1} b \\${not} \\x41$\"" ; \
     "x = y =~ /IP/UDP(dport = 53)" ; "wait dur=1s * n" ; \
     "repeat every=1s / n count=n*2 {}" ; "foreach t every=1s * 2 [1, 2] {}" ; \
@@ -1205,6 +1240,9 @@ let parse_patterns text =
   "line 1, column 9: Odd number of hexadecimal digits in #123" (reads "x = #123")
   "line 1, column 14: Invalid IP address 300.1.2.3" (reads "x = 300.1.2.3")
   "line 1, column 16: Invalid CIDR 10.0.0.0/33" (reads "x = 10.0.0.0/33")
+  "line 1, column 19: Invalid CIDR 2001:db8::/129" (reads "x = 2001:db8::/129")
+  "line 1, column 19: Invalid CIDR 2001:db8::1/32: bits are set beyond the mask" \
+    (reads "x = 2001:db8::1/32")
   "line 1, column 15: Invalid CIDR 10.0.0.1/8: bits are set beyond the mask" \
     (reads "x = 10.0.0.1/8")
   "line 1, column 7: Invalid interval 5x: unknown unit x" (reads "x = 5x")
