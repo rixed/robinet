@@ -299,7 +299,7 @@ let to_string =
                 "dst", always ip.dst String.print ;
                 "proto", if_not_none ip.proto String.print ]
         | Ip6 ip ->
-            print_trx oc "ip"
+            print_trx oc "ip6"
               [ "src", always ip.src String.print ;
                 "dst", always ip.dst String.print ;
                 "proto", if_not_none ip.proto String.print ]
@@ -323,6 +323,10 @@ let to_string =
             "src_port", if_not_none sock.src_port Int.print ;
             "ttl", if_not_none sock.ttl Int.print ;
             "tos", if_not_none sock.tos Int.print ]) sock
+(*$= to_string & ~printer:identity
+  "ip6(src=::1, dst=::2, proto=udp)" \
+    (to_string (of_string "ip6(src=::1, dst=::2, proto=udp)"))
+ *)
 
 (* Returns the trx and a close function *)
 let to_trx ctx t cont =
