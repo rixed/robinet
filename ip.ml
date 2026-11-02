@@ -112,7 +112,14 @@ module Proto = struct
         | "Tcp" -> Some tcp
         | "Udp" -> Some udp
         | "Ip6" -> Some ipv6
+        | "Icmp6" -> Some icmpv6
         | _ -> None
+    (*$< Proto *)
+    (*$T of_layer
+      of_layer "Icmp6" = Some icmpv6
+      of_layer "Eth" = None
+     *)
+    (*$>*)
 
     (** The protocols this module has a name for, as the choices of a kind
      * (see [Widget.one_of]). A datagram may of course carry any of the 256.
