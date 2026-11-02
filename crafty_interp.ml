@@ -2321,7 +2321,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
               else tx cnx.trx bits)))
 
   let tcp_client h log =
-      h.Host.trx.Host.tcp_connect (Host.IPv4 (address 1)) ~src_port:(Tcp.Port.o 5000) (Tcp.Port.o 80) (function
+      h.Host.trx.Host.tcp_connect (Host.Ip (address 1)) ~src_port:(Tcp.Port.o 5000) (Tcp.Port.o 80) (function
           | None -> log "cannot connect"
           | Some cnx ->
               Tools.(cnx.Tcp.TRX.trx.ins --> sink (fun bits ->

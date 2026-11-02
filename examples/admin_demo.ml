@@ -49,7 +49,7 @@ let main =
                                     netmask =
                                         Some (Ip.Addr.of_string
                                                   "255.255.255.0") ;
-                                    gateway = None ; nameserver = None ;
+                                    addresses = [] ; gateway = None ; nameserver = None ;
                                     search_sfx = None ; mac = None }) in
             (* Spread around the switch, each one further out than the last, so
              * that the three cables are of three different lengths. Before the
@@ -73,7 +73,7 @@ let main =
     let rec tick () =
         List.iteri (fun i ((h : Host.t), _) ->
             let _, dst = List.at hosts ((i + 1) mod List.length hosts) in
-            h.Host.trx.Host.ping (Host.IPv4 dst)
+            h.Host.trx.Host.ping (Host.Ip dst)
         ) hosts ;
         Simulation.delay net.root.power (Clock.Interval.msec 100.) tick () in
     (* A DHCP server on the first host, so that the interface has properties

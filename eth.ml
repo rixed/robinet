@@ -1816,7 +1816,7 @@ struct
         (* Both go out before the first can be answered, so both wait on the
            same resolution. *)
         List.iter (fun n ->
-            a.Host.trx.Host.udp_send (Host.IPv4 (ip 2)) (Udp.Port.o 5000)
+            a.Host.trx.Host.udp_send (Host.Ip (ip 2)) (Udp.Port.o 5000)
                                      (Bitstring.bitstring_of_string n)
         ) [ "one" ; "two" ] ;
         Simulation.run sim false ;

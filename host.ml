@@ -32,7 +32,7 @@ open SimTypes
 open Bitstring
 open Tools
 
-type addr = IPv4 of Ip.Addr.t | Name of string
+type addr = Ip of Ip.Addr.t | Name of string
 
 (* FIXME: that's plenty of closures which only state is the host.
  * To make host object smaller we should store a single backlink to it,
@@ -130,6 +130,9 @@ and t = {
     mutable static_ip : Ip.Addr.t option ;
     mutable host_name : string ;
     mutable netmask : Ip.Addr.t option ;
+    (* Other addresses, of either family, given at boot whatever
+       [static_ip]: *)
+    mutable addresses : Ip.Cidr.t list ;
     (* What the current lease granted, if anything. A lease is not a
        property of the host but of the moment: it goes when the power
        does (see [reset]), and what it does not carry falls back on the
@@ -172,10 +175,32 @@ let cur_search_sfx t = if t.leased_search_sfx <> None then t.leased_search_sfx
 let cur_host_name t = t.leased_host_name |? t.host_name
 
 (* IP packets are sized for the host's only interface, and TCP segments for
- * those packets (IP and TCP headers without options): *)
+ * those packets (IP and TCP headers without options) from [local]: *)
 let ip_mtu t = t.eth_state.Eth.State.mtu
-(* FIXME: Ip.Pdu.no_opt_hdr_len over IPv4 only! *)
-let tcp_mss t = ip_mtu t - Ip.Pdu.no_opt_hdr_len - Tcp.Pdu.no_opt_hdr_len
+let tcp_mss t local =
+    let ip_hdr_len = if Ip.Addr.is_v6 local then 40 else Ip.Pdu.no_opt_hdr_len in
+    ip_mtu t - ip_hdr_len - Tcp.Pdu.no_opt_hdr_len
+
+let my_addresses t =
+    List.map (fun (a : Eth.State.my_address) -> Ip.Addr.of_bitstring a.addr, a)
+             t.eth_state.Eth.State.my_addresses
+
+let is_mine t ip =
+    List.exists (fun (a, _) -> Ip.Addr.compare a ip = 0) (my_addresses t)
+
+(* The address to reach [dst] from, of its family: one on its subnet, or else
+ * one that is not link-local, or else any. *)
+let src_for t dst =
+    let same =
+        List.filter (fun (a, _) -> Ip.Addr.is_v6 a = Ip.Addr.is_v6 dst)
+                    (my_addresses t) in
+    let dst_bits = Ip.Addr.to_bitstring dst in
+    match List.find_opt (fun (_, m) -> Eth.State.on_subnet m dst_bits) same with
+    | Some (a, _) -> Some a
+    | None ->
+        match List.find_opt (fun (a, _) -> not (Ip.Addr.is_link_local a)) same with
+        | Some (a, _) -> Some a
+        | None -> (match same with (a, _) :: _ -> Some a | [] -> None)
 
 let print oc trx = String.print oc trx.widget.name
 
@@ -207,10 +232,14 @@ let sweep_tcps t =
         | Tcp_sock c -> not (c.is_over ())
         | Udp_sock _ -> true) t.sockets
 
-(* A new IP TRX from [local] to [remote], emitting to the adapter: *)
+(* A new IP TRX from [local] to [remote], of their family, emitting to the
+ * adapter. IPv6 ones drop what exceeds the MTU rather than fragment it. *)
 let ip_trx t proto local remote =
-    let trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) local remote proto
-                          t.trx.widget.logger in
+    let power = t.trx.widget.power and mtu = ip_mtu t
+    and logger = t.trx.widget.logger in
+    let trx =
+        if Ip.Addr.is_v6 local then Ip6.TRX.make power ~mtu local remote proto logger
+        else Ip.TRX.make power ~mtu local remote proto logger in
     trx =-> t.eth_trx.ins ;
     trx
 
@@ -249,7 +278,7 @@ let tcp_rx t ~local ~remote bits =
                 sweep_tcps t ;
                 let cnx =
                     Tcp.TRX.make
-                        t.trx.widget.power ~mss:(tcp_mss t)
+                        t.trx.widget.power ~mss:(tcp_mss t local)
                         ?snd_buf:server.tcp_snd_buf
                         ?rcv_buf:server.tcp_rcv_buf
                         tcp.dst_port tcp.src_port
@@ -268,15 +297,14 @@ let tcp_rx t ~local ~remote bits =
                     if not (c.is_closed ()) then server.tcp_accept c)) ;
                 rx cnx.tcp_trx.trx bits
 
-(* Hand the datagram [ip] to its socket, or to a server that opens one, or
- * answer with a port unreachable. *)
-let udp_rx t ~local (ip : Ip.Pdu.t) =
-    match Udp.Pdu.unpack (ip.payload :> bitstring) with
+(* Hand the datagram to its socket, or to a server that opens one, or else
+ * call [unreachable] unless it was sent [to_all] (RFC 1122, 3.2.2). *)
+let udp_rx t ~local ~remote ~to_all ~unreachable bits =
+    match Udp.Pdu.unpack bits with
     | Error s ->
         Log.(log t.trx.widget.logger Warning s)
     | Ok udp ->
-        let bits = (ip.payload :> bitstring) in
-        let key = udp_key local udp.dst_port ip.src udp.src_port in
+        let key = udp_key local udp.dst_port remote udp.src_port in
         match find_udp t key with
         | Some u ->
             rx u.trx bits
@@ -284,17 +312,17 @@ let udp_rx t ~local (ip : Ip.Pdu.t) =
             match Hashtbl.find_option t.udp_servers udp.dst_port with
             | Some server ->
                 let u = Udp.TRX.make t.trx.widget.power udp.dst_port udp.src_port t.trx.widget.logger in
-                u.trx =-> (ip_trx t Ip.Proto.udp local ip.src).ins ;
+                u.trx =-> (ip_trx t Ip.Proto.udp local remote).ins ;
                 Hashtbl.add t.sockets key (Udp_sock u) ;
                 server.udp_peers <- key :: server.udp_peers ;
                 server.udp_accept u ; (* supposed to set the recver of this udp trx *)
                 rx u.trx bits
             | None ->
                 Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %s" (Udp.Port.to_string udp.dst_port)))) ;
-                (* Not to what was sent to all (RFC 1122, 3.2.2): *)
-                if not Ip.Addr.(is_broadcast ip.dst || is_multicast ip.dst) then
-                    Icmp.Pdu.make_port_unreachable ip |> Icmp.Pdu.pack |>
-                    ip_reply t Ip.Proto.icmp local ip.src
+                if not to_all then unreachable ()
+
+let echo_reply_rx t id seq =
+    Option.may (fun waiter -> waiter seq) (Hashtbl.find_option t.echo_waiters id)
 
 let icmp_rx t ~local ~remote bits =
     match Icmp.Pdu.unpack bits with
@@ -309,8 +337,24 @@ let icmp_rx t ~local ~remote bits =
         (* A reply nobody is waiting for is dropped. *)
         | Ok Icmp.Pdu.{ msg_type ; payload = Ids (id, seq, _) ; _ }
             when Icmp.MsgType.is_echo_reply msg_type ->
-                Option.may (fun waiter -> waiter seq)
-                           (Hashtbl.find_option t.echo_waiters id)
+                echo_reply_rx t id seq
+        | _ -> ()
+
+(* Neighbor discovery is the adapter's: *)
+let icmp6_rx t ~local ~remote bits =
+    match Icmp6.Pdu.unpack bits with
+        | Error s ->
+            Log.(log t.trx.widget.logger Warning s)
+        | Ok Icmp6.Pdu.{ msg_type ; payload = Ids (id, seq, pld) } ->
+            (match Icmp6.MsgType.type_of msg_type, Icmp6.MsgType.code_of msg_type with
+            | 128, 0 ->
+                Log.(log t.trx.widget.logger Debug (lazy "Answering a PING")) ;
+                Icmp6.Pdu.make_echo_reply id seq ~pld |>
+                Icmp6.Pdu.pack |>
+                ip_reply t Ip.Proto.icmpv6 local remote
+            | 129, 0 ->
+                echo_reply_rx t id seq
+            | _ -> ())
         | _ -> ()
 
 exception AlreadyConnected
@@ -319,11 +363,11 @@ exception CannotResolveName
 exception DnsTimeout
 
 let string_of_addr = function
-    | IPv4 ip  -> Ip.Addr.to_string ip
+    | Ip ip  -> Ip.Addr.to_string ip
     | Name str -> str
 
 let addr_of_string s =
-   try IPv4 (Ip.Addr.of_string s)
+   try Ip (Ip.Addr.of_string s)
    with _ -> Name s
 
 (* Waiting to be attached to the widget of the host that owns them, which will
@@ -337,9 +381,27 @@ let resolution_timeouts  = Metric.Atomic.make "Host/Resolver/Timeouts"
 let resolution_cachehits = Metric.Atomic.make "Host/Resolver/CacheHits"
 *)
 
-let ip_is_set t =
-    try ignore (Eth.State.find_ip4 t.eth_state) ; true
-    with Not_found -> false
+let ip_is_set t = t.eth_state.Eth.State.my_addresses <> []
+
+(* [f src] with the address [dst] is reached from, if this host is on and has
+ * one: *)
+let with_src_for t dst f =
+    if t.trx.widget.power.on then
+        match src_for t dst with
+        | Some src -> f src
+        | None ->
+            Log.(log t.trx.widget.logger Warning (lazy (Printf.sprintf
+                "No address to reach %s from" (Ip.Addr.to_string dst))))
+
+(* [connect my_ip dst_ip] with the address [dst_ip] is reached from, or
+ * [cont None] if there is none: *)
+let connect_from t cont connect dst_ip =
+    match src_for t dst_ip with
+    | Some my_ip -> connect my_ip dst_ip
+    | None ->
+        Log.(log t.trx.widget.logger Error (lazy (Printf.sprintf
+            "No address to reach %s from" (Ip.Addr.to_string dst_ip)))) ;
+        cont None
 
 let rec with_resolver_trx t cont =
     let dns_recv _trx bits = (match Dns.Pdu.unpack bits with
@@ -385,7 +447,7 @@ let rec with_resolver_trx t cont =
         cont None
     | None, Some srv ->
         Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Create a resolving TRX to DNS %s" (Ip.Addr.to_string srv)))) ;
-        udp_connect t (IPv4 srv) (Udp.Port.o 53) ~src_port:(Udp.Port.o 53) dns_recv (function
+        udp_connect t (Ip srv) (Udp.Port.o 53) ~src_port:(Udp.Port.o 53) dns_recv (function
         | None -> cont None
         | Some (trx : Udp.TRX.udp_trx) ->
             t.resolv_trx <- Some trx.trx ;
@@ -453,8 +515,7 @@ and do_gethostbyname t name cont =
 and tcp_connect t dst ?src_port ?snd_buf ?rcv_buf (dst_port : Tcp.Port.t) cont =
     (* Fail if we do not have an IP yet *)
     if not (t.trx.widget.power.on && ip_is_set t) then cont None else
-    let my_ip = Eth.State.find_ip4 t.eth_state in
-    let connect dst_ip =
+    let connect my_ip dst_ip =
         Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Connecting to %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
         let key src_port = tcp_key my_ip src_port dst_ip dst_port in
         (* Try to find a unused port if none was given, or ensure the given one is free *)
@@ -485,7 +546,7 @@ and tcp_connect t dst ?src_port ?snd_buf ?rcv_buf (dst_port : Tcp.Port.t) cont =
             | None ->
                 cont None
             | Some src_port ->
-                let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t) ?snd_buf ?rcv_buf src_port dst_port t.trx.widget.logger in
+                let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t my_ip) ?snd_buf ?rcv_buf src_port dst_port t.trx.widget.logger in
                 tcp.tcp_trx.trx =-> (ip_trx t Ip.Proto.tcp my_ip dst_ip).ins ;
                 Hashtbl.add t.sockets (key src_port) (Tcp_sock tcp.tcp_trx) ;
                 Tcp.TRX.connect tcp (function
@@ -498,8 +559,9 @@ and tcp_connect t dst ?src_port ?snd_buf ?rcv_buf (dst_port : Tcp.Port.t) cont =
                     Log.(log t.trx.widget.logger Error (lazy (Printf.sprintf2 "Cannot connect to %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
                     cont None)
     in
+    let connect = connect_from t cont connect in
     match dst with
-        | IPv4 dst_ip ->
+        | Ip dst_ip ->
             connect dst_ip
         | Name name ->
             gethostbyname t name (function
@@ -516,8 +578,7 @@ and tcp_connect t dst ?src_port ?snd_buf ?rcv_buf (dst_port : Tcp.Port.t) cont =
 and udp_connect t dst ?src_port dst_port client_f cont =
     (* Fail if we do not have an IP yet *)
     if not (t.trx.widget.power.on && ip_is_set t) then cont None else
-    let my_ip = Eth.State.find_ip4 t.eth_state in
-    let connect dst_ip =
+    let connect my_ip dst_ip =
         let src_port = may_default src_port (fun () -> Udp.Port.o (Random.int 0x10000)) in
         let key = udp_key my_ip src_port dst_ip dst_port in
         if Hashtbl.mem t.sockets key then (
@@ -533,8 +594,9 @@ and udp_connect t dst ?src_port dst_port client_f cont =
             cont (Some trx)
         )
     in
+    let connect = connect_from t cont connect in
     match dst with
-        | IPv4 dst_ip ->
+        | Ip dst_ip ->
             connect dst_ip
         | Name name ->
             gethostbyname t name (function
@@ -544,47 +606,36 @@ and udp_connect t dst ?src_port dst_port client_f cont =
                 Log.(log t.trx.widget.logger Error (lazy ("Cannot resolve "^name))) ;
                 cont None)
 
-let with_my_ip t f =
-    if t.trx.widget.power.on then
-        match Eth.State.find_ip4 t.eth_state with
-        | exception Not_found -> ()
-        | my_ip -> f my_ip
+(* Each of these resolves [dst] if it is a name, and is sent from no
+ * socket: *)
+let with_dst t dst f =
+    match dst with
+    | Ip dst_ip -> f dst_ip
+    | Name name ->
+        gethostbyname t name (function
+        | Some (dst_ip :: _) -> f dst_ip
+        | _ -> ())
 
 let udp_send t dst ?src_port dst_port bits =
-    with_my_ip t (fun my_ip ->
-        let send dst_ip =
+    with_dst t dst (fun dst_ip ->
+        with_src_for t dst_ip (fun my_ip ->
             Udp.Pdu.make ~src_port:(Option.default dst_port src_port)
                          ~dst_port bits |>
-                Udp.Pdu.pack |>
-                Ip.Pdu.make Ip.Proto.udp my_ip dst_ip |>
-                Ip.Pdu.pack |>
-                tx t.eth_trx in
-        match dst with
-            | IPv4 dst_ip -> send dst_ip
-            | Name name   ->
-                gethostbyname t name (function
-                | None -> ()
-                | Some dst_ips ->
-                    send (List.hd dst_ips)))
+            Udp.Pdu.pack |>
+            ip_reply t Ip.Proto.udp my_ip dst_ip))
 
 let ping t ?(id=1) ?(seq=1) dst =
-    with_my_ip t (fun my_ip ->
-        let do_ping dst_ip =
+    with_dst t dst (fun dst_ip ->
+        with_src_for t dst_ip (fun my_ip ->
             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Transmitting a ping to %s" (Ip.Addr.to_string dst_ip)))) ;
-            Icmp.Pdu.make_echo_request id seq |>
-            Icmp.Pdu.pack |>
-            Ip.Pdu.make Ip.Proto.icmp my_ip dst_ip |>
-            Ip.Pdu.pack |>
-            tx t.eth_trx in
-        match dst with
-            | IPv4 dst_ip ->
-                do_ping dst_ip
-            | Name name ->
-                gethostbyname t name (function
-                | None -> ()
-                | Some dst_ips ->
-                    if dst_ips <> [] then
-                        do_ping (List.hd dst_ips)))
+            if Ip.Addr.is_v6 dst_ip then
+                Icmp6.Pdu.make_echo_request id seq |>
+                Icmp6.Pdu.pack |>
+                ip_reply t Ip.Proto.icmpv6 my_ip dst_ip
+            else
+                Icmp.Pdu.make_echo_request id seq |>
+                Icmp.Pdu.pack |>
+                ip_reply t Ip.Proto.icmp my_ip dst_ip))
 
 let tcp_server_start t ?snd_buf ?rcv_buf port tcp_accept =
     if Hashtbl.mem t.tcp_servers port then
@@ -645,7 +696,7 @@ let udp_server_stop t port =
     let cnx = ref None and closed = ref false in
     let connect () =
         cnx := None ;
-        a.trx.tcp_connect (IPv4 (ip 2)) port (fun c ->
+        a.trx.tcp_connect (Ip (ip 2)) port (fun c ->
             cnx := c ;
             Option.may (fun (c : Tcp.TRX.tcp_trx) ->
                 c.trx.ins --> sink (fun bits ->
@@ -669,7 +720,7 @@ let udp_server_stop t port =
         b.trx.udp_server_start uport (fun udp ->
             udp.trx.ins --> sink (fun _ -> incr served)) in
     let send () =
-        a.trx.udp_send (IPv4 (ip 2)) ~src_port:(Udp.Port.o 6000) uport
+        a.trx.udp_send (Ip (ip 2)) ~src_port:(Udp.Port.o 6000) uport
                        (Bitstring.zeroes_bitstring 64) ;
         Simulation.run sim false in
     serve () ;
@@ -704,7 +755,7 @@ let udp_server_stop t port =
             if Bitstring.bitstring_length bits = 0 then c.close ())) ;
     let connect () =
         let cnx = ref None in
-        a.trx.tcp_connect (IPv4 (ip 2)) ~src_port:(Tcp.Port.o 1234) port
+        a.trx.tcp_connect (Ip (ip 2)) ~src_port:(Tcp.Port.o 1234) port
                           (fun c -> cnx := c) ;
         Simulation.run sim false ;
         !cnx in
@@ -745,7 +796,7 @@ let udp_server_stop t port =
             if Bitstring.bitstring_length bits = 0 then incr closed)) ;
     let connect () =
         let cnx = ref None in
-        a.trx.tcp_connect (IPv4 (ip 2)) ~src_port:(Tcp.Port.o 1234) port
+        a.trx.tcp_connect (Ip (ip 2)) ~src_port:(Tcp.Port.o 1234) port
                           (fun c -> cnx := c) ;
         Simulation.run sim false ;
         !cnx in
@@ -758,23 +809,34 @@ let udp_server_stop t port =
  *)
 
 (* What the adapter receives for this host, reassembled and handed to the
- * socket it is for. What is sent to all is received on this host's own
- * address. *)
-let ip_recv t bits =
-    with_my_ip t (fun my_ip ->
-        match Ip.Pdu.unpack bits with
-        | Error s ->
-            Log.(log t.trx.widget.logger Warning s)
-        | Ok (ip : Ip.Pdu.t)
-            when Ip.Addr.compare my_ip ip.dst = 0 ||
-                 Ip.Addr.(is_broadcast ip.dst || is_multicast ip.dst) ->
-            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Received an IP packet."))) ;
-            let local = my_ip and remote = ip.src in
+ * socket it is for. What is sent to all is received on the address this host
+ * would answer from. *)
+let ip4_recv t bits =
+    match Ip.Pdu.unpack bits with
+    | Error s ->
+        Log.(log t.trx.widget.logger Warning s)
+    | Ok (ip : Ip.Pdu.t) ->
+        let to_all = Ip.Addr.(is_broadcast ip.dst || is_multicast ip.dst) in
+        let local = if to_all then src_for t ip.src
+                    else if is_mine t ip.dst then Some ip.dst
+                    else None in
+        match local with
+        | None ->
+            Log.(log t.trx.widget.logger Info (lazy (Printf.sprintf
+                "Received an IP packet for %s, not for me"
+                (Ip.Addr.to_string ip.dst))))
+        | Some local ->
+            let remote = ip.src in
             let deliver (ip : Ip.Pdu.t) =
                 let bits = (ip.payload :> bitstring) in
-                if ip.proto = Ip.Proto.tcp then tcp_rx t ~local ~remote bits
-                else if ip.proto = Ip.Proto.udp then udp_rx t ~local ip
-                else if ip.proto = Ip.Proto.icmp then icmp_rx t ~local ~remote bits in
+                if ip.proto = Ip.Proto.tcp then
+                    tcp_rx t ~local ~remote bits
+                else if ip.proto = Ip.Proto.udp then
+                    udp_rx t ~local ~remote ~to_all bits ~unreachable:(fun () ->
+                        Icmp.Pdu.make_port_unreachable ip |> Icmp.Pdu.pack |>
+                        ip_reply t Ip.Proto.icmp local remote)
+                else if ip.proto = Ip.Proto.icmp then
+                    icmp_rx t ~local ~remote bits in
             if Payload.bitlength ip.payload = 0 then
                 Log.(log t.trx.widget.logger Debug (lazy "Ignoring an empty IP packet"))
             else if ip.more_frags || ip.frag_offset > 0 then
@@ -787,10 +849,41 @@ let ip_recv t bits =
                                       payload = Payload.o pld })
             else
                 deliver ip
-        | Ok ip ->
+
+(* Fragments are dropped, there being no reassembly. *)
+let ip6_recv t bits =
+    match Ip6.Pdu.unpack bits with
+    | Error s ->
+        Log.(log t.trx.widget.logger Warning s)
+    | Ok (ip : Ip6.Pdu.t) ->
+        let to_all = Ip.Addr.is_multicast ip.dst in
+        let local = if to_all then src_for t ip.src
+                    else if is_mine t ip.dst then Some ip.dst
+                    else None in
+        match local with
+        | None ->
             Log.(log t.trx.widget.logger Info (lazy (Printf.sprintf
-                "Received an IP packet for %s (I'm %s)"
-                (Ip.Addr.to_string ip.dst) (Ip.Addr.to_string my_ip)))))
+                "Received an IPv6 packet for %s, not for me"
+                (Ip.Addr.to_string ip.dst))))
+        | Some _ when Ip6.Pdu.is_fragment ip ->
+            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf
+                "Ignoring a fragment from %s" (Ip.Addr.to_string ip.src))))
+        | Some local ->
+            let remote = ip.src and bits = (ip.payload :> bitstring) in
+            if ip.proto = Ip.Proto.tcp then
+                tcp_rx t ~local ~remote bits
+            else if ip.proto = Ip.Proto.udp then
+                udp_rx t ~local ~remote ~to_all bits ~unreachable:(fun () ->
+                    Icmp6.Pdu.make_port_unreachable ip |> Icmp6.Pdu.pack |>
+                    ip_reply t Ip.Proto.icmpv6 local remote)
+            else if ip.proto = Ip.Proto.icmpv6 then
+                icmp6_rx t ~local ~remote bits
+
+let ip_recv t bits =
+    if t.trx.widget.power.on && bitstring_length bits >= 4 then
+        match%bitstring bits with
+        | {| 6 : 4 ; _ |} -> ip6_recv t bits
+        | {| _ |} -> ip4_recv t bits
 
 (* Datagrams larger than the MTU arrive whole, each to the socket of its
    ports. *)
@@ -811,7 +904,7 @@ let ip_recv t bits =
             received := ((snd (udp.get_ports ()) :> int), Bitstring.bitstring_length bits / 8)
                         :: !received)) ;
     let send src_port len =
-        a.trx.udp_connect (IPv4 (ip 2)) ~src_port:(Udp.Port.o src_port)
+        a.trx.udp_connect (Ip (ip 2)) ~src_port:(Udp.Port.o src_port)
             (Udp.Port.o 5000) (fun _ _ -> ()) (function
             | None -> assert_failure "cannot connect"
             | Some (u : Udp.TRX.udp_trx) ->
@@ -822,6 +915,79 @@ let ip_recv t bits =
     assert_equal ~printer:(IO.to_string (List.print (Tuple2.print Int.print Int.print)))
         [ 6000, 4000 ; 6001, 3000 ] (List.sort Stdlib.compare !received) ;
     assert_equal ~printer:string_of_int 2 (Hashtbl.length b.sockets)
+ *)
+
+(* Dual-stack hosts talk each family from their address of that family. *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "dual-stack" in
+    let ip4 n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n)
+    and ip6 n = Ip.Addr.of_string ("2001:db8::" ^ string_of_int n) in
+    let host n =
+        make ~parent:sim.root ~static_ip:(ip4 n)
+             ~netmask:(Ip.Addr.of_string "255.255.255.0")
+             ~addresses:[ Ip.Cidr.of_string ("2001:db8::" ^ string_of_int n ^ "/64") ]
+             ("h" ^ string_of_int n) in
+    let a = host 1 and b = host 2 in
+    let st = Eth.Cable.State.make ~parent:sim.root ~name:"c" () in
+    Eth.Cable.plug st (a.trx.widget, 0) (b.trx.widget, 0) ;
+    Simulation.run_startup sim ;
+    (* TCP, over several segments: *)
+    let port = Tcp.Port.o 7 in
+    b.trx.tcp_server_start port (fun (c : Tcp.TRX.tcp_trx) ->
+        c.trx.ins --> sink (fun bits ->
+            if Bitstring.bitstring_length bits > 0 then tx c.trx bits)) ;
+    let echoed dst =
+        let got = ref 0 in
+        a.trx.tcp_connect (Ip dst) port (function
+            | None -> assert_failure "cannot connect"
+            | Some (c : Tcp.TRX.tcp_trx) ->
+                c.trx.ins --> sink (fun bits ->
+                    got := !got + Bitstring.bitstring_length bits / 8) ;
+                tx c.trx (Bitstring.zeroes_bitstring (3000 * 8))) ;
+        Simulation.run sim false ;
+        !got in
+    assert_equal ~printer:string_of_int 3000 (echoed (ip6 2)) ;
+    assert_equal ~printer:string_of_int 3000 (echoed (ip4 2)) ;
+    assert_bool "each from its family"
+        (Hashtbl.fold (fun k _ ok ->
+            ok && Ip.Addr.is_v6 k.local = Ip.Addr.is_v6 k.remote) b.sockets true) ;
+    (* UDP: *)
+    let served = ref 0 in
+    b.trx.udp_server_start (Udp.Port.o 5000) (fun udp ->
+        udp.trx.ins --> sink (fun _ -> incr served)) ;
+    a.trx.udp_send (Ip (ip6 2)) (Udp.Port.o 5000) (Bitstring.zeroes_bitstring 64) ;
+    Simulation.run sim false ;
+    assert_equal ~printer:string_of_int 1 !served ;
+    (* Ping: *)
+    let replies = ref [] in
+    Hashtbl.add a.echo_waiters 7 (fun seq -> replies := seq :: !replies) ;
+    a.trx.ping ~id:7 ~seq:1 (Ip (ip6 2)) ;
+    a.trx.ping ~id:7 ~seq:2 (Ip (ip4 2)) ;
+    Simulation.run sim false ;
+    assert_equal [ 1 ; 2 ] (List.sort Int.compare !replies)
+ *)
+
+(* An IPv6 only host reaches no IPv4 address, and asks no DHCP server. *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "v6-only" in
+    let h = make ~parent:sim.root
+                 ~addresses:[ Ip.Cidr.of_string "2001:db8::1/64" ] "h" in
+    Simulation.run_startup sim ;
+    let res = ref (Some ()) in
+    h.trx.tcp_connect (Ip (Ip.Addr.of_string "10.0.0.1")) (Tcp.Port.o 80)
+        (fun c -> res := Option.map ignore c) ;
+    Simulation.run sim false ;
+    assert_equal None !res ;
+    assert_equal ~printer:string_of_int 1
+        (List.length h.eth_state.Eth.State.my_addresses)
+ *)
+
+(*$T static_ip_of_json
+  static_ip_of_json "x" (`String "10.0.0.1") = (Ip.Addr.of_string "10.0.0.1", None)
+  static_ip_of_json "x" (`String "10.0.0.1/24") = \
+    (Ip.Addr.of_string "10.0.0.1", Some (Ip.Addr.of_string "255.255.255.0"))
+  try ignore (static_ip_of_json "x" (`String "::1/64")) ; false \
+  with Widget.Bad_value _ -> true
  *)
 
 (* The default route a lease installed on the adapter, taken off it again.
@@ -879,11 +1045,22 @@ let power_off t =
     Simulation.power_down t.trx.widget.power ;
     reset t
 
-let set_ip t my_ip netmask =
-    Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string my_ip)))) ;
-    t.eth_state.my_addresses <-
-        [ Eth.State.make_my_ip_address ~prefix_len:(Ip.Cidr.width_of_netmask netmask) my_ip ] ;
+(* Give the adapter [ip4], an address and netmask, if any, and the other
+   [addresses]: *)
+let set_addresses t ip4 =
+    let of_cidr c =
+        let ip, prefix_len = (c : Ip.Cidr.t :> Ip.Addr.t * int) in
+        Eth.State.make_my_ip_address ~prefix_len ip in
+    let ip4 =
+        Option.map_default (fun (ip, netmask) ->
+            [ Eth.State.make_my_ip_address
+                ~prefix_len:(Ip.Cidr.width_of_netmask netmask) ip ]) [] ip4 in
+    t.eth_state.my_addresses <- ip4 @ List.map of_cidr t.addresses ;
+    Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf2 "Setting my addresses to %a"
+        (List.print Eth.State.print_my_address) t.eth_state.my_addresses))) ;
     sink (ip_recv t) <-= t.eth_trx |> ignore
+
+let set_ip t my_ip netmask = set_addresses t (Some (my_ip, netmask))
 
 (* What a host is built from belongs within it, which is what the interface
    being built under the host's own widget buys. *)
@@ -899,19 +1076,15 @@ let set_ip t my_ip netmask =
  *)
 
 let init_static t =
-    match t.static_ip with
-    | Some static_ip ->
-        (* A static address given without a netmask is a host that knows only
-           itself: everything else is reached through a gateway. *)
-        set_ip t static_ip (t.netmask |? Ip.Addr.all_ones) ;
-        (* TODO: Send a gratuitous ARP request? *)
-        (* Note: even if on_ip is unset, it might be set before [asap]! *)
-        Simulation.asap t.trx.widget.power (fun () ->
-            List.iter (fun f -> f t) t.trx.on_ip
-        ) ()
-    | None ->
-        (* [init] sends a host here only with one. *)
-        assert false
+    (* A static address given without a netmask is a host that knows only
+       itself: everything else is reached through a gateway. *)
+    set_addresses t (Option.map (fun ip -> ip, t.netmask |? Ip.Addr.all_ones)
+                                t.static_ip) ;
+    (* TODO: Send a gratuitous ARP request? *)
+    (* Note: even if on_ip is unset, it might be set before [asap]! *)
+    Simulation.asap t.trx.widget.power (fun () ->
+        List.iter (fun f -> f t) t.trx.on_ip
+    ) ()
 
 (* The parameters a client asks for, most wanted first. Whatever is asked for
    here has to be applied by [apply_lease] below, and the other way about: a
@@ -1033,7 +1206,7 @@ let init_dhcp t =
 
 (* Build the host from its ethernet adapter.
  * you probably want [eth_state] to share its power source with [widget]. *)
-let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
+let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
                   ?(own_ip_config=true) ~widget
                   (eth_state : Eth.State.t) eth_trx name =
     (* For the API a cable reaches a host but in reality it reaches its
@@ -1057,6 +1230,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
         host_name     = name ;
         static_ip ;
         netmask ;
+        addresses ;
         leased_netmask = None ;
         leased_gateway = None ;
         leased_nameserver = None ;
@@ -1079,7 +1253,8 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
            packets. Calling [set_ip] here would have it read the wire as well, which
            is exactly what a router's admin host must not do. *)
         if not t.own_ip_config then ignore
-        else if t.static_ip = None then init_dhcp
+        (* DHCP for a host given no address at all: *)
+        else if t.static_ip = None && t.addresses = [] then init_dhcp
         else init_static
     and host_trx = {
         widget ;
@@ -1671,7 +1846,30 @@ let udp_client_action t =
                 | None -> cont None
                 | Some udp -> cont (Some (udp_flow udp))))
 
+(* An IPv4 address, and the netmask of its prefix length if it has one: *)
+let static_ip_of_json name v =
+    let s = Widget.to_string v in
+    match String.split s ~by:"/" with
+    | exception Not_found -> Ip.Addr.of_json name v, None
+    | _ ->
+        let c = try Ip.Cidr.of_string s
+                with _ -> Widget.bad_value "%s: %S is not a CIDR" name s in
+        let ip, width = (c :> Ip.Addr.t * int) in
+        if Ip.Addr.is_v6 ip then
+            Widget.bad_value "%s: %S is not an IPv4 address" name s ;
+        ip, Some (Ip.Addr.of_bitstring (Ip.Addr.mask width))
+
+(* Addresses with their prefix length, or a full one: *)
+let addresses_of_json name =
+    Widget.to_list (fun v ->
+        let s = Widget.to_string v in
+        try Ip.Cidr.of_string s
+        with _ ->
+            let ip = Ip.Addr.of_json name v in
+            Ip.Cidr.o (ip, Ip.Addr.length ip))
+
 let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
+         ?addresses
          ~parent ?(own_power=true) ?location name =
     (* A host can take its power source from some larger equipment, and
        mints one of its own when it is a machine in its own right. *)
@@ -1682,17 +1880,30 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
         Eth.State.make ?mac ?gateways ~parent:widget () in
     let eth_trx = Eth.TRX.make eth_state in
     let t = make_from_eth ?search_sfx ?nameserver ~widget ?static_ip
-                          ?netmask eth_state eth_trx name in
+                          ?netmask ?addresses eth_state eth_trx name in
     (* This host minted the supply above, so the switch for it goes here, and
        so does stopping it for good. And it is a whole machine, unlike a host
        built on somebody else's adapter. *)
     widget.device <- Some (T t) ;
     Widget.add_properties widget Widget.[
         property "static-ip" ~kind:(Optional String)
-            ~descr:"IP given at boot (if none, will use DHCP)."
+            ~descr:"IPv4 address given at boot, with its prefix length if \
+                    not with a static-netmask (if none and no addresses, \
+                    will use DHCP)."
             ~getter:(fun () -> json_of_optional Ip.Addr.to_json t.static_ip)
             ~setter:(fun v ->
-                t.static_ip <- to_option (Ip.Addr.of_json "static-ip") v) ;
+                match to_option (static_ip_of_json "static-ip") v with
+                | None -> t.static_ip <- None
+                | Some (ip, netmask) ->
+                    t.static_ip <- Some ip ;
+                    Option.may (fun m -> t.netmask <- Some m) netmask) ;
+        property "addresses" ~kind:(list String)
+            ~descr:"Other addresses given at boot, of either family, each \
+                    with its prefix length."
+            ~getter:(fun () ->
+                `List (List.map (fun c -> `String (Ip.Cidr.to_string c))
+                                t.addresses))
+            ~setter:(fun v -> t.addresses <- addresses_of_json "addresses" v) ;
         property "static-netmask" ~kind:(Optional String)
             ~descr:"Netmask of the static IP configuration."
             ~getter:(fun () -> json_of_optional Ip.Addr.to_json t.netmask)

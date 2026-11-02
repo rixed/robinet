@@ -151,14 +151,15 @@ thing itself.
 
 ### host
 
-A machine with a single network adapter. With `static-ip` it is configured
-statically; without one it goes looking for a DHCP server.
+A machine with a single network adapter. With `static-ip` or `addresses` it
+is configured statically; with neither it goes looking for a DHCP server.
 
 | param | kind | default | |
 | --- | --- | --- | --- |
-| `static-ip` | optional string | `null` | Its address, or DHCP when left out. |
+| `static-ip` | optional string | `null` | Its IPv4 address, such as `"10.0.0.1"`, or with a prefix length, `"10.0.0.1/24"`, which then wins over `netmask`. |
 | `netmask` | optional string | `"255.255.255.0"` | What it can reach without a gateway. A DHCP client is told by its lease and has this only to fall back on. |
-| `gateway` | optional string | `null` | Where to send what the netmask does not cover. |
+| `addresses` | list of strings | `[]` | Its other addresses, of either family, each with its prefix length: `["2001:db8::1/64"]`. One without is alone on its subnet. |
+| `gateway` | optional string | `null` | Where to send what is not on its subnets, for the family of that gateway. Both families need the adapter's `gateways`. |
 | `nameserver` | optional string | `null` | Which DNS server to ask. |
 | `search suffix` | optional string | `null` | Appended to the names it resolves. |
 | `MAC` | optional string | `null` | Drawn at random when left out. |
@@ -442,7 +443,7 @@ under:
 
 | device | path | properties |
 | --- | --- | --- |
-| host | `""` | `static-ip`, `static-netmask`, `nameserver`, `hostname`, `search suffix` |
+| host | `""` | `static-ip`, `static-netmask`, `addresses`, `nameserver`, `hostname`, `search suffix` |
 | | `eth` | *its adapter* |
 | switch | `""` | `cut-through` |
 | | `#0`… | *its ports* |

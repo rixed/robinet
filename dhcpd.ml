@@ -332,7 +332,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                     Pdu.make_offer ~chaddr ~xid:dhcp.Pdu.xid ~options ?client_id offered_ip |>
                     Pdu.pack |>
                     (* We can't use 'udp.tx offer' since we have to force both IP and Eth dest addr *)
-                    host.Host.udp_send (Host.IPv4 offered_ip) ~src_port dst_port
+                    host.Host.udp_send (Host.Ip offered_ip) ~src_port dst_port
                 | None ->
                     Log.(log st.widget.logger Debug (lazy "No more unused IP, cannot make offer")))
             | Ok (Pdu.{ op = BootRequest ; htype ; hlen = 6 ; chaddr ; xid ; client_id ; requested_ip = Some requested_ip ; _ } as dhcp)
@@ -368,14 +368,14 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                                           dhcp.request_list in
                     Pdu.make_ack ~chaddr ~xid ?client_id ~options offered_ip |>
                     Pdu.pack |>
-                    host.Host.udp_send (Host.IPv4 offered_ip) ~src_port dst_port
+                    host.Host.udp_send (Host.Ip offered_ip) ~src_port dst_port
                 | _ ->
                     if st.authoritative then (
                         Log.(log st.widget.logger Warning (lazy (Printf.sprintf "I never offered anything to %s (or I forgot about it). Denying since I'm in charge here." (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr))))) ;
                         count "nack" ;
                         Pdu.make_nak ~chaddr ~xid ?client_id ~message:"go away" () |>
                         Pdu.pack |>
-                        host.Host.udp_send (Host.IPv4 requested_ip) ~src_port dst_port
+                        host.Host.udp_send (Host.Ip requested_ip) ~src_port dst_port
                         (* We could answer to the emitter with `udp.trx.ins.write`
                          * but it's likely a broadcast anyway. *)
                     ) else (

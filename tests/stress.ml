@@ -809,7 +809,7 @@ let test_power () =
     let listen () =
         h2.Host.trx.Host.udp_server_start (Udp.Port.o 1234) (fun _ -> incr served) in
     let send () =
-        h1.Host.trx.Host.udp_send (Host.IPv4 (Ip.Addr.of_dotted_string "10.2.0.2"))
+        h1.Host.trx.Host.udp_send (Host.Ip (Ip.Addr.of_dotted_string "10.2.0.2"))
                                   (Udp.Port.o 1234) (Bitstring.zeroes_bitstring 64) ;
         Simulation.run sim false in
     listen () ;
@@ -834,7 +834,7 @@ let test_power () =
         Tools.BitHash.length h2.Host.eth_state.Eth.State.postponed in
     let to_nowhere ?(meanwhile=ignore) () =
         h2.Host.trx.Host.udp_send
-            (Host.IPv4 (Ip.Addr.of_dotted_string "10.2.0.99"))
+            (Host.Ip (Ip.Addr.of_dotted_string "10.2.0.99"))
             (Udp.Port.o 1234) (Bitstring.zeroes_bitstring 64) ;
         Simulation.delay sim.root.power (Clock.Interval.msec 500.) meanwhile () ;
         Simulation.run sim false in

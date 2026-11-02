@@ -177,7 +177,7 @@ let tcp_connect ctx ?(wait_for_server=true) ?ttl ?tos
         Simulation.asap ctx.widget.power try_connect ()
     in
     match dst with
-        | Host.IPv4 dst_ip ->
+        | Host.Ip dst_ip ->
             connect_ (Ip.Addr.to_inet_addr dst_ip)
         | Host.Name name ->
             let dst_ips =

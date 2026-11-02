@@ -81,6 +81,7 @@ type model =
     | TSwitch of { ports : int ; speeds : EthSpeed.t list ;
                    full_duplex : bool ; macs : int }
     | THost of { static_ip : Ip.Addr.t option ; netmask : Ip.Addr.t option ;
+                 addresses : Ip.Cidr.t list ;
                  gateway : Ip.Addr.t option ; nameserver : Ip.Addr.t option ;
                  search_sfx : string option ; mac : Eth.Addr.t option }
     (* The two ends are widget ids, which is what the interface has to name
@@ -366,7 +367,8 @@ let host =
            * a DHCP server, and the two are different machines from here on. *)
           param "static-ip" ~kind:(Widget.optional String)
               ~placeholder:"static IP (or use DHCP)"
-              ~descr:"Its static IP address." ;
+              ~descr:"Its static IPv4 address, with its prefix length if not \
+                      with a netmask." ;
           (* A host that is given an address of its own is given the netmask
            * that goes with it; one left to DHCP is told by the lease, and has
            * this only to fall back on -- so it may be left out entirely,
@@ -374,9 +376,13 @@ let host =
           param "netmask" ~kind:(Widget.optional String)
               ~default:(`String "255.255.255.0")
               ~descr:"Which addresses it can reach without a gateway." ;
+          param "addresses" ~kind:(Widget.list String) ~default:(`List [])
+              ~descr:"Other static addresses, of either family, each with its \
+                      prefix length." ;
           param "gateway" ~kind:(Widget.optional String)
               ~placeholder:"192.168.0.1"
-              ~descr:"Where to send what the netmask does not cover." ;
+              ~descr:"Where to send what the netmask does not cover, of the \
+                      family of that gateway." ;
           param "nameserver" ~kind:(Widget.optional String)
               ~placeholder:"192.168.0.1"
               ~descr:"Which DNS server to ask." ;
@@ -387,9 +393,15 @@ let host =
               ~placeholder:"drawn at random"
               ~descr:"Its hardware address." ] ;
       of_params = fun args ->
+          let static_ip = opt args "static-ip" (Host.static_ip_of_json "static-ip") in
           THost {
-              static_ip = opt args "static-ip" (Ip.Addr.of_json "static-ip") ;
-              netmask = opt args "netmask" (Ip.Addr.of_json "netmask") ;
+              static_ip = Option.map fst static_ip ;
+              (* The prefix length of [static_ip] wins: *)
+              netmask =
+                  (match Option.bind static_ip snd with
+                  | Some _ as m -> m
+                  | None -> opt args "netmask" (Ip.Addr.of_json "netmask")) ;
+              addresses = Host.addresses_of_json "addresses" (Widget.arg args "addresses") ;
               gateway = opt args "gateway" (Ip.Addr.of_json "gateway") ;
               nameserver = opt args "nameserver" (Ip.Addr.of_json "nameserver") ;
               search_sfx = opt args "search suffix" Widget.to_string ;
@@ -720,9 +732,12 @@ let to_params =
                                     speeds) ;
           "full duplex", `Bool full_duplex ;
           "MACs", `Int macs ]
-    | THost { static_ip ; netmask ; gateway ; nameserver ; search_sfx ; mac } ->
+    | THost { static_ip ; netmask ; addresses ; gateway ; nameserver ;
+              search_sfx ; mac } ->
         [ "static-ip", ip_opt static_ip ;
           "netmask", ip_opt netmask ;
+          "addresses", `List (List.map (fun c -> `String (Ip.Cidr.to_string c))
+                                       addresses) ;
           "gateway", ip_opt gateway ;
           "nameserver", ip_opt nameserver ;
           "search suffix", str_opt search_sfx ;
@@ -801,16 +816,17 @@ let build ~parent name = function
     | TSwitch { ports ; speeds ; full_duplex ; macs } as m ->
         let t = Hub.Switch.make ~parent ~speeds ~full_duplex ports macs name in
         t.Hub.Switch.widget, m
-    | THost ({ static_ip ; netmask ; gateway ; nameserver ; search_sfx ;
-               mac } as h) ->
+    | THost ({ static_ip ; netmask ; addresses ; gateway ; nameserver ;
+               search_sfx ; mac } as h) ->
         let gateways =
             match gateway with
             | None -> []
             | Some gw ->
-                [ Eth.State.gw_selector (), Some (Eth.Gateway.Ip gw) ] in
+                [ Eth.State.gw_selector ~v6:(Ip.Addr.is_v6 gw) (),
+                  Some (Eth.Gateway.Ip gw) ] in
         let t =
             Host.make ~parent ~gateways ?search_sfx ?nameserver ?static_ip
-                      ?netmask ?mac name in
+                      ?netmask ~addresses ?mac name in
         (* The address it ended up with, drawn at random when it was not given
            one. Its "MAC" property is read-only, so nothing else would bring it
            back. *)
@@ -1140,7 +1156,7 @@ let make_from_params ?start type_ ~parent name given =
   (* Handed no address, a host comes back with the one it drew: *) \
   (let w = make ~parent:(root ()) "h" (THost { static_ip = None ; \
                netmask = Some (Ip.Addr.of_string "255.255.255.0") ; \
-               gateway = None ; \
+               addresses = [] ; gateway = None ; \
                nameserver = None ; search_sfx = None ; mac = None }) in \
    match w.made_with with \
    | Some args -> List.assoc "MAC" args <> `Null \

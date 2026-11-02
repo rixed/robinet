@@ -38,7 +38,7 @@ let perform_get (sim : Simulation.t) my_ip my_netmask mac peer_ip ?nameserver ?g
        of it, which is what [Simulation.run] does at the start and which is
        too late for what follows. *)
     Simulation.run_startup sim ;
-    host.trx.tcp_connect (Host.IPv4 peer_ip) (Tcp.Port.o 80) (function
+    host.trx.tcp_connect (Host.Ip peer_ip) (Tcp.Port.o 80) (function
     | None -> ()
     | Some tcp ->
         tcp.Tcp.TRX.trx.ins --> sink (fun bits ->

@@ -412,7 +412,7 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let ping id dst =
         let replies = ref 0 in
         Hashtbl.replace client.Host.echo_waiters id (fun _seq -> incr replies) ;
-        client.Host.trx.Host.ping ~id ~seq:1 (Host.IPv4 (Ip.Addr.of_string dst)) ;
+        client.Host.trx.Host.ping ~id ~seq:1 (Host.Ip (Ip.Addr.of_string dst)) ;
         Simulation.run sim false ;
         Hashtbl.remove client.Host.echo_waiters id ;
         !replies in
@@ -530,7 +530,7 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     gw_trx.trx <==> server_eth ;
     Simulation.delay sim.root.power (Clock.Interval.sec 10.) (fun () ->
         Log.(log desktop.trx.widget.logger Debug (lazy "Sending UDP packet to server")) ;
-        desktop.trx.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring) () ;
+        desktop.trx.udp_send (Host.Ip server_ip) (Udp.Port.o 80) empty_bitstring) () ;
     Simulation.run sim false ;
     assert_bool "Desktop was NATed" (!src = Some public_ip)
  *)

@@ -63,7 +63,7 @@ let run (sim : Simulation.t) () =
             assert false
         )
     in
-    h2.trx.tcp_connect (Host.IPv4 (Ip.Addr.of_string "192.168.0.1")) (Tcp.Port.o 7) (function
+    h2.trx.tcp_connect (Host.Ip (Ip.Addr.of_string "192.168.0.1")) (Tcp.Port.o 7) (function
     | None -> ()
     | Some tcp ->
         tcp.Tcp.TRX.trx.ins --> sink (client_f tcp) ;
