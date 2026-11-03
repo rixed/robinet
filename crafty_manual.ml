@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 41a90a1a3e57d214c85a90637aaf543c) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 fbfdcb3ec4fd36e7da636e767a6060c7) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -156,9 +156,8 @@ Options:
 -   `--fw`: crafty shares the interface's address with the host, whose kernel
     would answer what crafty receives with TCP resets and ICMP port
     unreachables. `--fw` keeps the kernel off the ports of `--tcp` and `--udp`.
--   `--ip ADDR`: an address of crafty's own instead (IPv4 or IPv6), on the
-    interface's network, for which crafty answers ARP or neighbor solicitations.
-    Then `--fw` is not needed, nor allowed.
+-   `--ip ADDR`: an address of crafty's own instead, on the interface's network,
+    for which crafty answers ARP. Then `--fw` is not needed.
 -   `-p [/PATTERN]` (or `--print-packets`): prints the packets à la tcpdump.
 -   `--format csv|json`: change the output format to csv or json (json makes -p
     print all available details of every packet).
@@ -212,8 +211,8 @@ let reference = {crafty_manual|### Lexical conventions
     expected. An array of bytes.
 -   `string`: `"text ${expr}"`.
 -   `interval`: `5s`, `10ms`, `1m30s`, `1.5ms`, `-2s`. Units: `d`, `h`, `m`,
-    `s`, `ms`, `us` (or `µs`), `ns`, `ps`. Printed in one unit up to `s`, to 6
-    significant digits: `157.949ms`, `8.85159µs`, `3725.5s`.
+    `s`, `ms`, `us` (or `µs`), `ns`, `ps`. Printed in one unit up to `s`:
+    `157.949ms`, `8.85159µs`, `3725.5s`.
 -   `time`: `2026-10-20T22:02:45.25Z`, `2026-10-20T22:02+02:00`,
     `2026-10-20T22:02` (local time). Printed in UTC. `int(t)` and `float(t)`
     give its unix timestamp, `time(secs)` the reverse.
@@ -511,13 +510,12 @@ program. `Eth!` frames go out as they are.
 
 Self-driven IP fragments to the MTU and reassembles. `tos`, `ttl`, `dont_frag`
 and `options` apply to what it sends, but for the segments of a self-driven TCP
-connection. `IP!` sends the header as given, but for the checksum. Its addresses
-are IPv4 ones, and those of `IP6` IPv6 ones.
+connection. `IP!` sends the header as given, but for the checksum.
 
 #### `IP6`: IPv6
 
--   `src` (key): ip; set M, S; read M, S. Default: the interface's IPv6 address
-    that reaches `dst`.
+-   `src` (key): ip; set M, S; read M, S. Default: the interface's address that
+    reaches `dst`.
 -   `dst` (key): ip; set M, S; read M, S. Required.
 -   `proto`: int; set M, S; read M, S. Default: the layer on top. Received, that
     past the extension headers.
@@ -526,9 +524,8 @@ are IPv4 ones, and those of `IP6` IPv6 ones.
 -   `flow_label`: int; set M; read M, S. Default 0.
 -   `is_fragment`: bool; read M.
 
-It sends no extension header and does not fragment: self-driven, a packet over
-the MTU is an error. Fragments received are seen by `IP6!` only, there being no
-reassembly.
+Self-driven, a packet over the MTU is an error. Fragments received are seen by
+`IP6!` only, there being no reassembly.
 
 #### `TCP`
 
@@ -550,8 +547,7 @@ reassembly.
 
 The fields of the options cannot be given with `options`. A missing `ts_val` or
 `ts_ecr` is 0. Self-driven, `mss` and `wscale` are what the connection offers
-(default: the MTU less 40, or 60 over `IP6`, and what fits the receive buffer;
--1 offers no window scaling, which caps its window at 64KiB); a `TCP!` over it
+(-1 offers no window scaling, which caps its window at 64KiB); a `TCP!` over it
 does not send them.
 
 Self-driven, the first message sent connects, and what follows waits for the
