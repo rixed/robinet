@@ -1116,6 +1116,15 @@ let ip_recv t bits =
                       h.eth_state.Eth.State.my_addresses)
  *)
 
+(* A DHCP client nobody answers asks again in the background, which does not
+   keep a run going: *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "dhcp-unanswered" in
+    let h = make ~parent:sim.root "h" in
+    Simulation.run sim false ;
+    assert_bool "no address" (h.eth_state.Eth.State.my_addresses = [])
+ *)
+
 (* An address of SLAAC goes when its prefix's valid lifetime runs out, unless
    an advertisement renews it: *)
 (*$R make
@@ -1313,8 +1322,11 @@ let apply_lease t (dhcp : Dhcp.Pdu.t) =
     set_ip t dhcp.yiaddr netmask
 
 let init_dhcp t =
-    (* Will receive all eth frames until we got an IP address *)
-    let dhcp_client bits = (match Ip.Pdu.unpack bits with
+    (* Will receive all IPv4 packets until we got an IPv4 address: *)
+    let dhcp_client bits =
+      match%bitstring bits with
+      | {| 6 : 4 ; _ |} -> ip6_recv t bits
+      | {| _ |} -> (match Ip.Pdu.unpack bits with
         | Error s ->
             Log.(log t.trx.widget.logger Warning s)
         | Ok (ip : Ip.Pdu.t) ->
@@ -1368,7 +1380,9 @@ let init_dhcp t =
                 Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast |>
                 Ip.Pdu.pack |>
                 tx t.eth_trx ;
-            Simulation.delay t.trx.widget.power
+            (* In the background, so that a client with no server to answer
+               it does not keep a simulation running: *)
+            Simulation.delay ~background:true t.trx.widget.power
                              (Clock.Interval.sec (5.+.(Random.float 3.)))
                              send_discover ()
         ) in
@@ -1437,10 +1451,9 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
            packets. Calling [set_ip] here would have it read the wire as well, which
            is exactly what a router's admin host must not do. *)
         if not t.own_ip_config then ignore
-        (* DHCP for a host given no address at all, nor SLAAC: *)
+        (* DHCP for a host given no address at all: *)
         else (fun t ->
-            (if t.static_ip = None && t.addresses = [] && not t.slaac then
-                init_dhcp t
+            (if t.static_ip = None && t.addresses = [] then init_dhcp t
              else init_static t) ;
             init_autoconf t)
     and host_trx = {

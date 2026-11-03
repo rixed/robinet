@@ -527,6 +527,8 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     Simulation.run sim false ;
     assert_bool "the client took an address in the LAN prefix"
         (Host.is_mine client (a "2001:db8:1::ff:fe00:10")) ;
+    assert_bool "and is leased an IPv4 one"
+        (Host.is_mine client (a "192.168.0.2")) ;
     let replies = ref 0 in
     Hashtbl.replace client.Host.echo_waiters 1 (fun _ -> incr replies) ;
     client.trx.ping ~id:1 ~seq:1 (Host.Ip (a "2001:db8::1")) ;

@@ -152,8 +152,8 @@ thing itself.
 ### host
 
 A machine with a single network adapter. With `static-ip` or `addresses` it
-is configured statically; with neither, nor `SLAAC`, it goes looking for a
-DHCP server, which gives IPv4 only.
+is configured statically; with neither it goes looking for a DHCP server,
+which gives IPv4 only — and with `SLAAC` too, it is dual-stack.
 
 | param | kind | default | |
 | --- | --- | --- | --- |
