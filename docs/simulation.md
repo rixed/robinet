@@ -152,17 +152,30 @@ thing itself.
 ### host
 
 A machine with a single network adapter. With `static-ip` or `addresses` it
-is configured statically; with neither it goes looking for a DHCP server.
+is configured statically; with neither, nor `SLAAC`, it goes looking for a
+DHCP server, which gives IPv4 only.
 
 | param | kind | default | |
 | --- | --- | --- | --- |
 | `static-ip` | optional string | `null` | Its IPv4 address, such as `"10.0.0.1"`, or with a prefix length, `"10.0.0.1/24"`, which then wins over `netmask`. |
 | `netmask` | optional string | `"255.255.255.0"` | What it can reach without a gateway. A DHCP client is told by its lease and has this only to fall back on. |
 | `addresses` | list of strings | `[]` | Its other addresses, of either family, each with its prefix length: `["2001:db8::1/64"]`. One without is alone on its subnet. |
+| `SLAAC` | bool | `false` | Takes IPv6 addresses and the default IPv6 route from router advertisements. |
 | `gateway` | optional string | `null` | Where to send what is not on its subnets, for the family of that gateway. Both families need the adapter's `gateways`. |
 | `nameserver` | optional string | `null` | Which DNS server to ask, of either family. It is asked for the addresses of the families the host has one of. |
 | `search suffix` | optional string | `null` | Appended to the names it resolves. |
 | `MAC` | optional string | `null` | Drawn at random when left out. |
+
+A host with an IPv6 address or `SLAAC` also takes the link-local address of
+its MAC, `fe80::` and the modified EUI-64 of it
+(`02:52:0a:00:00:02` gives `fe80::52:aff:fe00:2`). With `SLAAC` it then
+solicits routers and, from each advertisement, takes an address of its MAC in
+every /64 prefix marked autonomous, and the advertising router as default IPv6
+route after those of its adapter's `gateways`. An address is used only once
+duplicate address detection has found no other node with it, a second later;
+until it is, nothing is answered for it. The prefixes' lifetimes are not
+counted down; a router lifetime of 0 withdraws the route. Those addresses are
+listed, read only, in its `autoconfigured addresses`.
 
 ### switch
 
@@ -301,10 +314,10 @@ outside, port 1 the network it serves.**
 | `max connections` | 1…1000000 | `500` | Translations its NAT holds at once. |
 | `MAC` | optional string | `null` | Its address on the LAN side, which is the one the machines behind it send to. |
 
-IPv6 is neither translated nor served: without `LAN IPv6` the gateway forwards
-none, and with it the machines behind it are configured statically (no DHCPv6,
-no router advertisements), and its own IPv6 addresses answer only neighbor
-discovery. The outside must route that prefix to `public IPv6`.
+IPv6 is not translated: without `LAN IPv6` the gateway forwards none, and with
+it it advertises that prefix to the machines behind it, which configure
+themselves with `SLAAC` (there is no DHCPv6), and its own IPv6 addresses answer
+only neighbor discovery. The outside must route that prefix to `public IPv6`.
 
 On the LAN a gateway is **one machine at one address**: `.1` is where its
 clients send what is to be forwarded, and also the DHCP server that leased them
@@ -452,7 +465,7 @@ under:
 
 | device | path | properties |
 | --- | --- | --- |
-| host | `""` | `static-ip`, `static-netmask`, `addresses`, `nameserver`, `hostname`, `search suffix`, `prefer IPv6` |
+| host | `""` | `static-ip`, `static-netmask`, `addresses`, `SLAAC`, `nameserver`, `hostname`, `search suffix`, `prefer IPv6` |
 | | `eth` | *its adapter* |
 | switch | `""` | `cut-through` |
 | | `#0`… | *its ports* |
@@ -461,7 +474,7 @@ under:
 | policer | `""` | `max packets`, `max volume`, `max duration`, `max packet rate`, `max throughput`, `max syns`, `max syn rate`; the flags `max packets reached`, `max volume reached`, `max syns reached`, `expired` (which are only reset); and, read only, `start`, `packets`, `volume`, `syns`, `elapsed` |
 | firewall | `""` | `inside rules`, `outside rules`, `uninspectable`, `MAC` |
 | router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin`, `buffer capacity`, `drop hop-by-hop`, `drop segment routing` |
-| | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay` |
+| | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay`, `router advertisements`, `router lifetime` |
 | | `#0/admin@0`… | `hostname`, `search suffix`, `prefer IPv6` — the stack answering for the address that interface holds |
 | gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
 | | `nat` | `min port`, `port forwards`, `NAT pings`, `send errors`, `answer pings` |
@@ -518,6 +531,14 @@ A router's interface also has its own `errors probability` and `errors delay`,
 1 and 0 unless set otherwise. An error about a packet that came in through
 that interface is reported with the product of the router's probability and
 the interface's, after the sum of both delays.
+
+A router's interface with an IPv6 address also has a link-local one, from its
+MAC as a host's. With `router advertisements`, off unless set, it advertises
+from it the IPv6 prefixes on its link — those of its addresses, and those
+routed out of it without a `via` that hold one of them — autonomous if /64,
+with its MTU and `router lifetime` (0…9000 seconds, 1800 unless set; 0 is not
+to be used as a default router). It sends three when switched on, 16 seconds
+apart, then answers solicitations only.
 
 A router's `buffer capacity` is the RAM, in bytes, it holds the frames waiting
 for an interface to be free in. A third of it is reserved to the interfaces in
@@ -770,8 +791,9 @@ it exchanged.
 
 One thing to know before putting much in a list: **an entry without a `delay`
 runs at time zero**, before anything has settled. A DHCP client waits a few
-seconds before its first request, so an undelayed `ping` goes out before the
-host has an address. Give it a `delay` that outlives the wait.
+seconds before its first request, and one with `SLAAC` takes up to four seconds
+to configure, so an undelayed `ping` goes out before the host has an address.
+Give it a `delay` that outlives the wait.
 
 ## Examples
 
@@ -1104,16 +1126,18 @@ either side, which is what makes the translation visible: they leave as
 
 `examples/dual-stack.json` is a small network speaking IPv4 and IPv6 at once.
 An office switch holds alice, with an address of each family, and bob, with
-only an IPv6 one; a router, core, joins it to a server behind a firewall. Every
-address is static, given with its prefix length (`static-ip` and `addresses`),
-and each host's adapter has one default route per family in its `gateways`.
-core takes its addresses from its routing table, one row to itself per family
-and port, and drops packets with a hop-by-hop header. The firewall's rules mix
-both families, and deny bob alone.
+only an IPv6 one; a router, core, joins it to a server behind a firewall.
+alice's and the server's addresses are static, given with their prefix length
+(`static-ip` and `addresses`), and their adapters have one default route per
+family in their `gateways`. bob has `SLAAC`, and core `router advertisements`
+on its office port, so bob takes `2001:db8:1:0:52:aff:fe00:2` and core as its
+default route. core takes its addresses from its routing table, one row to
+itself per family and port, and drops packets with a hop-by-hop header. The
+firewall's rules mix both families, and deny bob alone.
 
 At startup the server echoes TCP port 7; alice pings it at both its addresses
-and then talks to it over IPv6 for two seconds, while bob's pings go
-unanswered.
+and then talks to it over IPv6 for two seconds, while bob's pings, once it has
+configured itself, go unanswered.
 
 ### Load balancing over an ocean
 

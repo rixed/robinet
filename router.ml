@@ -325,7 +325,16 @@ mutable link_fragmentation : bool ;
                (** Errors about packets received here are reported with the product
                 * of this and the router's probability, after the sum of both
                 * delays: *)
-               notify_errs : icmp_probability }
+               notify_errs : icmp_probability ;
+               (** Whether router advertisements are sent from here, and the
+                * router lifetime they give, in seconds: *)
+               mutable advertise : bool ;
+               mutable router_lifetime : int ;
+               (* The unsolicited advertisements scheduled by an older
+                * [start_router_adverts] stop when this changes: *)
+               mutable ra_gen : int ;
+               (* Whether a solicited advertisement is due: *)
+               mutable ra_pending : bool }
 
 type load_balancing =
     | First (* Forward a packet to its first matching route *)
@@ -550,6 +559,122 @@ let maybe_fragment iface bits =
                 | exception Invalid_argument _ -> Error p
                 | frags -> Ok frags
 
+(* {2 Router advertisements (RFC 4861, section 6)} *)
+
+(* Prefix lifetimes, as radvd's defaults: *)
+let ra_valid = 86400 * 30
+let ra_preferred = 86400 * 7
+
+(* The IPv6 prefixes on the link of interface [n], but link-local: those of
+ * its addresses, and those routed out of it with no gateway that hold one of
+ * them. As lengths and addresses: *)
+let on_link_prefixes t n =
+    let mine =
+        List.filter (fun (a : Eth.State.my_address) ->
+            bitstring_length a.addr = 128 &&
+            not (Ip.Addr.is_link_local (Ip.Addr.of_bitstring a.addr))
+        ) t.ifaces.(n).eth.my_addresses in
+    let prefix len addr =
+        if len > 0 && len < 128 then
+            Some (len, concat [ takebits len addr ; zeroes_bitstring (128 - len) ])
+        else None in
+    let of_addrs =
+        List.filter_map (fun (a : Eth.State.my_address) ->
+            prefix a.prefix_len a.addr) mine
+    and of_routes =
+        List.filter_map (fun (r : Route.t) ->
+            match r.target, r.dst_mask with
+            | Forward { out_iface ; via = None }, Some (cidr, _)
+              when out_iface = n ->
+                let addr, len = (cidr : Ip.Cidr.t :> Ip.Addr.t * int) in
+                if Ip.Addr.is_v6 addr &&
+                   List.exists (fun (a : Eth.State.my_address) ->
+                       Ip.Cidr.mem cidr (Ip.Addr.of_bitstring a.addr)) mine then
+                    prefix len (Ip.Addr.to_bitstring addr)
+                else None
+            | _ -> None) t.routes in
+    List.unique ~eq:(fun (l1, p1) (l2, p2) -> l1 = l2 && bits_equal p1 p2)
+                (of_addrs @ of_routes) |>
+    List.map (fun (len, p) -> len, Ip.Addr.of_bitstring p)
+(*$T on_link_prefixes
+  let c = Ip.Cidr.of_string in \
+  let r = make_from_addrs ~parent:(Simulation.make ~realtime:false "p").root \
+            [| [ c "2001:db8:1::fe/64", None ; c "10.0.0.1/24", None ], \
+               Eth.Addr.random () |] "r" in \
+  List.map (fun (l, p) -> Ip.Addr.to_string p ^"/"^ string_of_int l) \
+           (on_link_prefixes r 0) = [ "2001:db8:1::/64" ]
+ *)
+
+(* The advertisement of interface [n], if it has on-link prefixes: those,
+ * autonomous if /64, its MTU and its MAC. *)
+let router_advert t n =
+    let iface = t.ifaces.(n) in
+    let prefixes = on_link_prefixes t n in
+    if prefixes = [] then None else
+    Some (Icmp6.Pdu.make_router_advert ~lifetime:iface.router_lifetime (
+        Icmp6.Opt.Source_lla (Eth.Ndp.lla iface.eth.mac) ::
+        Icmp6.Opt.Mtu iface.eth.mtu ::
+        List.map (fun (prefix_len, prefix) ->
+            Icmp6.Opt.Prefix { prefix_len ; on_link = true ;
+                               autonomous = prefix_len = 64 ; flags = 0 ;
+                               valid = ra_valid ; preferred = ra_preferred ;
+                               prefix }
+        ) prefixes))
+
+(* To all nodes, from the link-local address of interface [n]: *)
+let send_router_advert t n =
+    let iface = t.ifaces.(n) in
+    let link_local =
+        List.find_opt (fun (a : Eth.State.my_address) ->
+            bitstring_length a.addr = 128 &&
+            Ip.Addr.is_link_local (Ip.Addr.of_bitstring a.addr)
+        ) iface.eth.my_addresses in
+    match router_advert t n, link_local with
+    | Some ra, Some ll ->
+        Log.(log iface.eth.iface.widget.logger Debug (lazy "Advertising")) ;
+        Eth.Ndp.packet ll.addr Eth.Ndp.all_nodes ra |> tx iface.trx
+    | _ -> ()
+
+(* As RFC 4861, section 10: *)
+let max_initial_rtr_advertisements = 3
+let max_initial_rtr_advert_interval = 16.
+let max_ra_delay_time = 0.5
+
+(* The unsolicited advertisements of interface [n], from within a second, if
+ * it advertises and is on. Only the initial ones: hosts solicit when they
+ * boot and never let a lifetime run out, and a periodic event would keep a
+ * simulation from ever running out of events. *)
+let start_router_adverts t n =
+    let iface = t.ifaces.(n) in
+    iface.ra_gen <- iface.ra_gen + 1 ;
+    let gen = iface.ra_gen and power = t.widget.power in
+    let rec loop i () =
+        if iface.ra_gen = gen && iface.advertise then (
+            send_router_advert t n ;
+            if i < max_initial_rtr_advertisements then
+                Simulation.delay power
+                    (Clock.Interval.sec max_initial_rtr_advert_interval)
+                    (loop (i + 1)) ()) in
+    if power.on && iface.advertise then
+        Simulation.delay power (Clock.Interval.sec (Random.float 1.)) (loop 1) ()
+
+(* A router solicitation received by interface [n]: one advertisement for all
+ * the solicitations of the next half second. *)
+let router_solicited t n =
+    let iface = t.ifaces.(n) in
+    if iface.advertise && not iface.ra_pending then (
+        iface.ra_pending <- true ;
+        Simulation.delay t.widget.power
+            (Clock.Interval.sec (Random.float max_ra_delay_time)) (fun () ->
+                iface.ra_pending <- false ;
+                send_router_advert t n) ())
+
+let is_router_solicit (ip : Ip6.Pdu.t) =
+    ip.proto = Ip.Proto.icmpv6 && ip.ttl = 255 &&
+    match Icmp6.Pdu.unpack (ip.payload :> bitstring) with
+    | Ok { payload = Router_solicit _ ; _ } -> true
+    | _ -> false
+
 (* Report [err] about [p], received at interface [n], from the address of
  * that interface [p]'s source is reached from. Sending performs routing
  * again. *)
@@ -613,6 +738,10 @@ and route in_iface_opt t bits =
         match p_opt with
         | Some (V6 ip) -> is_link_scoped ip.src || is_link_scoped ip.dst
         | _ -> false in
+    match in_iface_opt, p_opt with
+    | Some n, Some (V6 ip) when is_router_solicit ip ->
+        router_solicited t n
+    | _ ->
     match target_routes ?in_iface:in_iface_opt
                         ?src_ip:src_opt ?dst_ip:dst_opt ?proto:proto_opt
                         ?src_port:src_port_opt ?dst_port:dst_port_opt t with
@@ -742,7 +871,8 @@ let my_addresses_of routes n =
  * errors from is one a later [routes] gave it. *)
 let configure_iface t n =
     let iface = t.ifaces.(n) in
-    let my_addresses = my_addresses_of t.routes n in
+    let my_addresses =
+        my_addresses_of t.routes n |> Eth.State.with_link_local iface.eth.mac in
     let same_addresses =
         List.equal Eth.State.my_address_equal
             my_addresses iface.eth.my_addresses in
@@ -817,10 +947,12 @@ let iface_make ?speeds ?mtu ?delay ?loss ?inter_frame_gap
         Eth.State.make ?speeds ?mtu ?delay ?loss ?inter_frame_gap
                        ?can_forward_after ?mac ?my_addresses ~name
                        ~parent () in
+    eth.groups <- [ Eth.Ndp.all_routers ] ;
     let trx = Eth.TRX.make eth in
     let iface =
         { trx ; eth ; admin_host = None ; link_fragmentation ;
-          max_queue_delay ; notify_errs } in
+          max_queue_delay ; notify_errs ; advertise = false ;
+          router_lifetime = 1800 ; ra_gen = 0 ; ra_pending = false } in
     Widget.add_properties eth.iface.widget Widget.[
         property "link fragmentation" ~kind:Bool
             ~descr:"Fragment IPv4 packets larger than the MTU, unless they \
@@ -895,8 +1027,12 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
        and the supply asks each of them in turn. Every interface is reset,
        including the ones no admin host was built on, which nothing else
        would reach. *)
+    widget.power_up <- (fun () ->
+        Array.iteri (fun n _ -> start_router_adverts t n) t.ifaces) ;
     widget.power_down <- (fun () ->
-        Array.iter (fun iface -> Eth.State.reset iface.eth) t.ifaces ;
+        Array.iter (fun iface ->
+            Eth.State.reset iface.eth ;
+            iface.ra_pending <- false) t.ifaces ;
         (* Powering down cancelled any pending refresh: *)
         t.refresh_pending <- false ;
         let now = Simulation.Widget.now widget in
@@ -1080,6 +1216,22 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                     Eth.State.announce iface.eth) t.ifaces ;
                 Action.stop s) ] ;
     Array.iteri (fun n iface ->
+        Widget.add_properties iface.eth.iface.widget Widget.[
+            property "router advertisements" ~kind:Bool
+                ~descr:"Advertise the IPv6 prefixes on this interface's link, \
+                        for hosts to configure themselves with SLAAC and \
+                        route through this one."
+                ~getter:(fun () -> `Bool iface.advertise)
+                ~setter:(fun v ->
+                    iface.advertise <- to_bool v ;
+                    start_router_adverts t n) ;
+            property "router lifetime" ~kind:(IRange (0, 9000)) ~units:"secs"
+                ~descr:"How long hosts may route through this one after an \
+                        advertisement; 0 is not to be used as a default \
+                        router."
+                ~getter:(fun () -> `Int iface.router_lifetime)
+                ~setter:(fun v ->
+                    iface.router_lifetime <- to_int_range ~min:0 ~max:9000 v) ] ;
         configure_iface t n ;
         (* When packets are received from the outside, go to routing: *)
         iface.trx.ins --> sink (route (Some n) t)
@@ -1415,6 +1567,63 @@ let make_from_addrs
     Simulation.run sim false ;
     assert_equal ~printer:(IO.to_string (List.print Int.print))
         [ 1 ; 2 ] (List.sort Int.compare !replies)
+ *)
+
+(* Hosts with SLAAC take an address in the prefix of the interface they are
+ * on and route through it, once it advertises; the others keep to their
+ * link-local address. *)
+(*$R make
+    let a = Ip.Addr.of_string and c = Ip.Cidr.of_string in
+    let sim = Simulation.make ~realtime:false "router-slaac" in
+    let r =
+        make_from_addrs ~parent:sim.root
+            [| [ c "2001:db8:1::fe/64", None ], Eth.Addr.random () ;
+               [ c "2001:db8:2::fe/64", None ], Eth.Addr.random () |] "r" in
+    let host n mac =
+        let h = Host.make ~parent:sim.root ~slaac:true ~mac:(Eth.Addr.of_string mac)
+                          ("h" ^ string_of_int n) in
+        let st = Eth.Cable.State.make ~parent:sim.root
+                                      ~name:("c" ^ string_of_int n) () in
+        Eth.Cable.plug st (h.trx.widget, 0) (r.widget, n - 1) ;
+        h in
+    let h1 = host 1 "02:00:00:00:00:01" and h2 = host 2 "02:00:00:00:00:02" in
+    let advertise b = Array.iter (fun i -> i.advertise <- b) r.ifaces in
+    let autoconf (h : Host.t) =
+        List.map (fun m -> Printf.sprintf2 "%a" Eth.State.print_my_address m)
+                 h.autoconf |> String.concat ", " in
+    advertise true ;
+    Simulation.run sim false ;
+    assert_equal ~printer:identity
+        "fe80::ff:fe00:1/64, 2001:db8:1::ff:fe00:1/64" (autoconf h1) ;
+    assert_equal ~printer:identity
+        "fe80::ff:fe00:2/64, 2001:db8:2::ff:fe00:2/64" (autoconf h2) ;
+    let replies = ref [] in
+    Hashtbl.add h1.echo_waiters 7 (fun seq -> replies := seq :: !replies) ;
+    h1.trx.ping ~id:7 ~seq:1 (Host.Ip (a "2001:db8:2::ff:fe00:2")) ;
+    Simulation.run sim false ;
+    assert_equal ~printer:(IO.to_string (List.print Int.print))
+        ~msg:"routed through the advertised router" [ 1 ] !replies ;
+    (* Rebooted, h1 solicits an advertisement, which has to be answered as
+     * the initial ones are over: *)
+    Simulation.power_down h1.trx.widget.power ;
+    Simulation.power_up h1.trx.widget.power ;
+    Simulation.run sim false ;
+    assert_equal ~printer:identity
+        "fe80::ff:fe00:1/64, 2001:db8:1::ff:fe00:1/64" (autoconf h1) ;
+    (* Without advertisements, or without SLAAC, the link-local only: *)
+    let reboot () =
+        Simulation.power_down h1.trx.widget.power ;
+        Simulation.power_up h1.trx.widget.power ;
+        Simulation.run sim false in
+    advertise false ;
+    reboot () ;
+    assert_equal ~printer:identity "fe80::ff:fe00:1/64" (autoconf h1) ;
+    advertise true ;
+    h1.slaac <- false ;
+    h1.addresses <- [ c "2001:db8:1::1/64" ] ;
+    reboot () ;
+    assert_equal ~printer:identity "fe80::ff:fe00:1/64" (autoconf h1) ;
+    assert_bool "no default route" (h1.eth_state.gateways = [])
  *)
 
 (* An interface with no address of its own gets no admin host, so nothing

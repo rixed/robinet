@@ -98,6 +98,9 @@
       }
      ],
      "drop hop-by-hop": true
+    },
+    "#0": {
+     "router advertisements": true
     }
    }
   },
@@ -149,20 +152,8 @@
     "lon": 1.95
    },
    "params": {
-    "addresses": [
-     "2001:db8:1::11/64"
-    ],
+    "SLAAC": true,
     "MAC": "02:52:0a:00:00:02"
-   },
-   "properties": {
-    "eth": {
-     "gateways": [
-      {
-       "destination": "::/0",
-       "via": "2001:db8:1::fe"
-      }
-     ]
-    }
    }
   },
   {
@@ -186,7 +177,7 @@
     "outside rules": [
      {
       "verdict": 1,
-      "CIDR": "2001:db8:1::11"
+      "CIDR": "2001:db8:1:0:52:aff:fe00:2"
      },
      {
       "verdict": 0,
@@ -286,7 +277,7 @@
     "lon": 2.4
    },
    "params": {
-    "text": "Dual stack. core routes 10.0.1.0/24 and 2001:db8:1::/64 (the office, port 0) to 10.0.2.0/24 and 2001:db8:2::/64 (behind fw, port 1), and answers at .254 and ::fe on either side; it drops packets with a hop-by-hop header. alice has an address of each family, bob only an IPv6 one, which fw denies. server echoes TCP port 7. At startup alice pings server over both families and talks to it over IPv6, and bob's ping goes unanswered."
+    "text": "Dual stack. core routes 10.0.1.0/24 and 2001:db8:1::/64 (the office, port 0) to 10.0.2.0/24 and 2001:db8:2::/64 (behind fw, port 1), and answers at .254 and ::fe on either side; it drops packets with a hop-by-hop header, and advertises the office prefix. alice has an address of each family, bob only the IPv6 one SLAAC gives it, 2001:db8:1:0:52:aff:fe00:2, which fw denies. server echoes TCP port 7. At startup alice pings server over both families and talks to it over IPv6, and bob's ping goes unanswered."
    }
   }
  ],
@@ -370,7 +361,7 @@
     "target": "2001:db8:2::10",
     "count": 3
    },
-   "delay": 1
+   "delay": 5
   },
   {
    "path": "alice",

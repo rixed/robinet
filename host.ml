@@ -141,6 +141,16 @@ and t = {
     (* Other addresses, of either family, given at boot whatever
        [static_ip]: *)
     mutable addresses : Ip.Cidr.t list ;
+    (* Whether IPv6 addresses and the default IPv6 route are taken from
+       router advertisements: *)
+    mutable slaac : bool ;
+    (* The addresses configured automatically and kept: the link-local one,
+       given to a host with any IPv6, and those of SLAAC. *)
+    mutable autoconf : Eth.State.my_address list ;
+    (* The router whose advertisement installed the default IPv6 route, and
+       whether any advertisement came at all: *)
+    mutable ra_gateway : Ip.Addr.t option ;
+    mutable got_ra : bool ;
     (* What the current lease granted, if anything. A lease is not a
        property of the host but of the moment: it goes when the power
        does (see [reset]), and what it does not carry falls back on the
@@ -338,8 +348,83 @@ let icmp_rx t ~local ~remote bits =
                 echo_reply_rx t id seq
         | _ -> ()
 
-(* Neighbor discovery is the adapter's: *)
-let icmp6_rx t ~local ~remote bits =
+(* Take [my_addr] if no other node has it, then call [ok]: *)
+let autoconf_add ?(ok=ignore) t my_addr =
+    let addr () = Ip.Addr.(to_string (of_bitstring my_addr.Eth.State.addr)) in
+    Eth.TRX.dad t.eth_state my_addr
+        ~ok:(fun () ->
+            Log.(log t.trx.widget.logger Info (lazy (Printf.sprintf2
+                "Configured %a" Eth.State.print_my_address my_addr))) ;
+            t.autoconf <- t.autoconf @ [ my_addr ] ;
+            ok ())
+        ~duplicate:(fun () ->
+            Log.(log t.trx.widget.logger Warning (lazy (Printf.sprintf
+                "Another node has %s, not using it" (addr ())))))
+
+let link_local t =
+    List.find_opt (fun a ->
+        Ip.Addr.is_link_local (Ip.Addr.of_bitstring a.Eth.State.addr)
+    ) t.autoconf
+
+(* As RFC 4861, section 10: *)
+let max_rtr_solicitations = 3
+let rtr_solicitation_interval = Clock.Interval.sec 4.
+
+(* Ask for router advertisements from the link-local address, after up to a
+   second, and again until one comes: *)
+let solicit_routers t =
+    let rec solicit n () =
+        if not t.got_ra && n <= max_rtr_solicitations then
+            Option.may (fun (ll : Eth.State.my_address) ->
+                Log.(log t.trx.widget.logger Debug (lazy "Soliciting routers")) ;
+                Icmp6.Pdu.make_router_solicit
+                    ~src_lla:(Eth.Ndp.lla t.eth_state.mac) () |>
+                Eth.Ndp.packet ll.addr Eth.Ndp.all_routers |>
+                tx t.eth_trx ;
+                Simulation.delay t.trx.widget.power rtr_solicitation_interval
+                                 (solicit (n + 1)) ()
+            ) (link_local t) in
+    Simulation.delay t.trx.widget.power
+                     (Clock.Interval.sec (Random.float 1.)) (solicit 1) ()
+
+let drop_ra_gateway t =
+    Option.may (fun gw ->
+        let route = Eth.State.gw_selector ~v6:true (), Some (Eth.Gateway.Ip gw) in
+        t.eth_state.gateways <- List.remove t.eth_state.gateways route
+    ) t.ra_gateway ;
+    t.ra_gateway <- None
+
+(* A router advertisement from [router]: the default route it offers, after
+   the configured ones, and an address in each autonomous /64 prefix, of that
+   length if the prefix is on-link. Lifetimes are not counted down, but a
+   router lifetime of 0 withdraws the route. *)
+let slaac_rx t ~router lifetime options =
+    t.got_ra <- true ;
+    let from_gw = Option.map_default (fun gw -> Ip.Addr.compare gw router = 0)
+                                     false t.ra_gateway in
+    if lifetime = 0 then (
+        if from_gw then drop_ra_gateway t
+    ) else if not from_gw then (
+        drop_ra_gateway t ;
+        let route = Eth.State.gw_selector ~v6:true (), Some (Eth.Gateway.Ip router) in
+        t.eth_state.gateways <- t.eth_state.gateways @ [ route ] ;
+        t.ra_gateway <- Some router) ;
+    List.iter (function
+        | Icmp6.Opt.Prefix p
+          when p.autonomous && p.prefix_len = 64 && p.valid > 0 &&
+               p.preferred <= p.valid && not (Ip.Addr.is_link_local p.prefix) ->
+            let addr = Eth.Ndp.address_in p.prefix t.eth_state.mac in
+            let bits = Ip.Addr.to_bitstring addr in
+            if not (Eth.TRX.is_mine t.eth_state bits ||
+                    Eth.TRX.tentative t.eth_state bits <> None) then
+                Eth.State.make_my_ip_address
+                    ~prefix_len:(if p.on_link then 64 else 128) addr |>
+                autoconf_add t
+        | _ -> ()) options
+
+(* Neighbor discovery is the adapter's, but for router advertisements, which
+   are this host's when it does SLAAC and they were not routed: *)
+let icmp6_rx t ~local ~remote ~ttl bits =
     match Icmp6.Pdu.unpack bits with
         | Error s ->
             Log.(log t.trx.widget.logger Warning s)
@@ -353,6 +438,9 @@ let icmp6_rx t ~local ~remote bits =
             | 129, 0 ->
                 echo_reply_rx t id seq
             | _ -> ())
+        | Ok Icmp6.Pdu.{ payload = Router_advert { lifetime ; options ; _ } ; _ }
+          when t.slaac && ttl = 255 && Ip.Addr.is_link_local remote ->
+            slaac_rx t ~router:remote lifetime options
         | _ -> ()
 
 exception AlreadyConnected
@@ -882,7 +970,7 @@ let ip6_recv t bits =
                     Icmp6.Pdu.make_port_unreachable ip |> Icmp6.Pdu.pack |>
                     ip_reply t Ip.Proto.icmpv6 local remote)
             else if ip.proto = Ip.Proto.icmpv6 then
-                icmp6_rx t ~local ~remote bits
+                icmp6_rx t ~local ~remote ~ttl:ip.ttl bits
 
 let ip_recv t bits =
     if t.trx.widget.power.on && bitstring_length bits >= 4 then
@@ -983,8 +1071,9 @@ let ip_recv t bits =
         (fun c -> res := Option.map ignore c) ;
     Simulation.run sim false ;
     assert_equal None !res ;
-    assert_equal ~printer:string_of_int 1
-        (List.length h.eth_state.Eth.State.my_addresses)
+    assert_bool "no IPv4 address"
+        (List.for_all (fun a -> Bitstring.bitstring_length a.Eth.State.addr = 128)
+                      h.eth_state.Eth.State.my_addresses)
  *)
 
 (*$T static_ip_of_json
@@ -1029,6 +1118,9 @@ let reset t =
        installed included: a lease is granted to a running host, and this one
        has stopped. *)
     drop_leased_gateway t ;
+    drop_ra_gateway t ;
+    t.autoconf <- [] ;
+    t.got_ra <- false ;
     t.leased_netmask <- None ;
     t.leased_nameserver <- None ;
     t.leased_search_sfx <- None ;
@@ -1050,8 +1142,8 @@ let power_off t =
     Simulation.power_down t.trx.widget.power ;
     reset t
 
-(* Give the adapter [ip4], an address and netmask, if any, and the other
-   [addresses]: *)
+(* Give the adapter [ip4], an address and netmask, if any, the other
+   [addresses] and those configured automatically: *)
 let set_addresses t ip4 =
     let of_cidr c =
         let ip, prefix_len = (c : Ip.Cidr.t :> Ip.Addr.t * int) in
@@ -1060,7 +1152,7 @@ let set_addresses t ip4 =
         Option.map_default (fun (ip, netmask) ->
             [ Eth.State.make_my_ip_address
                 ~prefix_len:(Ip.Cidr.width_of_netmask netmask) ip ]) [] ip4 in
-    t.eth_state.my_addresses <- ip4 @ List.map of_cidr t.addresses ;
+    t.eth_state.my_addresses <- ip4 @ List.map of_cidr t.addresses @ t.autoconf ;
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf2 "Setting my addresses to %a"
         (List.print Eth.State.print_my_address) t.eth_state.my_addresses))) ;
     sink (ip_recv t) <-= t.eth_trx |> ignore
@@ -1090,6 +1182,16 @@ let init_static t =
     Simulation.asap t.trx.widget.power (fun () ->
         List.iter (fun f -> f t) t.trx.on_ip
     ) ()
+
+(* A link-local address for a host with IPv6, and then, with SLAAC, the
+   routers' advertisements: *)
+let init_autoconf t =
+    if t.slaac ||
+       List.exists (fun c -> Ip.Addr.is_v6 (fst (c : Ip.Cidr.t :> Ip.Addr.t * int)))
+                   t.addresses then
+        Eth.State.make_my_ip_address ~prefix_len:64
+            (Eth.Ndp.link_local t.eth_state.mac) |>
+        autoconf_add t ~ok:(fun () -> if t.slaac then solicit_routers t)
 
 (* The parameters a client asks for, most wanted first. Whatever is asked for
    here has to be applied by [apply_lease] below, and the other way about: a
@@ -1187,7 +1289,8 @@ let init_dhcp t =
                             (* TODO: print it *)
                             t.trx.signal_err "Ignoring a DHCP message"))) in
     let rec send_discover () =
-        if not (ip_is_set t) then (
+        if not (List.exists (fun a -> bitstring_length a.Eth.State.addr = 32)
+                            t.eth_state.my_addresses) then (
             Log.(log t.trx.widget.logger Debug (lazy "Sending DHCP DISCOVER")) ;
             Dhcp.Pdu.make_discover ~chaddr:(t.eth_state.mac :> bitstring) ~host_name:(cur_host_name t) ~request_list:dhcp_request_list () |>
                 Dhcp.Pdu.pack |>
@@ -1212,7 +1315,7 @@ let init_dhcp t =
 (* Build the host from its ethernet adapter.
  * you probably want [eth_state] to share its power source with [widget]. *)
 let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
-                  ?(own_ip_config=true) ~widget
+                  ?(slaac=false) ?(own_ip_config=true) ~widget
                   (eth_state : Eth.State.t) eth_trx name =
     (* For the API a cable reaches a host but in reality it reaches its
        adapter. *)
@@ -1236,6 +1339,10 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
         static_ip ;
         netmask ;
         addresses ;
+        slaac ;
+        autoconf      = [] ;
+        ra_gateway    = None ;
+        got_ra        = false ;
         leased_netmask = None ;
         leased_gateway = None ;
         leased_nameserver = None ;
@@ -1259,9 +1366,12 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
            packets. Calling [set_ip] here would have it read the wire as well, which
            is exactly what a router's admin host must not do. *)
         if not t.own_ip_config then ignore
-        (* DHCP for a host given no address at all: *)
-        else if t.static_ip = None && t.addresses = [] then init_dhcp
-        else init_static
+        (* DHCP for a host given no address at all, nor SLAAC: *)
+        else (fun t ->
+            (if t.static_ip = None && t.addresses = [] && not t.slaac then
+                init_dhcp t
+             else init_static t) ;
+            init_autoconf t)
     and host_trx = {
         widget ;
         dev           = { write = (fun bits ->
@@ -1880,7 +1990,7 @@ let addresses_of_json name =
             Ip.Cidr.o (ip, Ip.Addr.length ip))
 
 let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
-         ?addresses
+         ?addresses ?slaac
          ~parent ?(own_power=true) ?location name =
     (* A host can take its power source from some larger equipment, and
        mints one of its own when it is a machine in its own right. *)
@@ -1891,7 +2001,7 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
         Eth.State.make ?mac ?gateways ~parent:widget () in
     let eth_trx = Eth.TRX.make eth_state in
     let t = make_from_eth ?search_sfx ?nameserver ~widget ?static_ip
-                          ?netmask ?addresses eth_state eth_trx name in
+                          ?netmask ?addresses ?slaac eth_state eth_trx name in
     (* This host minted the supply above, so the switch for it goes here, and
        so does stopping it for good. And it is a whole machine, unlike a host
        built on somebody else's adapter. *)
@@ -1915,6 +2025,18 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
                 `List (List.map (fun c -> `String (Ip.Cidr.to_string c))
                                 t.addresses))
             ~setter:(fun v -> t.addresses <- addresses_of_json "addresses" v) ;
+        property "SLAAC" ~kind:Bool
+            ~descr:"Take IPv6 addresses and the default IPv6 route from \
+                    router advertisements, from the next boot."
+            ~getter:(fun () -> `Bool t.slaac)
+            ~setter:(fun v -> t.slaac <- to_bool v) ;
+        property "autoconfigured addresses" ~kind:(list String)
+            ~descr:"The link-local address of a host with IPv6, and those \
+                    SLAAC configured."
+            ~getter:(fun () ->
+                `List (List.map (fun a ->
+                    `String (Printf.sprintf2 "%a" Eth.State.print_my_address a)
+                ) t.autoconf)) ;
         property "static-netmask" ~kind:(Optional String)
             ~descr:"Netmask of the static IP configuration."
             ~getter:(fun () -> json_of_optional Ip.Addr.to_json t.netmask)

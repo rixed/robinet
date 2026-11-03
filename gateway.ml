@@ -240,6 +240,12 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
         add_ip6 0 (Ip.Cidr.o (Enum.get_exn (Ip.Cidr.local_addrs lan6),
                               Ip.Cidr.width lan6))) lan6 ;
     Option.may (add_ip6 1) public_ip6 ;
+    Array.iter (fun (iface : Router.iface) ->
+        iface.eth.my_addresses <-
+            Eth.State.with_link_local iface.eth.mac iface.eth.my_addresses
+    ) router.ifaces ;
+    (* So that the LAN configures itself with SLAAC: *)
+    router.ifaces.(0).advertise <- lan6 <> None ;
     let nat_state =
         Nat.State.make ~num_max_cnxs ~parent:widget ?port_forwards public_ip in
     let nat_trx = Nat.TRX.make nat_state in
@@ -495,6 +501,37 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     client.trx.ping ~id:1 ~seq:2 (Host.Ip (a "80.82.17.1")) ;
     Simulation.run sim false ;
     assert_equal ~printer:string_of_int ~msg:"replies come back" 2 !replies
+ *)
+
+(* The LAN prefix is advertised, so that a client with SLAAC needs no IPv6
+   configuration of its own. *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "gw-slaac" in
+    let a = Ip.Addr.of_string and c = Ip.Cidr.of_string in
+    let gw =
+        make ~parent:sim.root ~lan6:(c "2001:db8:1::/64")
+             ~public_ip6:(c "2001:db8::2/64")
+             (a "80.82.17.127") (c "192.168.0.0/24") in
+    let far : Host.t =
+        Host.make ~parent:sim.root ~addresses:[ c "2001:db8::1/64" ]
+                  ~gateways:[ c "2001:db8:1::/64",
+                              Some (Eth.Gateway.Ip (a "2001:db8::2")) ]
+                  "far" in
+    far.Host.trx.Host.dev --> gw.trx.out ;
+    gw.trx.out --> far.Host.trx.Host.dev ;
+    let client : Host.t =
+        Host.make ~parent:sim.root ~slaac:true
+                  ~mac:(Eth.Addr.of_string "02:00:00:00:00:10") "client" in
+    client.Host.trx.Host.dev --> gw.trx.ins ;
+    ignore (client.Host.trx.Host.dev <-= gw.trx) ;
+    Simulation.run sim false ;
+    assert_bool "the client took an address in the LAN prefix"
+        (Host.is_mine client (a "2001:db8:1::ff:fe00:10")) ;
+    let replies = ref 0 in
+    Hashtbl.replace client.Host.echo_waiters 1 (fun _ -> incr replies) ;
+    client.trx.ping ~id:1 ~seq:1 (Host.Ip (a "2001:db8::1")) ;
+    Simulation.run sim false ;
+    assert_equal ~printer:string_of_int ~msg:"and reaches the outside" 1 !replies
  *)
 
 (* And the two halves are not sealed off from each other: a name the server
