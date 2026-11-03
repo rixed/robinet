@@ -889,8 +889,12 @@ struct
            * updates an entry already there. *)
           mutable accept_announcements : bool ;
           mutable learn_neighbors_from_incoming : Learn.t ;
-          (* TODO: these two should be timeouted, requiring a clock *)
           neighbors : Addr.t option BitHash.t ;     (* proto_addr -> hw_addr option (None when resolving) *)
+          (* When each learnt neighbor was last confirmed, which it is
+           * forgotten [neighbor_timeout] seconds after, if set. Entries
+           * without one are kept: *)
+          confirmed : Time.t BitHash.t ;
+          mutable neighbor_timeout : float option ;
           (* Hash of messages waiting for a neighbor resolution.
            * dest_proto_addr -> msg *)
           postponed : bitstring BitHash.t ;
@@ -969,13 +973,34 @@ struct
       not (on "2001:db8:1::1") && not (on "a00::1")
      *)
 
+    (* That [iaddr], a bitstring of its own, is at [hw] as of now: *)
+    let confirm_neighbor (t : t) iaddr hw =
+        BitHash.replace t.neighbors iaddr (Some hw) ;
+        match t.neighbor_timeout with
+        | None ->
+            BitHash.remove_all t.confirmed iaddr
+        | Some secs ->
+            let now = Simulation.Widget.now t.iface.widget in
+            BitHash.replace t.confirmed iaddr now ;
+            (* Forgotten then, unless confirmed again meanwhile: *)
+            Simulation.delay ~background:true t.iface.widget.power
+                             (Interval.sec secs) (fun () ->
+                match BitHash.find_option t.confirmed iaddr with
+                | Some last when Time.compare last now = 0 ->
+                    Log.(log t.iface.widget.logger Debug (lazy (Printf.sprintf
+                        "Forgetting %s" (hexstring_of_bitstring iaddr)))) ;
+                    BitHash.remove_all t.confirmed iaddr ;
+                    BitHash.remove_all t.neighbors iaddr
+                | _ -> ()) ()
+
     let set_neighbor (t : t) iaddr = function
         | None      ->
             Log.(log t.iface.widget.logger Debug (lazy (Printf.sprintf "Removing entry for iaddr %s from the neighbor cache" (hexstring_of_bitstring iaddr)))) ;
+            BitHash.remove_all t.confirmed iaddr ;
             BitHash.remove_all t.neighbors iaddr
-        | haddr_opt ->
-            Log.(log t.iface.widget.logger Debug (lazy (Printf.sprintf "Adding entry for iaddr %s to MAC %s in the neighbor cache" (hexstring_of_bitstring iaddr) (match haddr_opt with None -> "None" | Some haddr -> Addr.to_string haddr)))) ;
-            BitHash.replace t.neighbors iaddr haddr_opt
+        | Some haddr ->
+            Log.(log t.iface.widget.logger Debug (lazy (Printf.sprintf "Adding entry for iaddr %s to MAC %s in the neighbor cache" (hexstring_of_bitstring iaddr) (Addr.to_string haddr)))) ;
+            confirm_neighbor t (concat [ iaddr ]) haddr
 
     (* What an adapter learnt about its neighbours, and what it was holding
      * back until it learnt more. Both are true only for as long as the device
@@ -986,6 +1011,7 @@ struct
      * already in flight and sends no other. *)
     let reset t =
         BitHash.clear t.neighbors ;
+        BitHash.clear t.confirmed ;
         BitHash.clear t.postponed ;
         t.tentative <- [] ;
         t.via <- None ;
@@ -1078,6 +1104,8 @@ struct
             my_addresses ; tentative = [] ; groups = [] ;
             delay ; loss ; via = None ;
             neighbors = BitHash.create 3 ;
+            confirmed = BitHash.create 3 ;
+            neighbor_timeout = Some 60. ;
             postponed = BitHash.create 3 } in
         (* Enrich the underlying dumb adapter with more properties: *)
         Widget.add_properties iface.widget Widget.[
@@ -1090,6 +1118,13 @@ struct
             property "neighbor cache size" ~kind:Int
                 ~descr:"Current size of the neighbor cache, ARP and NDP alike."
                 ~getter:(fun () -> `Int (BitHash.length t.neighbors)) ;
+            property "neighbor timeout" ~kind:(optional Duration) ~units:"secs"
+                ~descr:"How long a neighbour's hardware address is kept after \
+                        it was last learnt; unset, for ever."
+                ~getter:(fun () -> json_of_optional (fun s -> `Float s)
+                                                    t.neighbor_timeout)
+                ~setter:(fun v ->
+                    t.neighbor_timeout <- to_option (to_float_range ~min:0.) v) ;
             property "gateways"
                 ~descr:"Where to send what is not on this LAN."
                 ~kind:(list (row [| "destination", hint "0.0.0.0/0" String ;
@@ -1339,7 +1374,7 @@ struct
     let learn (st : State.t) ~add ip hw =
         if add || BitHash.mem st.neighbors ip then (
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...%s is at %s" (hexstring_of_bitstring ip) (Addr.to_string hw)))) ;
-            BitHash.replace st.neighbors (concat [ ip ]) (Some hw)) ;
+            State.confirm_neighbor st (concat [ ip ]) hw) ;
         let waiting = List.rev (BitHash.find_all st.postponed ip) in
         BitHash.remove_all st.postponed ip ;
         List.iter (fun msg -> send st (proto_of msg) hw msg) waiting
@@ -1442,11 +1477,10 @@ struct
                     | Some (ip, m) ->
                         if ip.ttl = 255 then ndp_rx st frame.src ip m
                     | None ->
-                        (* Take note of the MAC/IP pair of the sender (TODO: with a short timeout) : *)
+                        (* Take note of the MAC/IP pair of the sender: *)
                         let learn src =
                             (* A copy, not to keep the whole frame alive: *)
-                            BitHash.replace st.neighbors (concat [ src ])
-                                            (Some frame.src) in
+                            State.confirm_neighbor st (concat [ src ]) frame.src in
                         let src () = Pdu.extract_src_proto frame.proto payload in
                         (match st.learn_neighbors_from_incoming with
                         | Learn.Never -> ()
@@ -1624,6 +1658,27 @@ struct
       State.announce a ;
       Simulation.run sim false ;
       assert_bool "and are when they are" (knows b (ip6 1) && knows b (ip 1))
+    *)
+    (*$R
+      let sim, a, b, _, _ = dual () in
+      let at secs f = Simulation.delay sim.root.power (Clock.Interval.sec secs) f () in
+      let seen = ref [] in
+      let see () = seen := (knows a (ip6 2), knows a (ip 2)) :: !seen in
+      send6 a (ip6 1) (ip6 2) "one" ; send a (ip 2) ;
+      at 30. (fun () -> see () ; send6 a (ip6 1) (ip6 2) "renews nothing") ;
+      at 59. (fun () -> State.announce b) ;
+      at 61. see ;
+      at 120. see ;
+      Simulation.run sim false ;
+      let printer l =
+          String.concat ", " (List.map (fun (x, y) -> Printf.sprintf "%b/%b" x y) l) in
+      assert_equal ~printer ~msg:"forgotten a minute after, unless learnt again"
+          [ true, true ; true, true ; false, false ] (List.rev !seen) ;
+      a.neighbor_timeout <- None ;
+      send a (ip 2) ;
+      at 1000. see ;
+      Simulation.run sim false ;
+      assert_equal ~printer ~msg:"or kept for ever" [ false, true ] [ List.hd !seen ]
     *)
     (*$R
       let sim, a, b, _, got_b = dual () in

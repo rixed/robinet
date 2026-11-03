@@ -492,15 +492,17 @@ under:
 
 *An Ethernet adapter* is `speeds`, `full-duplex` and `inter-frame-gap`, and on
 one with an IP stack above it also `MTU` (68…65535), `gateways`, `delay`,
-`loss`, `answer neighbor requests`, `accept neighbor announcements` and `learn
-neighbors from incoming` — a loss of 0.01 drops one frame in a hundred, which
+`loss`, `answer neighbor requests`, `accept neighbor announcements`, `learn
+neighbors from incoming` and `neighbor timeout` — a loss of 0.01 drops one frame in a hundred, which
 is how a machine is made to misbehave without touching the cable. `gateways`
 rows are `{"destination": "0.0.0.0/0", "via": "10.0.0.1"}`, IPv4 or IPv6,
 `via` an IP or a MAC, or `null` for reaching the destination directly; a
 `destination` address beside a dotted `mask`, as older simulations have it,
 still reads. An adapter carries IPv4 and IPv6 alike, and finds a neighbour's
 hardware address with ARP for the one and neighbor discovery for the other: it
-learns it when it asks for it, or when the neighbour asks for its own; with
+learns it when it asks for it, or when the neighbour asks for its own, and
+forgets it `neighbor timeout` seconds after it last learnt it (60 unless set;
+unset, never), to ask again for the next frame; with
 `accept neighbor announcements` it also learns one that merely announces
 itself (see `announce addresses` below), which is what spares the first frame
 to a neighbour the wait of an exchange. It is off unless set, as on most real
