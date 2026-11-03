@@ -322,8 +322,9 @@ outside, port 1 the network it serves.**
 
 IPv6 is not translated: without `LAN IPv6` the gateway forwards none, and with
 it it advertises that prefix to the machines behind it, which configure
-themselves with `SLAAC` (there is no DHCPv6), and its own IPv6 addresses answer
-only neighbor discovery. The outside must route that prefix to `public IPv6`.
+themselves with `SLAAC` (there is no DHCPv6). Its own IPv6 addresses answer as
+a router's do, each only on its side: ping, and errors for TCP and UDP, but no
+DHCP or DNS. The outside must route that prefix to `public IPv6`.
 
 On the LAN a gateway is **one machine at one address**: `.1` is where its
 clients send what is to be forwarded, and also the DHCP server that leased them

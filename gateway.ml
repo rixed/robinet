@@ -210,11 +210,21 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
                (* route everything else toward the outside *)
                Route.forward ~dst_mask:(Ip.Cidr.of_string "0.0.0.0/0")
                              ?via:public_gw 1 ] @
-             (* and likewise for IPv6, but only with a prefix of its own: *)
+             (* and likewise for IPv6, but only with a prefix of its own;
+                the router answers for its IPv6 addresses as any router does
+                (the LAN one is the first of its prefix): *)
+             (match public_ip6 with
+             | None -> []
+             | Some cidr ->
+                 [ Route.admin ~in_iface:1 (Ip.Cidr.subnet cidr) ;
+                   Route.forward ~dst_mask:(Ip.Cidr.o (Ip.Cidr.zero_addr cidr,
+                                                       Ip.Cidr.width cidr)) 1 ]) @
              match lan6 with
              | None -> []
              | Some lan6 ->
-                 [ Route.forward ~dst_mask:lan6 0 ;
+                 [ Route.admin ~in_iface:0
+                       (Enum.get_exn (Ip.Cidr.local_addrs lan6)) ;
+                   Route.forward ~dst_mask:lan6 0 ;
                    Route.forward ~dst_mask:(Ip.Cidr.of_string "::/0")
                                  ?via:public_gw6 1 ])
             "router") in
@@ -232,18 +242,6 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     (* The second iface of our router (facing internet) is the NAT *)
     Eth.State.add_ip router.ifaces.(1).eth
         ?prefix_len:(Option.map Ip.Cidr.width_of_netmask public_netmask) public_ip ;
-    (* The IPv6 addresses, the LAN one the first of its prefix: *)
-    let add_ip6 n cidr =
-        let ip, prefix_len = (cidr : Ip.Cidr.t :> Ip.Addr.t * int) in
-        Eth.State.add_ip router.ifaces.(n).eth ~prefix_len ip in
-    Option.may (fun lan6 ->
-        add_ip6 0 (Ip.Cidr.o (Enum.get_exn (Ip.Cidr.local_addrs lan6),
-                              Ip.Cidr.width lan6))) lan6 ;
-    Option.may (add_ip6 1) public_ip6 ;
-    Array.iter (fun (iface : Router.iface) ->
-        iface.eth.my_addresses <-
-            Eth.State.with_link_local iface.eth.mac iface.eth.my_addresses
-    ) router.ifaces ;
     (* So that the LAN configures itself with SLAAC: *)
     router.ifaces.(0).advertise <- lan6 <> None ;
     let nat_state =
@@ -500,7 +498,19 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     Simulation.run sim false ;
     client.trx.ping ~id:1 ~seq:2 (Host.Ip (a "80.82.17.1")) ;
     Simulation.run sim false ;
-    assert_equal ~printer:string_of_int ~msg:"replies come back" 2 !replies
+    assert_equal ~printer:string_of_int ~msg:"replies come back" 2 !replies ;
+    (* The gateway answers at its IPv6 address on either side: *)
+    let ping (h : Host.t) dst =
+        let replies = ref 0 in
+        Hashtbl.replace h.Host.echo_waiters 2 (fun _ -> incr replies) ;
+        h.trx.ping ~id:2 ~seq:1 (Host.Ip (a dst)) ;
+        Simulation.run sim false ;
+        Hashtbl.remove h.Host.echo_waiters 2 ;
+        !replies in
+    assert_equal ~printer:string_of_int ~msg:"LAN address" 1
+        (ping client "2001:db8:1::1") ;
+    assert_equal ~printer:string_of_int ~msg:"public address" 1
+        (ping far "2001:db8::2")
  *)
 
 (* The LAN prefix is advertised, so that a client with SLAAC needs no IPv6
