@@ -1714,6 +1714,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "b = #0000\nb := 10.0.0.1\nm = #0000\nm := 02:00:00:00:00:01\nprint(\"${b} ${length(b)} ${m}\")")
   "> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 UDP 1>2 \"\\n\\000\\000\\001\"\n4µs640ns2ps: done" \
     (runs ~frames:true "/IP(dst=10.0.0.2)/UDP(src=1, dst=2)/Raw(10.0.0.1)")
+  "> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 UDP 1>2 \"\\n\\000\\000\\001\"\n4µs640ns2ps: done" \
+    (runs ~frames:true "/IP4(dst=10.0.0.2)/UDP(src=1, dst=2)/Raw(10.0.0.1)")
   "0s: failed: line 1, column 5: 4 bytes are no MAC address" \
     (runs "x = mac_addr(#01020304)")
   "0s: 16 -1.5 1 true #2c 1.5s 2026-10-20T22:02:45Z 10.0.0.1 01:02:03:04:05:06\n0s: done" \

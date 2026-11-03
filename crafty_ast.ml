@@ -53,9 +53,10 @@ struct
         | TimeExceeded -> "TimeExceeded" | PacketTooBig -> "PacketTooBig"
         | DNS -> "DNS" | Query -> "Query" | Answer -> "Answer" | Raw -> "Raw"
 
-    (* However written: *)
+    (* However written; IP4 is an alias for IP: *)
     let of_string s =
         let s = String.lowercase_ascii s in
+        if s = "ip4" then Some IP else
         List.find_opt (fun n -> String.lowercase_ascii (to_string n) = s) all
 
     let print oc n = String.print oc (to_string n)
@@ -66,6 +67,7 @@ end
   Layer_name.of_string "dns" = Some Layer_name.DNS
   Layer_name.of_string "destUNREACHABLE" = Some Layer_name.DestUnreachable
   Layer_name.of_string "HTTP" = None
+  Layer_name.of_string "Ip4" = Some Layer_name.IP
   List.for_all (fun n -> Layer_name.of_string (Layer_name.to_string n) = Some n) Layer_name.all
 *)
 
