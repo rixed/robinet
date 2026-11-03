@@ -925,6 +925,9 @@ let ports iface =
 
 (* TODO: similarly, a write n b = t.ifaces.(n).trx.write b *)
 
+(* With [v], interface [n] answers ARP requests for the addresses it routes
+   out of another interface. IPv4 only: neighbor solicitations are never
+   proxied. *)
 let set_proxy_arp t n v =
     t.ifaces.(n).eth.do_proxy_arp <-
         if v then

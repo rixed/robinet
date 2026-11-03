@@ -1076,7 +1076,7 @@ struct
      * @param mac the source {!Eth.Addr}
      * @param gateways list of [Gateeway.t]
      * @param promisc an optional function that will receive frames received but not destined to this TRX.
-     * @param do_proxy_arp an optional function instructing the driver to perform proxy-arp on a give ARP request
+     * @param do_proxy_arp an optional function telling which ARP requests to answer on another node's behalf (IPv4 only: there is no proxy NDP)
      * @param answer_requests whether to answer ARP requests and neighbor solicitations for [my_addresses] (default: true)
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
