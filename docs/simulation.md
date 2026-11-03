@@ -173,9 +173,11 @@ solicits routers and, from each advertisement, takes an address of its MAC in
 every /64 prefix marked autonomous, and the advertising router as default IPv6
 route after those of its adapter's `gateways`. An address is used only once
 duplicate address detection has found no other node with it, a second later;
-until it is, nothing is answered for it. The prefixes' lifetimes are not
-counted down; a router lifetime of 0 withdraws the route. Those addresses are
-listed, read only, in its `autoconfigured addresses`.
+until it is, nothing is answered for it. An address goes when its prefix's
+valid lifetime runs out, and the route when the router lifetime does, unless a
+later advertisement renews them; a router lifetime of 0 withdraws the route at
+once. Those addresses are listed, read only, in its `autoconfigured
+addresses`.
 
 ### switch
 
@@ -538,7 +540,8 @@ from it the IPv6 prefixes on its link — those of its addresses, and those
 routed out of it without a `via` that hold one of them — autonomous if /64,
 with its MTU and `router lifetime` (0…9000 seconds, 1800 unless set; 0 is not
 to be used as a default router). It sends three when switched on, 16 seconds
-apart, then answers solicitations only.
+apart, then one every 200 to 600 seconds, and answers solicitations within
+half a second. The prefixes are valid for 30 days.
 
 A router's `buffer capacity` is the RAM, in bytes, it holds the frames waiting
 for an interface to be free in. A third of it is reserved to the interfaces in

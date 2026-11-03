@@ -147,10 +147,13 @@ and t = {
     (* The addresses configured automatically and kept: the link-local one,
        given to a host with any IPv6, and those of SLAAC. *)
     mutable autoconf : Eth.State.my_address list ;
-    (* The router whose advertisement installed the default IPv6 route, and
-       whether any advertisement came at all: *)
+    (* The router whose advertisement installed the default IPv6 route, until
+       when, and whether any advertisement came at all: *)
     mutable ra_gateway : Ip.Addr.t option ;
+    mutable ra_deadline : Clock.Time.t ;
     mutable got_ra : bool ;
+    (* Until when each address of SLAAC is valid, if not forever: *)
+    slaac_deadlines : Clock.Time.t BitHash.t ;
     (* What the current lease granted, if anything. A lease is not a
        property of the host but of the moment: it goes when the power
        does (see [reset]), and what it does not carry falls back on the
@@ -394,21 +397,53 @@ let drop_ra_gateway t =
     ) t.ra_gateway ;
     t.ra_gateway <- None
 
+(* A deadline [secs] from now, checked by [check] then, in the background as
+   a later advertisement may have pushed it back: *)
+let deadline t secs check =
+    let d = Clock.Interval.sec (float_of_int secs) in
+    Simulation.delay ~background:true t.trx.widget.power d check () ;
+    Clock.Time.add (Simulation.Widget.now t.trx.widget) d
+
+let past t deadline =
+    Clock.Time.compare deadline (Simulation.Widget.now t.trx.widget) <= 0
+
+let expire_route t () =
+    if t.ra_gateway <> None && past t t.ra_deadline then (
+        Log.(log t.trx.widget.logger Info (lazy "The default router expired")) ;
+        drop_ra_gateway t)
+
+let expire_address t bits () =
+    match BitHash.find_option t.slaac_deadlines bits with
+    | Some d when past t d ->
+        Log.(log t.trx.widget.logger Info (lazy (Printf.sprintf
+            "%s expired" Ip.Addr.(to_string (of_bitstring bits))))) ;
+        BitHash.remove_all t.slaac_deadlines bits ;
+        let other a = not (bits_equal a.Eth.State.addr bits) in
+        t.autoconf <- List.filter other t.autoconf ;
+        t.eth_state.my_addresses <- List.filter other t.eth_state.my_addresses
+    | _ -> ()
+
+(* An infinite lifetime (RFC 4861, 4.6.2): *)
+let forever = 0xffff_ffff
+
 (* A router advertisement from [router]: the default route it offers, after
    the configured ones, and an address in each autonomous /64 prefix, of that
-   length if the prefix is on-link. Lifetimes are not counted down, but a
-   router lifetime of 0 withdraws the route. *)
+   length if the prefix is on-link, each until its lifetime runs out unless
+   another advertisement renews it. A router lifetime of 0 withdraws the
+   route at once. *)
 let slaac_rx t ~router lifetime options =
     t.got_ra <- true ;
     let from_gw = Option.map_default (fun gw -> Ip.Addr.compare gw router = 0)
                                      false t.ra_gateway in
     if lifetime = 0 then (
         if from_gw then drop_ra_gateway t
-    ) else if not from_gw then (
-        drop_ra_gateway t ;
-        let route = Eth.State.gw_selector ~v6:true (), Some (Eth.Gateway.Ip router) in
-        t.eth_state.gateways <- t.eth_state.gateways @ [ route ] ;
-        t.ra_gateway <- Some router) ;
+    ) else (
+        if not from_gw then (
+            drop_ra_gateway t ;
+            let route = Eth.State.gw_selector ~v6:true (), Some (Eth.Gateway.Ip router) in
+            t.eth_state.gateways <- t.eth_state.gateways @ [ route ] ;
+            t.ra_gateway <- Some router) ;
+        t.ra_deadline <- deadline t lifetime (expire_route t)) ;
     List.iter (function
         | Icmp6.Opt.Prefix p
           when p.autonomous && p.prefix_len = 64 && p.valid > 0 &&
@@ -419,7 +454,12 @@ let slaac_rx t ~router lifetime options =
                     Eth.TRX.tentative t.eth_state bits <> None) then
                 Eth.State.make_my_ip_address
                     ~prefix_len:(if p.on_link then 64 else 128) addr |>
-                autoconf_add t
+                autoconf_add t ;
+            if p.valid = forever then
+                BitHash.remove_all t.slaac_deadlines bits
+            else
+                deadline t p.valid (expire_address t bits) |>
+                BitHash.replace t.slaac_deadlines bits
         | _ -> ()) options
 
 (* Neighbor discovery is the adapter's, but for router advertisements, which
@@ -1076,6 +1116,34 @@ let ip_recv t bits =
                       h.eth_state.Eth.State.my_addresses)
  *)
 
+(* An address of SLAAC goes when its prefix's valid lifetime runs out, unless
+   an advertisement renews it: *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "slaac-expiry" in
+    let h = make ~parent:sim.root ~slaac:true
+                 ~mac:(Eth.Addr.of_string "02:00:00:00:00:01") "h" in
+    Simulation.run_startup sim ;
+    let prefix valid =
+        Icmp6.Opt.Prefix { prefix_len = 64 ; on_link = true ; autonomous = true ;
+                           flags = 0 ; valid ; preferred = valid ;
+                           prefix = Ip.Addr.of_string "2001:db8::" } in
+    let router = Ip.Addr.of_string "fe80::1" in
+    let addr = Ip.Addr.of_string "2001:db8::ff:fe00:1" in
+    let seen = ref [] in
+    let at secs f = Simulation.delay sim.root.power (Clock.Interval.sec secs) f () in
+    let see () = seen := is_mine h addr :: !seen in
+    slaac_rx h ~router 0 [ prefix 5 ] ;
+    at 3. see ;
+    at 4. (fun () -> slaac_rx h ~router 0 [ prefix 5 ]) ;
+    at 8. see ;
+    at 10. see ;
+    Simulation.run sim false ;
+    assert_equal ~printer:(IO.to_string (List.print Bool.print))
+        [ true ; true ; false ] (List.rev !seen) ;
+    assert_equal ~printer:string_of_int ~msg:"the link-local address stays" 1
+        (List.length h.autoconf)
+ *)
+
 (*$T static_ip_of_json
   static_ip_of_json "x" (`String "10.0.0.1") = (Ip.Addr.of_string "10.0.0.1", None)
   static_ip_of_json "x" (`String "10.0.0.1/24") = \
@@ -1120,6 +1188,7 @@ let reset t =
     drop_leased_gateway t ;
     drop_ra_gateway t ;
     t.autoconf <- [] ;
+    BitHash.clear t.slaac_deadlines ;
     t.got_ra <- false ;
     t.leased_netmask <- None ;
     t.leased_nameserver <- None ;
@@ -1342,7 +1411,9 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
         slaac ;
         autoconf      = [] ;
         ra_gateway    = None ;
+        ra_deadline   = Clock.Time.zero ;
         got_ra        = false ;
+        slaac_deadlines = BitHash.create 3 ;
         leased_netmask = None ;
         leased_gateway = None ;
         leased_nameserver = None ;

@@ -635,15 +635,16 @@ let send_router_advert t n =
         Eth.Ndp.packet ll.addr Eth.Ndp.all_nodes ra |> tx iface.trx
     | _ -> ()
 
-(* As RFC 4861, section 10: *)
+(* As RFC 4861, section 10, and radvd's default intervals: *)
 let max_initial_rtr_advertisements = 3
 let max_initial_rtr_advert_interval = 16.
 let max_ra_delay_time = 0.5
+let min_rtr_adv_interval = 200.
+let max_rtr_adv_interval = 600.
 
 (* The unsolicited advertisements of interface [n], from within a second, if
- * it advertises and is on. Only the initial ones: hosts solicit when they
- * boot and never let a lifetime run out, and a periodic event would keep a
- * simulation from ever running out of events. *)
+ * it advertises and is on: the initial ones, then one every 200 to 600s.
+ * In the background, as hosts solicit one when they boot. *)
 let start_router_adverts t n =
     let iface = t.ifaces.(n) in
     iface.ra_gen <- iface.ra_gen + 1 ;
@@ -651,12 +652,17 @@ let start_router_adverts t n =
     let rec loop i () =
         if iface.ra_gen = gen && iface.advertise then (
             send_router_advert t n ;
-            if i < max_initial_rtr_advertisements then
-                Simulation.delay power
-                    (Clock.Interval.sec max_initial_rtr_advert_interval)
-                    (loop (i + 1)) ()) in
+            let interval =
+                if i < max_initial_rtr_advertisements then
+                    max_initial_rtr_advert_interval
+                else
+                    min_rtr_adv_interval +.
+                    Random.float (max_rtr_adv_interval -. min_rtr_adv_interval) in
+            Simulation.delay ~background:true power
+                (Clock.Interval.sec interval) (loop (i + 1)) ()) in
     if power.on && iface.advertise then
-        Simulation.delay power (Clock.Interval.sec (Random.float 1.)) (loop 1) ()
+        Simulation.delay ~background:true power
+            (Clock.Interval.sec (Random.float 1.)) (loop 1) ()
 
 (* A router solicitation received by interface [n]: one advertisement for all
  * the solicitations of the next half second. *)
@@ -1610,6 +1616,21 @@ let make_from_addrs
     Simulation.run sim false ;
     assert_equal ~printer:identity
         "fe80::ff:fe00:1/64, 2001:db8:1::ff:fe00:1/64" (autoconf h1) ;
+    (* Periodic advertisements renew the default route beyond its lifetime,
+     * which runs out between two of them when shorter: *)
+    let at secs f = Simulation.delay sim.root.power (Clock.Interval.sec secs) f () in
+    let seen = ref [] in
+    let see () = seen := (h1.eth_state.gateways <> []) :: !seen in
+    at 2000. see ;
+    Simulation.run sim false ;
+    r.ifaces.(0).router_lifetime <- 10 ;
+    start_router_adverts r 0 ;
+    at 5. see ;
+    at 14. see ;
+    Simulation.run sim false ;
+    assert_equal ~printer:(IO.to_string (List.print Bool.print))
+        [ true ; true ; false ] (List.rev !seen) ;
+    r.ifaces.(0).router_lifetime <- 1800 ;
     (* Without advertisements, or without SLAAC, the link-local only: *)
     let reboot () =
         Simulation.power_down h1.trx.widget.power ;
