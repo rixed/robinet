@@ -49,7 +49,7 @@ let main =
                                     netmask =
                                         Some (Ip.Addr.of_string
                                                   "255.255.255.0") ;
-                                    addresses = [] ; slaac = false ; gateway = None ; nameserver = None ;
+                                    addresses = [] ; slaac = false ; dad = false ; gateway = None ; nameserver = None ;
                                     search_sfx = None ; mac = None }) in
             (* Spread around the switch, each one further out than the last, so
              * that the three cables are of three different lengths. Before the

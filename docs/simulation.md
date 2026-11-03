@@ -161,6 +161,7 @@ which gives IPv4 only — and with `SLAAC` too, it is dual-stack.
 | `netmask` | optional string | `"255.255.255.0"` | What it can reach without a gateway. A DHCP client is told by its lease and has this only to fall back on. |
 | `addresses` | list of strings | `[]` | Its other addresses, of either family, each with its prefix length: `["2001:db8::1/64"]`. One without is alone on its subnet. |
 | `SLAAC` | bool | `false` | Takes IPv6 addresses and the default IPv6 route from router advertisements. |
+| `DAD` | bool | `false` | Uses its static IPv6 addresses only once duplicate address detection has found no other node with them. |
 | `gateway` | optional string | `null` | Where to send what is not on its subnets, for the family of that gateway. Both families need the adapter's `gateways`. |
 | `nameserver` | optional string | `null` | Which DNS server to ask, of either family. It is asked for the addresses of the families the host has one of. |
 | `search suffix` | optional string | `null` | Appended to the names it resolves. |
@@ -173,7 +174,9 @@ solicits routers and, from each advertisement, takes an address of its MAC in
 every /64 prefix marked autonomous, and the advertising router as default IPv6
 route after those of its adapter's `gateways`. An address is used only once
 duplicate address detection has found no other node with it, a second later;
-until it is, nothing is answered for it. An address goes when its prefix's
+until it is, nothing is answered for it. With `DAD` its static IPv6 addresses
+are checked the same way; otherwise they are used from boot. A SLAAC address
+goes when its prefix's
 valid lifetime runs out, and the route when the router lifetime does, unless a
 later advertisement renews them; a router lifetime of 0 withdraws the route at
 once. Those addresses are listed, read only, in its `autoconfigured
@@ -467,7 +470,7 @@ under:
 
 | device | path | properties |
 | --- | --- | --- |
-| host | `""` | `static-ip`, `static-netmask`, `addresses`, `SLAAC`, `nameserver`, `hostname`, `search suffix`, `prefer IPv6` |
+| host | `""` | `static-ip`, `static-netmask`, `addresses`, `SLAAC`, `DAD`, `nameserver`, `hostname`, `search suffix`, `prefer IPv6` |
 | | `eth` | *its adapter* |
 | switch | `""` | `cut-through` |
 | | `#0`… | *its ports* |

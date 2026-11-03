@@ -144,6 +144,10 @@ and t = {
     (* Whether IPv6 addresses and the default IPv6 route are taken from
        router advertisements: *)
     mutable slaac : bool ;
+    (* Whether the static IPv6 [addresses] are used only once no other node
+       is found to have them, and those that were: *)
+    mutable dad : bool ;
+    mutable checked : Eth.State.my_address list ;
     (* The addresses configured automatically and kept: the link-local one,
        given to a host with any IPv6, and those of SLAAC. *)
     mutable autoconf : Eth.State.my_address list ;
@@ -352,17 +356,21 @@ let icmp_rx t ~local ~remote bits =
         | _ -> ()
 
 (* Take [my_addr] if no other node has it, then call [ok]: *)
-let autoconf_add ?(ok=ignore) t my_addr =
+let take_if_free t my_addr ~ok =
     let addr () = Ip.Addr.(to_string (of_bitstring my_addr.Eth.State.addr)) in
     Eth.TRX.dad t.eth_state my_addr
         ~ok:(fun () ->
             Log.(log t.trx.widget.logger Info (lazy (Printf.sprintf2
                 "Configured %a" Eth.State.print_my_address my_addr))) ;
-            t.autoconf <- t.autoconf @ [ my_addr ] ;
             ok ())
         ~duplicate:(fun () ->
             Log.(log t.trx.widget.logger Warning (lazy (Printf.sprintf
                 "Another node has %s, not using it" (addr ())))))
+
+let autoconf_add ?(ok=ignore) t my_addr =
+    take_if_free t my_addr ~ok:(fun () ->
+        t.autoconf <- t.autoconf @ [ my_addr ] ;
+        ok ())
 
 let link_local t =
     List.find_opt (fun a ->
@@ -1116,6 +1124,28 @@ let ip_recv t bits =
                       h.eth_state.Eth.State.my_addresses)
  *)
 
+(* With [dad], a static IPv6 address is used only once no other node is found
+   to have it: *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "static-dad" in
+    let c = Ip.Cidr.of_string and ip = Ip.Addr.of_string in
+    let a = make ~parent:sim.root ~addresses:[ c "2001:db8::1/64" ] "a"
+    and b = make ~parent:sim.root ~dad:true
+                 ~addresses:[ c "2001:db8::1/64" ; c "2001:db8::2/64" ] "b" in
+    let st = Eth.Cable.State.make ~parent:sim.root ~name:"c" () in
+    Eth.Cable.plug st (a.trx.widget, 0) (b.trx.widget, 0) ;
+    Simulation.run_startup sim ;
+    assert_bool "not before it is checked" (not (is_mine b (ip "2001:db8::2"))) ;
+    Simulation.run sim false ;
+    assert_bool "the free address is taken" (is_mine b (ip "2001:db8::2")) ;
+    assert_bool "and the other's is not" (not (is_mine b (ip "2001:db8::1"))) ;
+    let replies = ref 0 in
+    Hashtbl.add a.echo_waiters 7 (fun _ -> incr replies) ;
+    a.trx.ping ~id:7 ~seq:1 (Ip (ip "2001:db8::2")) ;
+    Simulation.run sim false ;
+    assert_equal ~printer:string_of_int ~msg:"and answers" 1 !replies
+ *)
+
 (* A DHCP client nobody answers asks again in the background, which does not
    keep a run going: *)
 (*$R make
@@ -1197,6 +1227,7 @@ let reset t =
     drop_leased_gateway t ;
     drop_ra_gateway t ;
     t.autoconf <- [] ;
+    t.checked <- [] ;
     BitHash.clear t.slaac_deadlines ;
     t.got_ra <- false ;
     t.leased_netmask <- None ;
@@ -1220,17 +1251,27 @@ let power_off t =
     Simulation.power_down t.trx.widget.power ;
     reset t
 
+let my_address_of_cidr c =
+    let ip, prefix_len = (c : Ip.Cidr.t :> Ip.Addr.t * int) in
+    Eth.State.make_my_ip_address ~prefix_len ip
+
+let is_v6_cidr c = Ip.Addr.is_v6 (fst (c : Ip.Cidr.t :> Ip.Addr.t * int))
+
 (* Give the adapter [ip4], an address and netmask, if any, the other
-   [addresses] and those configured automatically: *)
+   [addresses] (the IPv6 ones only once checked, with [dad]) and those
+   configured automatically: *)
 let set_addresses t ip4 =
-    let of_cidr c =
-        let ip, prefix_len = (c : Ip.Cidr.t :> Ip.Addr.t * int) in
-        Eth.State.make_my_ip_address ~prefix_len ip in
+    let statics =
+        if t.dad then
+            List.filter (not % is_v6_cidr) t.addresses |>
+            List.map my_address_of_cidr |>
+            fun l -> l @ t.checked
+        else List.map my_address_of_cidr t.addresses in
     let ip4 =
         Option.map_default (fun (ip, netmask) ->
             [ Eth.State.make_my_ip_address
                 ~prefix_len:(Ip.Cidr.width_of_netmask netmask) ip ]) [] ip4 in
-    t.eth_state.my_addresses <- ip4 @ List.map of_cidr t.addresses @ t.autoconf ;
+    t.eth_state.my_addresses <- ip4 @ statics @ t.autoconf ;
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf2 "Setting my addresses to %a"
         (List.print Eth.State.print_my_address) t.eth_state.my_addresses))) ;
     sink (ip_recv t) <-= t.eth_trx |> ignore
@@ -1255,6 +1296,12 @@ let init_static t =
        itself: everything else is reached through a gateway. *)
     set_addresses t (Option.map (fun ip -> ip, t.netmask |? Ip.Addr.all_ones)
                                 t.static_ip) ;
+    if t.dad then
+        List.iter (fun c ->
+            let my_addr = my_address_of_cidr c in
+            take_if_free t my_addr ~ok:(fun () ->
+                t.checked <- t.checked @ [ my_addr ])
+        ) (List.filter is_v6_cidr t.addresses) ;
     (* TODO: Send a gratuitous ARP request? *)
     (* Note: even if on_ip is unset, it might be set before [asap]! *)
     Simulation.asap t.trx.widget.power (fun () ->
@@ -1264,9 +1311,7 @@ let init_static t =
 (* A link-local address for a host with IPv6, and then, with SLAAC, the
    routers' advertisements: *)
 let init_autoconf t =
-    if t.slaac ||
-       List.exists (fun c -> Ip.Addr.is_v6 (fst (c : Ip.Cidr.t :> Ip.Addr.t * int)))
-                   t.addresses then
+    if t.slaac || List.exists is_v6_cidr t.addresses then
         Eth.State.make_my_ip_address ~prefix_len:64
             (Eth.Ndp.link_local t.eth_state.mac) |>
         autoconf_add t ~ok:(fun () -> if t.slaac then solicit_routers t)
@@ -1398,7 +1443,7 @@ let init_dhcp t =
 (* Build the host from its ethernet adapter.
  * you probably want [eth_state] to share its power source with [widget]. *)
 let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
-                  ?(slaac=false) ?(own_ip_config=true) ~widget
+                  ?(slaac=false) ?(dad=false) ?(own_ip_config=true) ~widget
                   (eth_state : Eth.State.t) eth_trx name =
     (* For the API a cable reaches a host but in reality it reaches its
        adapter. *)
@@ -1423,6 +1468,8 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
         netmask ;
         addresses ;
         slaac ;
+        dad ;
+        checked       = [] ;
         autoconf      = [] ;
         ra_gateway    = None ;
         ra_deadline   = Clock.Time.zero ;
@@ -2074,7 +2121,7 @@ let addresses_of_json name =
             Ip.Cidr.o (ip, Ip.Addr.length ip))
 
 let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
-         ?addresses ?slaac
+         ?addresses ?slaac ?dad
          ~parent ?(own_power=true) ?location name =
     (* A host can take its power source from some larger equipment, and
        mints one of its own when it is a machine in its own right. *)
@@ -2085,7 +2132,7 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
         Eth.State.make ?mac ?gateways ~parent:widget () in
     let eth_trx = Eth.TRX.make eth_state in
     let t = make_from_eth ?search_sfx ?nameserver ~widget ?static_ip
-                          ?netmask ?addresses ?slaac eth_state eth_trx name in
+                          ?netmask ?addresses ?slaac ?dad eth_state eth_trx name in
     (* This host minted the supply above, so the switch for it goes here, and
        so does stopping it for good. And it is a whole machine, unlike a host
        built on somebody else's adapter. *)
@@ -2114,6 +2161,12 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
                     router advertisements, from the next boot."
             ~getter:(fun () -> `Bool t.slaac)
             ~setter:(fun v -> t.slaac <- to_bool v) ;
+        property "DAD" ~kind:Bool
+            ~descr:"Use the static IPv6 addresses only once no other node is \
+                    found to have them, a second after boot, from the next \
+                    boot."
+            ~getter:(fun () -> `Bool t.dad)
+            ~setter:(fun v -> t.dad <- to_bool v) ;
         property "autoconfigured addresses" ~kind:(list String)
             ~descr:"The link-local address of a host with IPv6, and those \
                     SLAAC configured."

@@ -81,7 +81,7 @@ type model =
     | TSwitch of { ports : int ; speeds : EthSpeed.t list ;
                    full_duplex : bool ; macs : int }
     | THost of { static_ip : Ip.Addr.t option ; netmask : Ip.Addr.t option ;
-                 addresses : Ip.Cidr.t list ; slaac : bool ;
+                 addresses : Ip.Cidr.t list ; slaac : bool ; dad : bool ;
                  gateway : Ip.Addr.t option ; nameserver : Ip.Addr.t option ;
                  search_sfx : string option ; mac : Eth.Addr.t option }
     (* The two ends are widget ids, which is what the interface has to name
@@ -389,6 +389,9 @@ let host =
           param "SLAAC" ~kind:Bool ~default:(`Bool false)
               ~descr:"Take IPv6 addresses and the default IPv6 route from \
                       router advertisements." ;
+          param "DAD" ~kind:Bool ~default:(`Bool false)
+              ~descr:"Use its static IPv6 addresses only once no other node \
+                      is found to have them." ;
           param "gateway" ~kind:(Widget.optional String)
               ~placeholder:"192.168.0.1"
               ~descr:"Where to send what the netmask does not cover, of the \
@@ -413,6 +416,7 @@ let host =
                   | None -> opt args "netmask" (Ip.Addr.of_json "netmask")) ;
               addresses = Host.addresses_of_json "addresses" (Widget.arg args "addresses") ;
               slaac = bool args "SLAAC" ;
+              dad = bool args "DAD" ;
               gateway = opt args "gateway" (Ip.Addr.of_json "gateway") ;
               nameserver = opt args "nameserver" (Ip.Addr.of_json "nameserver") ;
               search_sfx = opt args "search suffix" Widget.to_string ;
@@ -761,13 +765,14 @@ let to_params =
                                     speeds) ;
           "full duplex", `Bool full_duplex ;
           "MACs", `Int macs ]
-    | THost { static_ip ; netmask ; addresses ; slaac ; gateway ; nameserver ;
-              search_sfx ; mac } ->
+    | THost { static_ip ; netmask ; addresses ; slaac ; dad ; gateway ;
+              nameserver ; search_sfx ; mac } ->
         [ "static-ip", ip_opt static_ip ;
           "netmask", ip_opt netmask ;
           "addresses", `List (List.map (fun c -> `String (Ip.Cidr.to_string c))
                                        addresses) ;
           "SLAAC", `Bool slaac ;
+          "DAD", `Bool dad ;
           "gateway", ip_opt gateway ;
           "nameserver", ip_opt nameserver ;
           "search suffix", str_opt search_sfx ;
@@ -853,8 +858,8 @@ let build ~parent name = function
     | TSwitch { ports ; speeds ; full_duplex ; macs } as m ->
         let t = Hub.Switch.make ~parent ~speeds ~full_duplex ports macs name in
         t.Hub.Switch.widget, m
-    | THost ({ static_ip ; netmask ; addresses ; slaac ; gateway ; nameserver ;
-               search_sfx ; mac } as h) ->
+    | THost ({ static_ip ; netmask ; addresses ; slaac ; dad ; gateway ;
+               nameserver ; search_sfx ; mac } as h) ->
         let gateways =
             match gateway with
             | None -> []
@@ -863,7 +868,7 @@ let build ~parent name = function
                   Some (Eth.Gateway.Ip gw) ] in
         let t =
             Host.make ~parent ~gateways ?search_sfx ?nameserver ?static_ip
-                      ?netmask ~addresses ~slaac ?mac name in
+                      ?netmask ~addresses ~slaac ~dad ?mac name in
         (* The address it ended up with, drawn at random when it was not given
            one. Its "MAC" property is read-only, so nothing else would bring it
            back. *)
@@ -1194,7 +1199,7 @@ let make_from_params ?start type_ ~parent name given =
   (* Handed no address, a host comes back with the one it drew: *) \
   (let w = make ~parent:(root ()) "h" (THost { static_ip = None ; \
                netmask = Some (Ip.Addr.of_string "255.255.255.0") ; \
-               addresses = [] ; slaac = false ; gateway = None ; \
+               addresses = [] ; slaac = false ; dad = false ; gateway = None ; \
                nameserver = None ; search_sfx = None ; mac = None }) in \
    match w.made_with with \
    | Some args -> List.assoc "MAC" args <> `Null \
