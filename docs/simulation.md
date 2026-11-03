@@ -180,7 +180,8 @@ goes when its prefix's
 valid lifetime runs out, and the route when the router lifetime does, unless a
 later advertisement renews them; a router lifetime of 0 withdraws the route at
 once. Those addresses are listed, read only, in its `autoconfigured
-addresses`.
+addresses`. An advertised MTU from 1280 to the adapter's sizes the IPv6
+packets and TCP segments of the connections opened after it.
 
 ### switch
 

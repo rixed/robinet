@@ -1601,11 +1601,18 @@ let make_from_addrs
         List.map (fun m -> Printf.sprintf2 "%a" Eth.State.print_my_address m)
                  h.autoconf |> String.concat ", " in
     advertise true ;
+    r.ifaces.(0).eth.mtu <- 1400 ;
     Simulation.run sim false ;
     assert_equal ~printer:identity
         "fe80::ff:fe00:1/64, 2001:db8:1::ff:fe00:1/64" (autoconf h1) ;
     assert_equal ~printer:identity
         "fe80::ff:fe00:2/64, 2001:db8:2::ff:fe00:2/64" (autoconf h2) ;
+    (* The advertised MTU sizes IPv6 only: *)
+    assert_equal ~printer:string_of_int 1340
+        (Host.tcp_mss h1 (a "2001:db8:1::ff:fe00:1")) ;
+    assert_equal ~printer:string_of_int 1460 (Host.tcp_mss h1 (a "10.0.0.1")) ;
+    assert_equal ~printer:string_of_int 1440
+        (Host.tcp_mss h2 (a "2001:db8:2::ff:fe00:2")) ;
     let replies = ref [] in
     Hashtbl.add h1.echo_waiters 7 (fun seq -> replies := seq :: !replies) ;
     h1.trx.ping ~id:7 ~seq:1 (Host.Ip (a "2001:db8:2::ff:fe00:2")) ;

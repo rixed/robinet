@@ -156,6 +156,8 @@ and t = {
     mutable ra_gateway : Ip.Addr.t option ;
     mutable ra_deadline : Clock.Time.t ;
     mutable got_ra : bool ;
+    (* The IPv6 MTU an advertisement gave, if any: *)
+    mutable ra_mtu : int option ;
     (* Until when each address of SLAAC is valid, if not forever: *)
     slaac_deadlines : Clock.Time.t BitHash.t ;
     (* What the current lease granted, if anything. A lease is not a
@@ -201,12 +203,16 @@ let cur_search_sfx t = if t.leased_search_sfx <> None then t.leased_search_sfx
                        else t.search_sfx
 let cur_host_name t = t.leased_host_name |? t.host_name
 
-(* IP packets are sized for the host's only interface, and TCP segments for
- * those packets (IP and TCP headers without options) from [local]: *)
-let ip_mtu t = t.eth_state.Eth.State.mtu
+(* IP packets from [local] are sized for the host's only interface, or for
+ * the MTU a router advertised if [local] is IPv6, and TCP segments for those
+ * packets (IP and TCP headers without options): *)
+let ip_mtu t local =
+    let mtu = t.eth_state.Eth.State.mtu in
+    if Ip.Addr.is_v6 local then Option.map_default (min mtu) mtu t.ra_mtu
+    else mtu
 let tcp_mss t local =
     let ip_hdr_len = if Ip.Addr.is_v6 local then 40 else Ip.Pdu.no_opt_hdr_len in
-    ip_mtu t - ip_hdr_len - Tcp.Pdu.no_opt_hdr_len
+    ip_mtu t local - ip_hdr_len - Tcp.Pdu.no_opt_hdr_len
 
 let my_addresses t =
     List.map (fun (a : Eth.State.my_address) -> Ip.Addr.of_bitstring a.addr, a)
@@ -250,7 +256,7 @@ let sweep_tcps t =
 (* A new IP TRX from [local] to [remote], of their family, emitting to the
  * adapter. IPv6 ones drop what exceeds the MTU rather than fragment it. *)
 let ip_trx t proto local remote =
-    let power = t.trx.widget.power and mtu = ip_mtu t
+    let power = t.trx.widget.power and mtu = ip_mtu t local
     and logger = t.trx.widget.logger in
     let trx =
         if Ip.Addr.is_v6 local then Ip6.TRX.make power ~mtu local remote proto logger
@@ -438,7 +444,8 @@ let forever = 0xffff_ffff
    the configured ones, and an address in each autonomous /64 prefix, of that
    length if the prefix is on-link, each until its lifetime runs out unless
    another advertisement renews it. A router lifetime of 0 withdraws the
-   route at once. *)
+   route at once. An MTU from 1280 to the adapter's is taken (RFC 4861,
+   6.3.4) for the connections opened from then on. *)
 let slaac_rx t ~router lifetime options =
     t.got_ra <- true ;
     let from_gw = Option.map_default (fun gw -> Ip.Addr.compare gw router = 0)
@@ -468,6 +475,12 @@ let slaac_rx t ~router lifetime options =
             else
                 deadline t p.valid (expire_address t bits) |>
                 BitHash.replace t.slaac_deadlines bits
+        | Icmp6.Opt.Mtu mtu
+          when mtu >= 1280 && mtu <= t.eth_state.Eth.State.mtu ->
+            if t.ra_mtu <> Some mtu then
+                Log.(log t.trx.widget.logger Info (lazy (Printf.sprintf
+                    "IPv6 MTU is %d" mtu))) ;
+            t.ra_mtu <- Some mtu
         | _ -> ()) options
 
 (* Neighbor discovery is the adapter's, but for router advertisements, which
@@ -1230,6 +1243,7 @@ let reset t =
     t.checked <- [] ;
     BitHash.clear t.slaac_deadlines ;
     t.got_ra <- false ;
+    t.ra_mtu <- None ;
     t.leased_netmask <- None ;
     t.leased_nameserver <- None ;
     t.leased_search_sfx <- None ;
@@ -1474,6 +1488,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
         ra_gateway    = None ;
         ra_deadline   = Clock.Time.zero ;
         got_ra        = false ;
+        ra_mtu        = None ;
         slaac_deadlines = BitHash.create 3 ;
         leased_netmask = None ;
         leased_gateway = None ;
