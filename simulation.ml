@@ -213,10 +213,14 @@ let is_running (t : t) = t.continue
 (** [at p ts f x] will execute [f x] when the clock of [p]'s simulation reaches
  * time [ts] -- or never, if [p] is switched off by then.
  *
+ * A [background] event, such as a periodic timer keeping some state up to
+ * date, does not by itself keep a run that stops once out of events going:
+ * see [run]. What it schedules is not in the background unless it says so.
+ *
  * Nothing is scheduled at all while [p] is off, and [power_down] withdraws
  * what it had already scheduled, which is why the dispatcher never has to look
  * at a power source: everything left in the queue is powered. *)
-let at (p : power) (ts : Time.t) f x =
+let at ?(background=false) (p : power) (ts : Time.t) f x =
     let t = p.sim in
     if not p.on then (
         if debug then Printf.printf "Clock: dropping an event for time %s: %s is off\n%!" (Time.to_string ts) p.name ;
@@ -226,7 +230,7 @@ let at (p : power) (ts : Time.t) f x =
     ) else (
         with_lock t (fun () ->
             if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.diff ts (now t))) ;
-            let ev = p, (fun () -> f x) in
+            let ev = p, (fun () -> f x), background in
             if (ts : Time.t :> int) <= (now t :> int) then
                 Events.push_now t.events ev
             else
@@ -235,8 +239,8 @@ let at (p : power) (ts : Time.t) f x =
     )
 
 (** [delay d f x] will delay the execution of [f x] by the interval [d]. *)
-let delay (p : power) d f x =
-    at p (Time.add (now p.sim) d) f x
+let delay ?background (p : power) d f x =
+    at ?background p (Time.add (now p.sim) d) f x
 
 let asap (p : power) f x =
     delay p Interval.zero f x
@@ -497,7 +501,7 @@ let remove_widget (w : widget) =
         List.iter (fun (d : widget) -> d.on_delete ()) doomed ;
         List.iter (fun (d : widget) ->
             if d.owns_power then
-                Events.filter (fun (p, _) -> p != d.power) t.events
+                Events.filter (fun (p, _, _) -> p != d.power) t.events
         ) (cables @ doomed) ;
         withdraw_runs t (cables @ doomed) Deleted ;
         (* After the cables have been unplugged, so that a port is told it is
@@ -592,7 +596,7 @@ let power_down (p : power) =
                up in, what is inside a box before the box. *)
             p.on <- false ;
             let before = Events.cardinal t.events in
-            Events.filter (fun (p', _) -> p' != p) t.events ;
+            Events.filter (fun (p', _, _) -> p' != p) t.events ;
             let dropped = before - Events.cardinal t.events in
             if dropped > 0 then
                 Log.(log t.root.logger Debug (lazy (Printf.sprintf
@@ -1237,7 +1241,8 @@ let make =
               thread = None ;
               now ;
               log_seq ;
-              events = Events.make () ;
+              events = Events.make ~counts:(fun (_, _, background) ->
+                                           not background) () ;
               lock = Mutex.create () ;
               cond = Condition.create () ;
               lock_owner = None ;
@@ -1450,7 +1455,7 @@ let next_event_locked (t : t) =
         (* We have some work to do *)
         match Events.next t.events with
         | exception Not_found -> ()
-        | _power, f ->
+        | _power, f, _ ->
             (* powering down a power source clears its events (or a
              * rapid power cycle would leave them), so no need to check
              * [power] here *)
@@ -1484,16 +1489,17 @@ let next_event (t : t) =
     with_lock t next_event_locked t
 
 (** [run true] will run forever while [run false] will return once no more
- * events are waiting.  If you choose to not run forever, beware that waiting
- * for an answer from the outside world is _not_ a clock event. You should
- * probably run forever whenever you communicate with the outside. *)
+ * events are waiting but background ones, which run meanwhile as the others
+ * do. If you choose to not run forever, beware that waiting for an answer
+ * from the outside world is _not_ a clock event. You should probably run
+ * forever whenever you communicate with the outside. *)
 let run (t : t) wait =
     if debug then Printf.printf "clock: running the clock!\n%!" ;
     (* What the network is to be asked, before it is asked anything else. Once:
        a simulation may be run again -- [run false] returns when the queue
        empties -- and a startup list is not a thing that happens twice. *)
     if not t.startup_done then run_startup t ;
-    while t.continue && (wait || not (Events.is_empty t.events)) do
+    while t.continue && (wait || Events.has_counted t.events) do
         next_event t ;
         Thread.yield ()
     done
@@ -1511,6 +1517,22 @@ let run (t : t) wait =
   let took = Unix.gettimeofday () -. t0 in
   assert_bool (Printf.sprintf "ten 5ms hops took %.1fms" (took *. 1e3))
               (took >= 0.0495)
+ *)
+
+(* A background timer runs as long as there is something else to do, and no
+ * longer: *)
+(*$R run
+  let t = make ~realtime:false "background" in
+  let ticks = ref 0 and done_ = ref false in
+  let rec tick () =
+    incr ticks ;
+    delay ~background:true t.root.power (Clock.Interval.msec 5.) tick () in
+  delay ~background:true t.root.power (Clock.Interval.msec 5.) tick () ;
+  delay t.root.power (Clock.Interval.msec 22.) (fun () -> done_ := true) () ;
+  run t false ;
+  assert_bool "the normal event ran" !done_ ;
+  assert_equal ~printer:string_of_int ~msg:"so did the ticks before it" 4 !ticks ;
+  assert_bool "the next tick waits" (not (Events.is_empty t.events))
  *)
 
 (** Run [f] with those signals stopping every simulation, then put the previous

@@ -173,21 +173,35 @@ struct
           (* What was scheduled for now since, latest first: *)
           mutable now_events : 'a list ;
           (* When the event taken from the heap last was due: *)
-          mutable current_ts : Time.t }
+          mutable current_ts : Time.t ;
+          (* How many of the events queued [counts]: *)
+          counts : 'a -> bool ;
+          mutable counted : int }
 
-    let make () =
+    let make ?(counts=fun _ -> true) () =
         { tss = [||] ; slots = [||] ; len = 0 ; pool = [||] ; free = [||] ;
           num_free = 0 ; batch = [] ; now_events = [] ;
-          current_ts = Time.zero }
+          current_ts = Time.zero ; counts ; counted = 0 }
 
     let clear q =
         q.tss <- [||] ; q.slots <- [||] ; q.len <- 0 ; q.pool <- [||] ;
-        q.free <- [||] ; q.num_free <- 0 ; q.batch <- [] ; q.now_events <- []
+        q.free <- [||] ; q.num_free <- 0 ; q.batch <- [] ; q.now_events <- [] ;
+        q.counted <- 0
 
     let is_empty q =
         match q.batch, q.now_events with
         | [], [] -> q.len = 0
         | _ -> false
+
+    (* Whether any event queued [counts]: *)
+    let has_counted q = q.counted > 0
+
+    let added q x =
+        if q.counts x then q.counted <- q.counted + 1
+
+    let removed q x =
+        if q.counts x then q.counted <- q.counted - 1 ;
+        x
 
     let earlier (a : Time.t) (b : Time.t) = (a :> int) < (b :> int)
 
@@ -243,15 +257,18 @@ struct
         let s = q.free.(q.num_free) in
         q.pool.(s) <- x ;
         sift_up q.tss q.slots q.len ts s ;
-        q.len <- q.len + 1
+        q.len <- q.len + 1 ;
+        added q x
 
     (* Schedule [x] now, after everything already due: *)
     let push_now q x =
-        q.now_events <- x :: q.now_events
+        q.now_events <- x :: q.now_events ;
+        added q x
 
     (** The next event to run, which [current_ts] then says when it was due.
      * Raises [Not_found] if there is none. *)
     let next q =
+        removed q @@
         match q.batch with
         | x :: rest ->
             q.batch <- rest ;
@@ -319,7 +336,8 @@ struct
         q.len <- !n ;
         for i = q.len / 2 - 1 downto 0 do
             sift_down tss slots q.len i tss.(i) slots.(i)
-        done
+        done ;
+        q.counted <- fold (fun x n -> if q.counts x then n + 1 else n) q 0
     (*$inject
       let drain q =
         let rec loop acc =
@@ -368,14 +386,29 @@ struct
        [ a ; b ; c ; d ; e ] = [ 1 ; 2 ; 3 ; 4 ; 9 ] && \
        Clock.Time.compare (current_ts q) (Clock.Time.o 9) = 0)
     *)
+    (*$Q has_counted
+      Q.(list_small nat_small) (fun l -> \
+        let q = make ~counts:(fun i -> i mod 2 = 0) () in \
+        push_all q l ; push_now q 0 ; \
+        let evens q = fold (fun i n -> if i mod 2 = 0 then n + 1 else n) q 0 in \
+        let ok = ref (has_counted q) in \
+        filter (fun i -> i mod 3 <> 1) q ; \
+        while not (is_empty q) do \
+          ok := !ok && has_counted q = (evens q > 0) ; \
+          ignore (next q) \
+        done ; \
+        !ok && not (has_counted q))
+    *)
     (*$>*)
 end
 
 (* An event is what to do and the source that pays for it. Switching that
  * source off withdraws it, which is what powering a box down means and what
  * taking one out of the simulation ends up doing: everything that schedules
- * draws on the source of the box it is part of. *)
-type event = power * (unit -> unit)
+ * draws on the source of the box it is part of. A background event does not
+ * keep a simulation that runs out of events running (see
+ * [Simulation.run]). *)
+type event = power * (unit -> unit) * bool (* background *)
 
 (** {2 Simulation}
  * A simulation is a clock and a set of scheduled events.
