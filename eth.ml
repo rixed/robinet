@@ -174,6 +174,21 @@ module Addr = struct
 
     let is_broadcast = eq broadcast
 
+    (** The modified EUI-64 interface identifier this MAC gives an IPv6
+     * address, as 64 bits: the MAC with ff:fe in its middle and the U/L bit
+     * flipped (RFC 4291, appendix A). *)
+    let interface_id (t : t) =
+        match%bitstring (t :> bitstring) with
+        | {| hi : 6 : bitstring ; ul : 1 ; ig : 1 ; mid : 16 : bitstring ;
+             lo : 24 : bitstring |} ->
+            concat [ hi ; [%bitstring {| not ul : 1 ; ig : 1 |}] ; mid ;
+                     bitstring_of_string "\xff\xfe" ; lo ]
+        | {| _ |} -> assert false
+    (*$= interface_id & ~printer:hexstring_of_bitstring
+      (bitstring_of_string "\x00\x11\x22\xff\xfe\x33\x44\x55") \
+          (interface_id (of_string "02:11:22:33:44:55"))
+     *)
+
     (* Broadcast and multicast addresses have the group bit: *)
     let is_group (t : t) =
         match%bitstring (t :> bitstring) with
@@ -769,6 +784,19 @@ struct
 
     let all_nodes = Ip.Addr.of_string "ff02::1"
     let all_nodes_mac = Addr.of_ip6_multicast all_nodes
+    let all_routers = Ip.Addr.of_string "ff02::2"
+
+    (* The address of [mac] in the /64 [prefix]: *)
+    let address_in prefix mac =
+        concat [ takebits 64 (Ip.Addr.to_bitstring prefix) ;
+                 Addr.interface_id mac ] |>
+        Ip.Addr.of_bitstring
+
+    let link_local = address_in (Ip.Addr.of_string "fe80::")
+    (*$T
+      Ip.Addr.to_string (Ndp.link_local (Addr.of_string "02:11:22:33:44:55")) = \
+          "fe80::11:22ff:fe33:4455"
+     *)
 
     (* As a link-layer address option holds it: *)
     let lla (mac : Addr.t) = string_of_bitstring (mac :> bitstring)
@@ -841,6 +869,12 @@ struct
           mutable via : Gateway.t option ;
           mutable mtu : int ;
           mutable my_addresses : my_address list ;
+          (* Addresses under duplicate address detection, each with what to
+           * do if another node has it: *)
+          mutable tentative : (bitstring * (unit -> unit)) list ;
+          (* IPv6 multicast groups joined beside all-nodes and the
+           * solicited-node ones: *)
+          mutable groups : Ip.Addr.t list ;
           mutable promisc : (bitstring -> unit) option ;
           rx_otherhost_dropped : Metric.Counter.t ;
           mutable do_proxy_arp : Arp.Pdu.t -> bool ;
@@ -867,17 +901,21 @@ struct
           mutable loss : float }
 
     (* Whether a frame to [dst] is for this adapter: to its MAC, to
-     * broadcast, or, if it has IPv6 addresses, to the all-nodes group or to
-     * the solicited-node group of one of them: *)
+     * broadcast, or, if it has IPv6 addresses (tentative ones included), to
+     * the all-nodes group, to the solicited-node group of one of them or to
+     * a joined group: *)
     let accepts t dst =
         Addr.eq dst t.mac || Addr.is_broadcast dst ||
         let v6 =
-            List.filter (fun a -> bitstring_length a.addr = 128) t.my_addresses in
+            List.filter_map (fun a ->
+                if bitstring_length a.addr = 128 then Some a.addr else None
+            ) t.my_addresses @ List.map fst t.tentative in
         v6 <> [] &&
         (Addr.eq dst Ndp.all_nodes_mac ||
          List.exists (fun a ->
-             Ip.Addr.of_bitstring a.addr |> Ip.Addr.solicited_node |>
-             Addr.of_ip6_multicast |> Addr.eq dst) v6)
+             Ip.Addr.of_bitstring a |> Ip.Addr.solicited_node |>
+             Addr.of_ip6_multicast |> Addr.eq dst) v6 ||
+         List.exists (fun g -> Addr.eq dst (Addr.of_ip6_multicast g)) t.groups)
 
     let find_ip4 t =
         List.find_map (fun my_addr ->
@@ -889,6 +927,16 @@ struct
     (* Add this address in the list of my addresses: *)
     let add_ip t ?prefix_len ip =
         t.my_addresses <- make_my_ip_address ?prefix_len ip :: t.my_addresses
+
+    (* [addrs] and, if one is an IPv6 address that is not link-local, the
+     * link-local address of [mac], unless already there: *)
+    let with_link_local mac addrs =
+        let is_v6 a = bitstring_length a.addr = 128 in
+        let link_local a = Ip.Addr.is_link_local (Ip.Addr.of_bitstring a.addr) in
+        if List.exists (fun a -> is_v6 a && not (link_local a)) addrs &&
+           not (List.exists (fun a -> is_v6 a && link_local a) addrs) then
+            addrs @ [ make_my_ip_address ~prefix_len:64 (Ndp.link_local mac) ]
+        else addrs
 
     let on_subnet my_addr addr =
         bitstring_length my_addr.addr = bitstring_length addr &&
@@ -939,6 +987,7 @@ struct
     let reset t =
         BitHash.clear t.neighbors ;
         BitHash.clear t.postponed ;
+        t.tentative <- [] ;
         t.via <- None ;
         Iface.reset t.iface
 
@@ -1026,7 +1075,8 @@ struct
             learn_neighbors_from_incoming ;
             rx_otherhost_dropped = Metric.Counter.make () ;
             recv = ignore_bits ~logger:iface.widget.logger ;
-            my_addresses ; delay ; loss ; via = None ;
+            my_addresses ; tentative = [] ; groups = [] ;
+            delay ; loss ; via = None ;
             neighbors = BitHash.create 3 ;
             postponed = BitHash.create 3 } in
         (* Enrich the underlying dumb adapter with more properties: *)
@@ -1297,6 +1347,36 @@ struct
     let is_mine (st : State.t) ip =
         List.exists (fun my_addr -> bits_equal ip my_addr.State.addr) st.my_addresses
 
+    (* What to do if [ip], under detection, is found to be another node's: *)
+    let tentative (st : State.t) ip =
+        List.find_map_opt (fun (a, dup) ->
+            if bits_equal a ip then Some dup else None) st.tentative
+
+    let untentative (st : State.t) ip =
+        st.tentative <- List.filter (fun (a, _) -> not (bits_equal a ip)) st.tentative
+
+    (** Duplicate address detection (RFC 4862, 5.4): solicit [my_addr] from
+     * the unspecified address, and add it to this adapter's addresses and
+     * call [ok] if nobody claims it within [retrans_time], else call
+     * [duplicate]. Until then the address is neither used nor answered for. *)
+    let dad (st : State.t) (my_addr : State.my_address) ~ok ~duplicate =
+        let addr = concat [ my_addr.addr ] in
+        let target = Ip.Addr.of_bitstring addr in
+        let group = Ip.Addr.solicited_node target in
+        let claimed = ref false in
+        st.tentative <- (addr, fun () ->
+            claimed := true ;
+            untentative st addr ;
+            duplicate ()) :: st.tentative ;
+        Icmp6.Pdu.make_neighbor_solicit target |>
+        Ndp.packet (zeroes_bitstring 128) group |>
+        send ~control:true st Proto.ip6 (Addr.of_ip6_multicast group) ;
+        Simulation.delay st.iface.widget.power retrans_time (fun () ->
+            if not !claimed then (
+                untentative st addr ;
+                st.my_addresses <- st.my_addresses @ [ my_addr ] ;
+                ok ())) ()
+
     (* A neighbor solicitation or advertisement [m] in the IPv6 packet [ip],
      * brought by a frame from [frame_src]. As for ARP, the sender of a
      * solicitation is learnt if it is about one of this adapter's addresses,
@@ -1308,6 +1388,15 @@ struct
                 Option.map (fun a -> Addr.o (bitstring_of_string a)) (f o)
             ) opts in
         match m.payload with
+        | Neighbor_solicit { target ; _ }
+          when tentative st (Ip.Addr.to_bitstring target) <> None ->
+            (* Another node detecting the same address claims it as much as
+             * one that has it; any other solicitation is not answered: *)
+            if Ip.Addr.is_zero ip.src then
+                Option.get (tentative st (Ip.Addr.to_bitstring target)) ()
+        | Neighbor_advert { target ; _ }
+          when tentative st (Ip.Addr.to_bitstring target) <> None ->
+            Option.get (tentative st (Ip.Addr.to_bitstring target)) ()
         | Neighbor_solicit { target ; options } ->
             let target_bits = Ip.Addr.to_bitstring target in
             let from_dad = Ip.Addr.is_zero ip.src in
@@ -1535,6 +1624,27 @@ struct
       State.announce a ;
       Simulation.run sim false ;
       assert_bool "and are when they are" (knows b (ip6 1) && knows b (ip 1))
+    *)
+    (*$R
+      let sim, a, b, _, got_b = dual () in
+      let outcome = ref [] in
+      let try_addr st n =
+          dad st (State.make_my_ip_address ~prefix_len:64 (ip6 n))
+              ~ok:(fun () -> outcome := (n, "ok") :: !outcome)
+              ~duplicate:(fun () -> outcome := (n, "dup") :: !outcome) in
+      try_addr b 1 ;
+      try_addr b 3 ;
+      send6 a (ip6 1) (ip6 3) "too early" ;
+      Simulation.run sim false ;
+      let printer l =
+          String.concat ", " (List.map (fun (n, s) -> string_of_int n ^":"^ s) l) in
+      assert_equal ~printer [ 1, "dup" ; 3, "ok" ]
+          (List.sort (fun (x, _) (y, _) -> Int.compare x y) !outcome) ;
+      assert_bool "only the free address is taken"
+          (List.length b.my_addresses = 3 && b.tentative = []) ;
+      assert_equal ~printer:(String.concat ", ")
+          ~msg:"what was sent to the tentative address arrives once it is taken"
+          [ "6:too early" ] !got_b
     *)
     (*$>*)
 
