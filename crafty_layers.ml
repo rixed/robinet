@@ -103,6 +103,8 @@ type upper =
     (* Whichever can be on top of it, as each decodes it; but for this one
      * when there is nothing to go by: *)
     | Any of N.t
+    (* The start of this one, cut short (a first fragment), as well as Raw: *)
+    | Partial of N.t
 
 (** A layer of a received packet, decoded: *)
 type unpacked =
@@ -121,11 +123,12 @@ type ops =
       pack : fields -> hints -> bitstring -> bitstring * hints ;
       (* Self-driven mode: [payload] handed to its TRX: *)
       send : fields -> hints -> bitstring -> unit ;
-      (* What goes on from a received layer, with the modes that see it:
-       * nothing (a frame for another host), that layer, or others (a
-       * fragment, seen as it is in manual mode, then the reassembled packet,
-       * seen by the self-driven stream): *)
-      receive : unpacked -> (unpacked * mode list) list ;
+      (* What goes on from a received layer, seen in these modes, with the
+       * modes that see it: nothing (a frame for another host), that layer,
+       * or others (a fragment, seen as it is in manual mode, then the
+       * reassembled packet, seen by the self-driven stream). Only what is
+       * seen self-driven goes into the state of a stream: *)
+      receive : mode list -> unpacked -> (unpacked * mode list) list ;
       (* A self-driven pattern made the node (TCP accepts a connection): *)
       listen : unit -> unit ;
       (* The node is no longer used: once what it has to finish is (TCP
@@ -141,6 +144,9 @@ type ops =
        * is no longer busy, if it can tell sooner than [busy_for] did (TCP,
        * once connected or once its send buffer drained); or never: *)
       on_ready : (unit -> unit) -> unit ;
+      (* Whether what it passes up are messages of their own, which a
+       * pattern can match each of (HTTP's, out of a TCP stream): *)
+      messages : bool ;
       (* What it tells of its stream, by name, among the [stats] of its layer
        * or the counts of {!stream_stats}, which it then replaces: *)
       stats : unit -> (string * V.value) list }
@@ -205,9 +211,10 @@ let pass u = [ u, both ]
 (* The operations of a node with no stream, building a header in manual
  * mode: *)
 let manual pack =
-    { pack ; send = not_driven ; receive = pass ;
+    { pack ; send = not_driven ; receive = (fun _ u -> pass u) ;
       listen = ignore ; close = (fun k -> k ()) ; busy_for = Tools.never_busy ;
-      buffered = false ; on_ready = ignore ; stats = (fun () -> []) }
+      buffered = false ; on_ready = ignore ; messages = false ;
+      stats = (fun () -> []) }
 
 let bytes_value bits = V.bytes_of_string (string_of_bitstring bits)
 
@@ -265,7 +272,7 @@ let unpack_eth _ bits =
 let eth_node ctx =
     let st = ctx.eth in
     let trx = Eth.TRX.make st in
-    let receive (u : unpacked) =
+    let receive _ (u : unpacked) =
         match List.assoc "proto" u.values, List.assoc "dst" u.values with
         | V.Int p, _ when p = (Eth.Proto.arp :> int) ||
                           (p = ip6_proto && Eth.Ndp.message u.payload <> None) ->
@@ -304,12 +311,23 @@ let ip_values (ip : Ip.Pdu.t) =
       "tot_len", V.Int ip.tot_len ; "options", bytes_value (Ip.Pdu.Opt.pack ip.options) ;
       "is_fragment", V.Bool (Ip.Pdu.is_fragment ip) ]
 
-(* A fragment goes on as Raw: *)
+(* What a fragment tells of the layer on top: the first is the start of it,
+ * which the layers that can be cut short are told: *)
+let fragment_upper ~first proto_upper =
+    if first then Partial proto_upper, [ "partial", V.Bool true ]
+    else Only N.Raw, []
+
+(* A fragment goes on as Raw, and the first as the start of its protocol: *)
 let unpack_ip _ bits =
     match Ip.Pdu.unpack bits with
     | Error _ -> None
     | Ok ip ->
-        unpacked (ip_values ip) ~upper:(Only (ip_upper ip))
+        let upper, up_hints =
+            if Ip.Pdu.is_fragment ip then
+                fragment_upper ~first:(ip.frag_offset = 0)
+                               (ip_upper { ip with more_frags = false })
+            else Only (ip_upper ip), [] in
+        unpacked (ip_values ip) ~upper ~up_hints
                  ~payload:(ip.payload :> bitstring) bits
 
 let ip_proto fields hints = int_of ~hints fields "IP" "proto" 0 0xff
@@ -356,7 +374,7 @@ let ip_node ctx =
     let trxs = Hashtbl.create 3 in
     let fragments = Hashtbl.create 3 in
     let counters = Ip.TRX.make_counters () in
-    let receive (u : unpacked) =
+    let receive _ (u : unpacked) =
         if List.assoc "is_fragment" u.values <> V.Bool true then pass u else
         let fragment = u, [ Manual ] in
         match Ip.Pdu.unpack u.bits with
@@ -411,12 +429,17 @@ let ip6_values (ip : Ip6.Pdu.t) =
       "hop_limit", V.Int ip.ttl ; "flow_label", V.Int ip.flow_label ;
       "is_fragment", V.Bool (Ip6.Pdu.is_fragment ip) ]
 
-(* A fragment goes on as Raw: *)
+(* As IP: *)
 let unpack_ip6 _ bits =
     match Ip6.Pdu.unpack bits with
     | Error _ -> None
     | Ok ip ->
-        unpacked (ip6_values ip) ~upper:(Only (ip6_upper ip))
+        let upper, up_hints =
+            if Ip6.Pdu.is_fragment ip then
+                fragment_upper ~first:(not (Ip6.Pdu.is_later_fragment ip))
+                               (ip6_upper { ip with extensions = [] })
+            else Only (ip6_upper ip), [] in
+        unpacked (ip6_values ip) ~upper ~up_hints
                  ~payload:(ip.payload :> bitstring) bits
 
 let ip6_proto_of fields hints = int_of ~hints fields "IP6" "proto" 0 0xff
@@ -441,7 +464,7 @@ let ip6_node ctx =
     let trxs = Hashtbl.create 3 in
     let fragments = Hashtbl.create 3 in
     let counters = Ip.TRX.make_counters () in
-    let receive (u : unpacked) =
+    let receive _ (u : unpacked) =
         if List.assoc "is_fragment" u.values <> V.Bool true then pass u else
         let fragment = u, [ Manual ] in
         match Ip6.Pdu.unpack u.bits with
@@ -480,7 +503,24 @@ let ip6_node ctx =
       receive ;
       stats = (fun () -> frag_stats counters) }
 
-let unpack_udp _ bits =
+(* Whatever the length says, the payload is what is left: *)
+let unpack_quoted_udp _ bits =
+    match%bitstring bits with
+    | {| src : 16 ; dst : 16 ; length : 16 ; checksum : 16 ;
+         rest : -1 : bitstring |} ->
+        let payload =
+            takebits (min (bitstring_length rest) (max 0 (length - 8) * 8)) rest in
+        unpacked [ "src", V.Int src ; "dst", V.Int dst ;
+                   "length", V.Int length ; "checksum", V.Int checksum ]
+                 ~upper:(if bitstring_length payload > 0 then Only N.Raw else Nothing)
+                 ~payload bits
+    | {| _ |} -> None
+
+let is_partial hints = List.assoc_opt "partial" hints = Some (V.Bool true)
+
+(* Of a first fragment, as much as there is: *)
+let unpack_udp hints bits =
+    if is_partial hints then unpack_quoted_udp hints bits else
     match Udp.Pdu.unpack bits with
     | Error _ -> None
     | Ok u ->
@@ -544,7 +584,34 @@ let tcp_options (fields : fields) =
         Option.map_default (fun s -> [ Nop ; Wscale s ]) []
             (opt_int fields "wscale" 0 0xff)
 
-let unpack_tcp _ bits =
+(* Only the ports and the sequence number are sure to be quoted; the other
+ * fields read 0 when cut off: *)
+let unpack_quoted_tcp _ bits =
+    let u32 n = Int32.to_int n land 0xffff_ffff in
+    match%bitstring bits with
+    | {| src : 16 ; dst : 16 ; seq_num : 32 ; rest : -1 : bitstring |} ->
+        let ack_num, flags, win_size, checksum, urg_ptr, options, payload =
+            match%bitstring rest with
+            | {| ack_num : 32 ; hdr_len : 4 ; _ : 6 ; flags : 6 ; win_size : 16 ;
+                 checksum : 16 ; urg_ptr : 16 ; rest : -1 : bitstring |} ->
+                let opt_len = max 0 (hdr_len * 32 - 160) in
+                u32 ack_num, flags, win_size, checksum, urg_ptr,
+                takebits (min opt_len (bitstring_length rest)) rest,
+                (if bitstring_length rest > opt_len then dropbits opt_len rest
+                 else empty_bitstring)
+            | {| _ |} -> 0, 0, 0, 0, 0, empty_bitstring, empty_bitstring in
+        unpacked ([ "src", V.Int src ; "dst", V.Int dst ;
+                    "seq_num", V.Int (u32 seq_num) ; "ack_num", V.Int ack_num ;
+                    "flags", V.Int flags ; "win_size", V.Int win_size ;
+                    "urg_ptr", V.Int urg_ptr ; "checksum", V.Int checksum ] @
+                  tcp_option_values (Tcp.Pdu.Opt.unpack options))
+                 ~upper:(if bitstring_length payload > 0 then Only N.Raw else Nothing)
+                 ~payload bits
+    | {| _ |} -> None
+
+(* As UDP: *)
+let unpack_tcp hints bits =
+    if is_partial hints then unpack_quoted_tcp hints bits else
     match Tcp.Pdu.unpack bits with
     | Error _ -> None
     | Ok t ->
@@ -560,7 +627,7 @@ let unpack_tcp _ bits =
                    "urg_ptr", V.Int t.urg_ptr ; "checksum", V.Int t.checksum ] @
                  tcp_option_values t.options)
                  ~upper:(if bitstring_length payload > 0 then Any N.Raw else Nothing)
-                 ~payload bits
+                 ~up_hints:[ "more", V.Bool (not f.fin) ] ~payload bits
 
 (*$T unpack_tcp
   match unpack_tcp () Tcp.Pdu.(pack (make ~syn:true ~ece:true ~cwr:true \
@@ -593,8 +660,9 @@ let tcp_node ctx =
     let power = st.iface.widget.power and logger = st.iface.widget.logger in
     let port name = Tcp.Port.o (int_of ctx.key "TCP" name 0 0xffff) in
     let state = ref Idle in
-    (* What the connection hands while a segment is received: *)
-    let received = ref [] in
+    (* What the connection hands while a segment is received, and whether it
+     * tells its end (an empty chunk, once a FIN or a RST came in order): *)
+    let received = ref [] and ended = ref false in
     (* The sequence number of manual segments without a connection: *)
     let manual_seq = ref (Random.bits () lsl 2 land 0xffff_ffff) in
     let over s =
@@ -649,7 +717,8 @@ let tcp_node ctx =
         let t = Tcp.TRX.make power ~sync_recv:true ~mss ?wscale (port "src") (port "dst") logger in
         Tools.(t.tcp_trx.trx.out --> sink (below.send ctx.below_key [ "proto", V.Int tcp_proto ])) ;
         Tools.(t.tcp_trx.trx.ins --> sink (fun bits ->
-            if bitstring_length bits > 0 then received := bits :: !received)) ;
+            if bitstring_length bits > 0 then received := bits :: !received
+            else ended := true)) ;
         let s = { trx = t ; pending = [] ; closing = false ; on_closed = None } in
         t.cnx_established_cont <- Some (established s) ;
         state := Stream s ;
@@ -717,28 +786,32 @@ let tcp_node ctx =
             if s.trx.closed then V.fail "This TCP connection is closed"
             else if Tcp.TRX.is_established s.trx then Tcp.TRX.tx s.trx payload
             else s.pending <- payload :: s.pending) ;
-      receive = (fun u ->
+      receive = (fun modes u ->
+        let raw = u, [ Manual ] in
+        if not (List.mem Driven modes) then [ raw ] else (
         (match !state, List.assoc "flags" u.values with
         | Listening, V.Int f when f land 2 <> 0 && f land 16 = 0 ->
             ignore (new_stream ())
         | _ -> ()) ;
-        let raw = u, [ Manual ] in
         match !state with
         | Stream s ->
             received := [] ;
+            ended := false ;
             Tools.rx s.trx.tcp_trx.trx u.bits ;
-            let data = List.rev !received in
+            let data = List.rev !received and ended' = !ended in
             received := [] ;
+            ended := false ;
             removed s ;
             wake () ;
             (* What a segment that fills a gap releases comes up at once, as
-             * a pattern matches at most once per segment: *)
-            raw :: (match data with
-                | [] -> []
-                | data ->
-                    let d = Bitstring.concat data in
-                    [ { u with payload = d ; upper = Any N.Raw ; bits = d }, [ Driven ] ])
-        | Idle | Listening -> [ raw ]) ;
+             * a pattern matches at most once per segment; and the end of the
+             * stream, even without data: *)
+            raw :: (if data = [] && not ended' then [] else
+                let d = Bitstring.concat data in
+                [ { u with payload = d ; upper = Any N.Raw ; bits = d ;
+                           up_hints = [ "stream", V.Bool true ;
+                                        "more", V.Bool (not ended') ] }, [ Driven ] ])
+        | Idle | Listening -> [ raw ])) ;
       listen = (fun () -> match !state with Idle -> state := Listening | _ -> ()) ;
       close = (fun k ->
         match !state with
@@ -751,7 +824,7 @@ let tcp_node ctx =
                 if Option.is_some s.on_closed then (
                     Tcp.TRX.abort s.trx ;
                     Option.may (fun k -> s.on_closed <- None ; k ()) s.on_closed)) ()) ;
-      busy_for ; buffered = true ;
+      busy_for ; buffered = true ; messages = false ;
       on_ready = (fun k -> waiters := k :: !waiters) ;
       stats = (fun () ->
         match !state with
@@ -994,7 +1067,12 @@ let quoted_tcp_node _ =
             ?checksum:(opt_int fields "checksum" 0 0xffff) payload |>
         Tcp.Pdu.pack, [ "proto", V.Int tcp_proto ])
 
-let unpack_raw _ bits = unpacked [ "data", bytes_value bits ] bits
+let more hints = List.assoc_opt "more" hints <> Some (V.Bool false)
+
+(* The end of a stream, without data, is no Raw: *)
+let unpack_raw hints bits =
+    if bitstring_length bits = 0 && not (more hints) then None
+    else unpacked [ "data", bytes_value bits ] bits
 
 let raw_node _ =
     manual (fun fields _ _ -> bytes_of fields "data", [])
@@ -1095,6 +1173,123 @@ let dns_message_node layer ~query _ =
             additional_rrs = rrs "additional" } |>
         Dns.Pdu.pack, [])
 
+(* HTTP. The HTTP layer tells messages apart, those of the stream of its TCP
+ * connection as they complete, and those a segment holds whole; the messages
+ * on top, a request or an answer, have their body as Raw on top. *)
+
+let http_message_layer (msg : Http.Pdu.t) =
+    match msg.cmd with Http.Request _ -> N.HttpRequest | Http.Status _ -> N.HttpAnswer
+
+(* The messages at the start of [s], with what is left; [eof] ends the last
+ * one (an answer without a length). What is not HTTP is dropped: *)
+let http_messages s eof =
+    let rec loop acc s =
+        match Http.Pdu.parse s eof with
+        | Http.Pdu.Parsed (msg, n) ->
+            let rest = String.sub s n (String.length s - n) in
+            let acc = (msg, String.sub s 0 n) :: acc in
+            if rest = "" then List.rev acc, "" else loop acc rest
+        | Http.Pdu.Truncated _ -> List.rev acc, s
+        | Http.Pdu.Not_http -> List.rev acc, "" in
+    loop [] s
+
+let http_unpacked (msg, s) =
+    let bits = bitstring_of_string s in
+    with_length ~terminal:false
+        { values = [] ; upper = Only (http_message_layer msg) ; payload = bits ;
+          up_hints = [] ; bits }
+
+let is_stream hints = List.assoc_opt "stream" hints = Some (V.Bool true)
+
+(* The data of a TCP stream goes to the node, with whether more follows; a
+ * segment, to the message it starts with, its node seeing them all: *)
+let unpack_http hints bits =
+    if is_stream hints then unpacked [] ~up_hints:hints ~payload:bits bits else
+    match http_messages (string_of_bitstring bits) (not (more hints)) with
+    | m :: _, _ -> Some { (http_unpacked m) with bits ; up_hints = hints }
+    | [], _ -> None
+
+(* What the stream delivers waits for the rest of its message, or the end of
+ * the stream; a segment's messages are all seen, in manual mode only: *)
+let http_node _ =
+    let pending = Stdlib.Buffer.create 4096 in
+    { (manual (fun _ _ payload -> payload, [])) with
+      receive = (fun modes u ->
+        let eof = not (more u.up_hints) in
+        if List.mem Driven modes then (
+            Stdlib.Buffer.add_string pending (string_of_bitstring u.payload) ;
+            let msgs, rest = http_messages (Stdlib.Buffer.contents pending) eof in
+            Stdlib.Buffer.clear pending ;
+            Stdlib.Buffer.add_string pending rest ;
+            List.map (fun m -> http_unpacked m, both) msgs
+        ) else
+            fst (http_messages (string_of_bitstring u.bits) eof) |>
+            List.map (fun m -> http_unpacked m, [ Manual ])) ;
+      messages = true }
+
+(* Records sorted by field name, as every record: *)
+let http_header = Type.Record [ "name", Type.String ; "value", Type.String ]
+
+let http_headers_value hs =
+    V.Array (Array.of_list (List.map (fun (n, v) -> V.Record [| V.String n ; V.String v |]) hs))
+
+let http_headers (fields : fields) =
+    match fields "headers" with
+    | None -> []
+    | Some (V.Array hs) ->
+        Array.to_list hs |> List.map (function
+            | V.Record [| V.String n ; V.String v |] -> n, v
+            | _ -> invalid_arg "Crafty_layers: not an HTTP header")
+    | Some _ -> invalid_arg "Crafty_layers: HTTP headers are not an array"
+
+let string_of ~def (fields : fields) name =
+    match fields name with
+    | Some (V.String s) -> s
+    | None -> def
+    | Some _ -> invalid_arg ("Crafty_layers: "^ name ^" is not a string")
+
+(* The body, dechunked, is on top: *)
+let unpack_http_message kind _ bits =
+    match Http.Pdu.parse (string_of_bitstring bits) true with
+    | Http.Pdu.Parsed (msg, _) when http_message_layer msg = kind ->
+        let first =
+            match msg.cmd with
+            | Http.Request (meth, url) -> [ "method", V.String meth ; "url", V.String url ]
+            | Http.Status code -> [ "code", V.Int code ] in
+        unpacked (first @ [ "version", V.String msg.version ;
+                            "headers", http_headers_value msg.headers ])
+                 ~upper:(if msg.body = "" then Nothing else Only N.Raw)
+                 ~payload:(bitstring_of_string msg.body) bits
+    | _ -> None
+
+(* The headers as given, with a Content-Length unless they tell the length
+ * already, if [length_needed]; the body as given: *)
+let pack_http_message fields cmd ~length_needed payload =
+    let headers = http_headers fields
+    and body = string_of_bitstring payload in
+    let tells n = List.exists (fun (h, _) -> String.icompare h n = 0) headers in
+    let headers =
+        if length_needed body && not (tells "Content-Length" || tells "Transfer-Encoding")
+        then headers @ [ "Content-Length", string_of_int (String.length body) ]
+        else headers in
+    Http.Pdu.pack { cmd ; headers ; body ;
+                    version = string_of ~def:Http.Pdu.default_version fields "version" },
+    []
+
+(* A request has a length if it has a body: *)
+let http_request_node _ =
+    manual (fun fields _ payload ->
+        let cmd = Http.Request (string_of ~def:"GET" fields "method",
+                                string_of ~def:"/" fields "url") in
+        pack_http_message fields cmd ~length_needed:(fun b -> b <> "") payload)
+
+(* An answer has a length, but those that have no body: *)
+let http_answer_node _ =
+    manual (fun fields _ payload ->
+        let code = int_of fields "HttpAnswer" "code" 100 999 in
+        pack_http_message fields (Http.Status code) payload ~length_needed:(fun _ ->
+            not ((code >= 100 && code < 200) || code = 204 || code = 304)))
+
 (** {2 Layers} *)
 
 type layer =
@@ -1110,6 +1305,9 @@ type layer =
       (* Whether nothing can be on top of it. Emitting a terminal layer is
        * what sends packets: *)
       terminal : bool ;
+      (* Whether it is a message, which can be sent without anything on top
+       * of it; as terminal layers are: *)
+      ends : bool ;
       fields : field array ;
       (* The index of the field that a lone option, or a lone condition that
        * is not a boolean, is about ([Raw("x")]): *)
@@ -1143,7 +1341,7 @@ let unsendable name _ =
  * its own has: *)
 let length_field = field "length" Type.Int ~set_in:[] ~about:"the bytes %s carries"
 
-let layer ?(above=[]) ?(quoted=false) ?(driven=false) ?(terminal=false) ?default
+let layer ?(above=[]) ?(quoted=false) ?(driven=false) ?(terminal=false) ?(ends=terminal) ?default
           ?(constants=[]) ?node ?(stats=[]) ?(unpack=fun _ _ -> None) name fields =
     let fields, unpack =
         if (terminal && name <> N.Raw) ||
@@ -1159,7 +1357,7 @@ let layer ?(above=[]) ?(quoted=false) ?(driven=false) ?(terminal=false) ?default
             with Not_found ->
                 invalid_arg ("Crafty_layers: no field "^ d ^" in "^ N.to_string name)
         ) default in
-    { name ; above ; quoted ; driven ; terminal ; fields ; default_field ;
+    { name ; above ; quoted ; driven ; terminal ; ends ; fields ; default_field ;
       constants ; node = node |? unsendable name ; stats ; unpack }
 
 (** As in error messages: [IP?] for a quoted IP. *)
@@ -1343,12 +1541,32 @@ let quoted_tcp =
     layer N.TCP ~quoted:true ~above:[ quoted_ip ; quoted_ip6 ] ~node:quoted_tcp_node
         ~unpack:unpack_quoted_tcp (quoted_fields tcp)
 
+(* The messages of a TCP connection: *)
+let http =
+    layer N.HTTP ~above:[ tcp ] ~node:http_node ~unpack:unpack_http []
+
+let http_request =
+    layer N.HttpRequest ~above:[ http ] ~ends:true ~default:"url" ~node:http_request_node
+          ~unpack:(unpack_http_message N.HttpRequest) [
+        field "method" Type.String ;
+        field "url" Type.String ;
+        field "version" Type.String ;
+        field "headers" (Type.Array http_header) ]
+
+let http_answer =
+    layer N.HttpAnswer ~above:[ http ] ~ends:true ~default:"code" ~node:http_answer_node
+          ~unpack:(unpack_http_message N.HttpAnswer) [
+        field "code" Type.Int ;
+        field "version" Type.String ;
+        field "headers" (Type.Array http_header) ]
+
 (* What is carried by a layer that is not decoded any further: *)
 let raw =
     layer N.Raw ~terminal:true
         ~above:[ eth ; ip ; ip6 ; tcp ; udp ; icmp ; icmp6 ; dest_unreachable ;
                  time_exceeded ; dest_unreachable6 ; packet_too_big ; time_exceeded6 ;
-                 quoted_ip ; quoted_ip6 ; quoted_udp ; quoted_tcp ]
+                 quoted_ip ; quoted_ip6 ; quoted_udp ; quoted_tcp ;
+                 http_request ; http_answer ]
         ~node:raw_node ~unpack:unpack_raw
         ~default:"data" [ field "data" Type.bytes ]
 
@@ -1396,7 +1614,7 @@ let all =
       dest_unreachable ; time_exceeded ; dest_unreachable6 ; packet_too_big ;
       time_exceeded6 ; quoted_ip ; quoted_ip6 ; quoted_udp ; quoted_tcp ;
       dns ; dns_message N.Query ~query:true ; dns_message N.Answer ~query:false ;
-      raw ]
+      http ; http_request ; http_answer ; raw ]
 
 let same_name a b = String.lowercase_ascii a = String.lowercase_ascii b
 
@@ -1412,6 +1630,13 @@ let find ?below name =
 (** The layers that can be on top of [l]. *)
 let uppers (l : layer) =
     List.filter (fun (u : layer) -> List.memq l u.above) all
+
+(** The layers to decode on top of [l], from what it tells of it: *)
+let on_top (l : layer) = function
+    | Nothing -> []
+    | Only name -> List.of_enum (Option.enum (find ~below:l name))
+    | Partial name -> List.filter_map (fun n -> find ~below:l n) [ name ; N.Raw ]
+    | Any _ -> uppers l
 
 let root = eth
 
@@ -1541,7 +1766,7 @@ let record_type (l : layer) mode =
       List.for_all (fun b -> List.memq b all) l.above) all
   List.for_all (fun n -> List.exists (fun (l : layer) -> l.name = n) all) N.all
   List.for_all (fun (l : layer) -> \
-      l.terminal = (uppers l = [])) all
+      l.terminal = (uppers l = []) && (l.ends || not l.terminal)) all
   List.length (List.filter (fun (l : layer) -> List.is_empty l.above) all) = 1
   List.for_all (fun (l : layer) -> \
       l.driven || List.for_all (fun (f : field) -> \

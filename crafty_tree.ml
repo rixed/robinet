@@ -25,10 +25,10 @@
    that cannot be set (the protocol of IP) are told by the layer on top. A
    node is shared by the stacks and patterns that use it, whatever their
    mode, and goes away when the last of them is gone and it has no children
-   left. The nodes of terminal layers, which send a message each, are not
-   held by the stack that sends it: they go away with their parent, or once
-   sent for those of the root, which stays. The root is the Ethernet
-   interface.
+   left. The nodes of messages (terminal layers, HTTP's), which send one
+   each, are not held by the stack that sends it: they go away with their
+   parent, or once sent for those of the root, which stays. The root is the
+   Ethernet interface.
 
    Patterns are registered on nodes: a relative one on the node of the
    current stack it is on top of, an absolute one on the root. A received
@@ -91,7 +91,7 @@ type node =
       local_port : A.location -> L.layer -> int -> unit ;
       (* Whether a layer of that name used that local port: *)
       uses_port : string -> int -> bool ;
-      (* Told the nodes of streams that go away, terminal ones aside: *)
+      (* Told the nodes of streams that go away, messages aside: *)
       removed : node -> unit ;
       ops : L.ops ;
       (* Registered on it, by order of registration: *)
@@ -102,6 +102,9 @@ type node =
 and pattern =
     { seq : int ;
       layers : pattern_layer list ;
+      (* The modes of the layers of its stack below its node, the top first,
+       * which a packet must have been seen in: *)
+      below : L.mode list ;
       (* Holds a node made for it, for as long as it is registered: *)
       hold : node -> unit ;
       (* Told a packet that completed it: *)
@@ -241,13 +244,13 @@ let children n =
     Hashtbl.fold (fun _ s cs -> Siblings.fold (fun _ c cs -> c :: cs) s cs)
                  n.children []
 
-(* Removes [n] if nothing uses it any more, once it has closed, its terminal
- * children with it, and so on down to the root; unless it is used again
- * meanwhile: *)
+(* Removes [n] if nothing uses it any more, once it has closed, its children
+ * that are messages with it, and so on down to the root; unless it is used
+ * again meanwhile: *)
 let rec prune n =
     let unused () =
         n.users = 0 &&
-        List.for_all (fun c -> c.layer.terminal && c.users = 0) (children n) in
+        List.for_all (fun c -> c.layer.ends && c.users = 0) (children n) in
     if unused () && not n.closing then
         Option.may (fun p ->
             n.closing <- true ;
@@ -258,7 +261,7 @@ let rec prune n =
                         Siblings.remove s n.key ;
                         if Siblings.length s = 0 then Hashtbl.remove p.children n.layer.name
                     ) (siblings p n.layer) ;
-                    if not n.layer.terminal then n.removed n ;
+                    if not n.layer.ends then n.removed n ;
                     prune p))) n.parent
 
 let release n =
@@ -446,7 +449,7 @@ let rec stream_name n =
 let streams root =
     let rec loop acc n =
         List.fold_left (fun acc c ->
-            if c.layer.terminal then acc else loop (c :: acc) c
+            if c.layer.ends then acc else loop (c :: acc) c
         ) acc (children n) in
     List.rev (loop [] root)
 
@@ -465,16 +468,16 @@ let stats_line n =
 
 let next_seq = ref 0
 
-(** Registers cases of alternative patterns, each a node and layers starting
- * with that of the node, which it holds until the function returned
- * unregisters them all. A packet is told to at most one of them, which tells
- * the [matched] of its case. *)
+(** Registers cases of alternative patterns, each a node, the modes of the
+ * layers of its stack below it, and layers starting with that of the node,
+ * which it holds until the function returned unregisters them all. A packet
+ * is told to at most one of them, which tells the [matched] of its case. *)
 let register cases ~hold ~failed =
     incr next_seq ;
     let ps =
         List.concat_map (fun (alternatives, matched) ->
-            List.map (fun (node, layers) ->
-                let p = { seq = !next_seq ; layers ; hold ; matched ; failed } in
+            List.map (fun (node, below, layers) ->
+                let p = { seq = !next_seq ; layers ; below ; hold ; matched ; failed } in
                 acquire node ;
                 node.patterns <- node.patterns @ [ p ] ;
                 node, p) alternatives) cases in
@@ -500,11 +503,18 @@ let of_stream n (u : L.unpacked) =
 
 type event = Match of packet | Condition_error of A.location * string
 
-(* What a packet did to the patterns it met, the last first; at most one
- * thing to each, alternatives counting as one: *)
-type walk = { mutable met : (pattern * event) list }
+(* What a packet did to the patterns it met, the last first, each in its
+ * round: at most one thing to each per round, alternatives counting as
+ * one. A frame carries one message, or several once a node of a stream
+ * tells them apart (HTTP), each in a round of its own: *)
+type walk =
+    { mutable met : (int * pattern * event) list ;
+      mutable round : int ;
+      mutable rounds : int }
 
-let met w p = List.exists (fun (p', _) -> p'.seq = p.seq) w.met
+let met w p = List.exists (fun (r, p', _) -> r = w.round && p'.seq = p.seq) w.met
+
+let meet w p e = w.met <- (w.round, p, e) :: w.met
 
 (* Whether [pl] matches the top of [packet], seen in [modes]: *)
 let passes packet modes pl =
@@ -521,11 +531,11 @@ let check w packet modes (pending : pending list) =
         match pls with
         | pl :: rest when not (met w p) ->
             (match passes packet modes pl, rest with
-            | true, [] -> w.met <- (p, Match packet) :: w.met ; None
+            | true, [] -> meet w p (Match packet) ; None
             | true, rest -> Some (p, rest)
             | false, _ -> None
             | exception Runtime_error (where, message) ->
-                w.met <- (p, Condition_error (where, message)) :: w.met ; None)
+                meet w p (Condition_error (where, message)) ; None)
         | _ -> None) pending
 
 (* Of the layers that can be on top of [packet] (the one its header names,
@@ -537,18 +547,15 @@ let wanted node packet pending =
         Option.is_some (Option.bind node (fun n -> siblings n ul)) ||
         List.exists (fun (_, pls) ->
             match pls with pl :: _ -> pl.player == ul | [] -> false) pending in
-    (match u.upper with
-    | L.Nothing -> []
-    | L.Only name -> Option.map_default List.singleton [] (L.find ~below:l name)
-    | L.Any _ -> L.uppers l) |>
-    List.filter wants
+    List.filter wants (L.on_top l u.upper)
 
-(* Decodes each layer wanted on top of [packet], and goes on along the nodes
- * of that stream, or as long as some patterns are pending: *)
-let rec up w node packet pending =
-    List.iter (up_to w node packet pending) (wanted node packet pending)
+(* Decodes each layer wanted on top of [packet], whose layers were [seen] in
+ * these modes (the top first), and goes on along the nodes of that stream,
+ * or as long as some patterns are pending: *)
+let rec up w node seen packet pending =
+    List.iter (up_to w node seen packet pending) (wanted node packet pending)
 
-and up_to w node packet pending (ul : L.layer) =
+and up_to w node seen packet pending (ul : L.layer) =
     let u = snd (List.hd packet) in
     let streams = Option.bind node (fun n -> siblings n ul) in
     match ul.unpack u.L.up_hints u.payload with
@@ -556,7 +563,7 @@ and up_to w node packet pending (ul : L.layer) =
     | Some uu ->
         let key = incoming_key ul uu in
         match Option.bind streams (fun s -> Siblings.find_option s key) with
-        | Some c -> enter w c packet uu pending
+        | Some c -> enter w c seen packet uu pending
         | None ->
             let above = (ul, uu) :: packet in
             (* The patterns that would make a node for that layer (but
@@ -575,30 +582,46 @@ and up_to w node packet pending (ul : L.layer) =
                 if List.exists (fun (_, pls) ->
                        match pls with pl :: _ -> pl.pmode = L.Driven | [] -> false) makers
                 then c.ops.listen () ;
-                enter w c packet uu pending
+                enter w c seen packet uu pending
             | _ ->
                 let pending = check w above L.both pending in
-                if not (List.is_empty pending) then up w None above pending
+                if not (List.is_empty pending) then up w None (L.both :: seen) above pending
 
-(* What goes on from that layer of a packet, received by its node, with
- * the patterns registered there: *)
-and enter w node packet u pending =
-    node.received <- node.received + 1 ;
-    node.received_bytes <- node.received_bytes + Tools.bytelength u.payload ;
-    let pending = pending @ List.map (fun p -> p, p.layers) node.patterns in
+(* What goes on from that layer of a packet, received by its node, with the
+ * patterns registered there whose stack the layers below were seen as. It
+ * counts what is seen self-driven, and not the start of a packet (a first
+ * fragment): *)
+and enter w node seen packet u pending =
+    let modes = match seen with m :: _ -> m | [] -> L.both in
+    if List.mem L.Driven modes then (
+        node.received <- node.received + 1 ;
+        node.received_bytes <- node.received_bytes + Tools.bytelength u.payload) ;
+    let rec seen_as below seen =
+        match below, seen with
+        | m :: below, ms :: seen -> List.mem m ms && seen_as below seen
+        | _ -> true in
+    let pending =
+        pending @ List.filter_map (fun p ->
+            if seen_as p.below seen then Some (p, p.layers) else None) node.patterns in
+    let round = w.round in
     List.iter (fun (u, modes) ->
+        if node.ops.messages then (
+            w.rounds <- w.rounds + 1 ;
+            w.round <- w.rounds) ;
         let packet = (node.layer, u) :: packet in
-        up w (Some node) packet (check w packet modes pending)
-    ) (node.ops.receive u)
+        up w (Some node) (modes :: seen) packet (check w packet modes pending)
+    ) (node.ops.receive modes u) ;
+    w.round <- round
 
 (** Takes a frame from the interface, then tells the patterns it met. Its
  * [ts] is when it was captured, if it was, else when it arrived, as dated
  * by the simulation. *)
 let rec receive root frame =
-    let w = { met = [] } in
-    unpack_root root frame |> Option.may (fun u -> enter w root [] u []) ;
-    List.sort (fun (a, _) (b, _) -> Int.compare a.seq b.seq) w.met |>
-    List.iter (fun (p, e) ->
+    let w = { met = [] ; round = 0 ; rounds = 0 } in
+    unpack_root root frame |> Option.may (fun u -> enter w root [] [] u []) ;
+    List.sort (fun (r, a, _) (s, b, _) ->
+        match Int.compare r s with 0 -> Int.compare a.seq b.seq | c -> c) w.met |>
+    List.iter (fun (_, p, e) ->
         match e with
         | Match packet -> p.matched packet
         | Condition_error (where, message) -> p.failed where message)
@@ -624,7 +647,7 @@ let rec complete (packet : packet) =
         match u.upper with
         | L.Nothing -> []
         | L.Only name -> [ name ]
-        | L.Any name -> [ name ; L.N.Raw ] in
+        | L.Any name | L.Partial name -> [ name ; L.N.Raw ] in
     let rec first = function
         | [] ->
             (match L.raw.unpack [] u.payload with
@@ -659,13 +682,7 @@ let matches root layers frame =
         | [] -> true
         | pl :: rest ->
             let l, (u : L.unpacked) = List.hd packet in
-            let named =
-                match u.upper with
-                | L.Nothing -> false
-                | L.Only name ->
-                    Option.map_default ((==) pl.player) false (L.find ~below:l name)
-                | L.Any _ -> List.memq pl.player (L.uppers l) in
-            named &&
+            List.memq pl.player (L.on_top l u.upper) &&
             match pl.player.unpack u.up_hints u.payload with
             | None -> false
             | Some uu -> on_top ((pl.player, uu) :: packet) pl rest

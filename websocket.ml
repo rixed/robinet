@@ -363,6 +363,7 @@ struct
             t.request <- Some req ;
             emit t (Http.Pdu.pack {
                 Http.Pdu.cmd = Http.Status 101 ;
+                version = Http.Pdu.default_version ;
                 headers = [ "Upgrade", "websocket" ;
                             "Connection", "Upgrade" ;
                             "Sec-WebSocket-Accept", accept_key key ] ;

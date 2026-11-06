@@ -33,25 +33,26 @@ let print_location oc loc =
     Printf.fprintf oc "line %d, column %d" loc.line loc.column
 
 (** The names of the layers. Layers on top of different ones can share a
- * name ([DNS/Query], [HTTP/Query]). *)
+ * name ([ICMP/Echo], [ICMP6/Echo]) if they have the same fields. *)
 module Layer_name =
 struct
     type t =
         | Eth | IP | IP6 | TCP | UDP | ICMP | ICMP6 | Echo | Request | Reply
         | DestUnreachable | TimeExceeded | PacketTooBig | DNS | Query | Answer
-        | Raw
+        | HTTP | HttpRequest | HttpAnswer | Raw
 
     let all =
         [ Eth ; IP ; IP6 ; TCP ; UDP ; ICMP ; ICMP6 ; Echo ; Request ; Reply ;
           DestUnreachable ; TimeExceeded ; PacketTooBig ; DNS ; Query ; Answer ;
-          Raw ]
+          HTTP ; HttpRequest ; HttpAnswer ; Raw ]
 
     let to_string = function
         | Eth -> "Eth" | IP -> "IP" | IP6 -> "IP6" | TCP -> "TCP" | UDP -> "UDP"
         | ICMP -> "ICMP" | ICMP6 -> "ICMP6" | Echo -> "Echo" | Request -> "Request"
         | Reply -> "Reply" | DestUnreachable -> "DestUnreachable"
         | TimeExceeded -> "TimeExceeded" | PacketTooBig -> "PacketTooBig"
-        | DNS -> "DNS" | Query -> "Query" | Answer -> "Answer" | Raw -> "Raw"
+        | DNS -> "DNS" | Query -> "Query" | Answer -> "Answer" | HTTP -> "HTTP"
+        | HttpRequest -> "HttpRequest" | HttpAnswer -> "HttpAnswer" | Raw -> "Raw"
 
     (* However written; IP4 is an alias for IP: *)
     let of_string s =
@@ -66,7 +67,8 @@ end
 (*$T
   Layer_name.of_string "dns" = Some Layer_name.DNS
   Layer_name.of_string "destUNREACHABLE" = Some Layer_name.DestUnreachable
-  Layer_name.of_string "HTTP" = None
+  Layer_name.of_string "http" = Some Layer_name.HTTP
+  Layer_name.of_string "HTTPS" = None
   Layer_name.of_string "Ip4" = Some Layer_name.IP
   List.for_all (fun n -> Layer_name.of_string (Layer_name.to_string n) = Some n) Layer_name.all
 *)

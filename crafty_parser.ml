@@ -39,10 +39,16 @@
 open Batteries
 open Crafty_ast
 
-(* Whether the layer of that name sends a packet: *)
+(* Whether nothing can be on top of the layer of that name: *)
 let terminal name =
     List.exists (fun (l : Crafty_layers.layer) ->
         l.terminal && l.name = name) Crafty_layers.all
+
+(* Whether the layer of that name sends a packet, if not followed by a
+ * block: *)
+let ends name =
+    List.exists (fun (l : Crafty_layers.layer) ->
+        l.ends && l.name = name) Crafty_layers.all
 
 (* What is wrong with a stack of [layers] that is followed by a block although
  * it sends, and the fixes: *)
@@ -69,7 +75,7 @@ let not_a_message ?(block=false) anchor layers =
     let top = Layer_name.to_string (List.last layers).layer_name in
     let terminals =
         List.filter_map (fun (l : Crafty_layers.layer) ->
-            if l.terminal &&
+            if l.ends &&
                List.exists (fun (b : Crafty_layers.layer) ->
                    Layer_name.to_string b.name = top) l.above
             then Some (Layer_name.to_string l.name) else None) Crafty_layers.all |>
@@ -797,8 +803,9 @@ let () = set_stmt (
         (* Alone, a call rather than a stack, of an unknown layer: *)
         unknown_function (quiet (args expr +-
             stmt_end)) |||
-        (* A stack sends a packet if its top layer is terminal, and is
-         * otherwise that of the block that follows: *)
+        (* A stack sends a packet if its top layer is terminal, or ends a
+         * message and is not followed by a block; it is otherwise that of
+         * the block that follows: *)
         (anchor ++
          repeat ~min:1 ~sep:(maybe_next (slash -- nl_sp)) layer >>=
             fun (anchor, layers) ->
@@ -810,6 +817,7 @@ let () = set_stmt (
                     fun () -> Stack { anchor ; layers ; body = None }
                 else
                     optional ~def:None (body >>: Option.some) >>: function
+                    | None when ends top -> Stack { anchor ; layers ; body = None }
                     | None -> reject "%s" (not_a_message ~block:true anchor layers)
                     | body -> Stack { anchor ; layers ; body }) |||
         (nay call_of_no_function -+ expr >>: fun e -> Expr e) |||
@@ -833,7 +841,7 @@ let () = set_stmt (
          stmt_end >>:
             fun (((v, declare), anchor), layers) ->
                 let top = (List.last layers).layer_name in
-                if terminal top then
+                if ends top then
                     Capture { var = check_var v ; declare ; anchor ; layers }
                 else
                     reject "%s" (not_a_message anchor layers)) |||
@@ -1197,7 +1205,7 @@ let parse_patterns text =
   "line 1, column 10: MATCH is a reserved name" (reads "MATCH = 1")
   "line 1, column 19: LAST is a reserved name" (reads "repeat var=LAST {}")
   "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
-  "line 1, column 9: Unknown layer HTTP" (reads "/IP/HTTP {}")
+  "line 1, column 10: Unknown layer HTTPS, do you mean HTTP?" (reads "/IP/HTTPS {}")
   "line 1, column 8: Unknown layer UPD, do you mean UDP?" (reads "/IP/UPD {}")
   "line 1, column 11: Unknown layer Rae, do you mean Raw?" (reads "expect Rae {}")
   "line 1, column 11: Unknown layer Rae, do you mean Raw?" (reads "expect Rae(\"x\") {}")

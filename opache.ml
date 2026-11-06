@@ -242,13 +242,13 @@ let multiplexer res _host http msg (widget : Widget.t) =
                     else headers in
                 let body = BatIO.close_out str in
                 count_query code ;
-                TRXtop.tx http { Pdu.cmd = Status code ;
+                TRXtop.tx http { Pdu.cmd = Status code ; version = Pdu.default_version ;
                                  Pdu.headers = ("Content-Length", Printf.sprintf "%d" (String.length body)) :: headers ;
                                  Pdu.body = body }
             with ResourceError (code, str) ->
                 let err_msg = "It failed again! This time because:\n" ^ str in
                 count_query code ;
-                TRXtop.tx http { Pdu.cmd = Status code ;
+                TRXtop.tx http { Pdu.cmd = Status code ; version = Pdu.default_version ;
                                  Pdu.headers = [ "Content-Type", "text/plain" ;
                                                  "Content-Length", Printf.sprintf "%d" (String.length err_msg) ] ;
                                  Pdu.body = err_msg }) in
@@ -270,7 +270,7 @@ let multiplexer res _host http msg (widget : Widget.t) =
     | _ ->
         Log.(log widget.logger Debug (lazy ("Multiplexer: Don't know how to handle this HTTP message, returning 501"))) ;
         let body = "Don't know how to process this" in
-        TRXtop.tx http { Pdu.cmd = Status 501 ;
+        TRXtop.tx http { Pdu.cmd = Status 501 ; version = Pdu.default_version ;
                          (* We are suposed to have a message-body *)
                          Pdu.headers = [ "Content-Length", Printf.sprintf "%d" (String.length body) ;
                                          "Content-Type", "text/plain" ] ;

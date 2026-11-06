@@ -2270,7 +2270,7 @@ and stmt errors env (s : A.stmt) =
             let stack, tls, overlay = stack_layers ~hint env base over layers in
             (* Which the parser checked: *)
             let top = fst (List.hd stack) in
-            assert (top.terminal = (body = None)) ;
+            assert (if body = None then top.ends else not top.terminal) ;
             let depth = List.length base in
             (match body with
             | Some body ->
@@ -2633,10 +2633,10 @@ let denied_literals ~local ~remote ~mac (b : block) =
         | _ -> ()) b ;
     in_order !errors
 
-(* What a terminal layer carries, which is the payload of the packet: its
- * bytes and strings, and what holds them, rather than its numbers: *)
+(* What a message carries, which is the payload of the packet: its bytes and
+ * strings, and what holds them, rather than its numbers: *)
 let is_payload (l : L.layer) (f : L.field) =
-    l.terminal &&
+    l.ends &&
     match f.typ with
     | Type.Bool | Type.Byte | Type.Int | Type.Float -> false
     | _ -> true
@@ -2740,6 +2740,8 @@ let exfiltrations (b : block) =
   "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { case var=r MATCH[-1] UDP { Raw(\"${r.src}\") } else {} } }")
   "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nn = 0\non Raw { n += length(MATCH[Raw].data) }\nRaw(\"${n}\") }")
   "2:23" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { Query(\"a\")\nexpect Answer { Query(MATCH[Answer].answers[0].name) } }")
+  "2:33" (exfiltrated "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { HttpRequest(\"/\")\nexpect HttpAnswer { HttpRequest(MATCH[HttpAnswer].headers[0].value) } }")
+  "" (exfiltrated "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { HttpRequest(\"/\")\nexpect HttpAnswer { HttpRequest(\"/${MATCH[HttpAnswer].code}\") } }")
 *)
 
 (* [denied text] is what [denied_literals] says of that program, with local
@@ -2993,8 +2995,8 @@ let check_patterns (ps : A.patterns) =
   "x: int" (types "if 1 { wait 1s }\nx = 1\nif x > 0 { print(\"a\") } else { x := 2 }")
   "x: ip, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, b: {data: byte[], length: int}, y: byte[]" \
     (types "expect /IP { x = case MATCH[1] IP { MATCH[IP].src } | else { 0.0.0.0 }\n  case var=b MATCH[2] Raw { y = b.data } }")
-  "x: int, I: {dst: mac, length: int, proto: int, src: mac, ts: time}, I: {code: int, length: int, type: int}, I: {id: int, length: int}, I: {payload: byte[], seq: int}, I: {payload: byte[], seq: int}, I: {code: int, length: int, mtu: int}, I: {code: int, length: int}, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, I: {checksum: int, dst: int, length: int, src: int}, I: {ack_num: int, checksum: int, dst: int, flags: int, length: int, mss: int, options: byte[], sack_ok: bool, seq_num: int, src: int, ts_ecr: int, ts_val: int, urg_ptr: int, win_size: int, wscale: int}, I: {id: int, length: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {data: byte[], length: int}, I: {dst: ip, flow_label: int, hop_limit: int, is_fragment: bool, length: int, proto: int, src: ip, traffic_class: int}, I: {code: int, length: int, type: int}, I: {code: int, length: int, mtu: int}" \
-    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } | IP6 { 14 } | ICMP6 { 15 } | PacketTooBig { 16 } }")
+  "x: int, I: {dst: mac, length: int, proto: int, src: mac, ts: time}, I: {code: int, length: int, type: int}, I: {id: int, length: int}, I: {payload: byte[], seq: int}, I: {payload: byte[], seq: int}, I: {code: int, length: int, mtu: int}, I: {code: int, length: int}, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, I: {checksum: int, dst: int, length: int, src: int}, I: {ack_num: int, checksum: int, dst: int, flags: int, length: int, mss: int, options: byte[], sack_ok: bool, seq_num: int, src: int, ts_ecr: int, ts_val: int, urg_ptr: int, win_size: int, wscale: int}, I: {id: int, length: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {data: byte[], length: int}, I: {dst: ip, flow_label: int, hop_limit: int, is_fragment: bool, length: int, proto: int, src: ip, traffic_class: int}, I: {code: int, length: int, type: int}, I: {code: int, length: int, mtu: int}, I: {length: int}, I: {headers: {name: string, value: string}[], length: int, method: string, url: string, version: string}, I: {code: int, headers: {name: string, value: string}[], length: int, version: string}" \
+    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } | IP6 { 14 } | ICMP6 { 15 } | PacketTooBig { 16 } | HTTP { 17 } | HttpRequest { 18 } | HttpAnswer { 19 } }")
   "x: int, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, y: int" \
     (types "expect /IP { x = case MATCH[1] IP { wait 1s\n  1 } | else { 2 }\n  y = { expect Raw {}\n  3 } }")
 *)
@@ -3310,16 +3312,16 @@ let check_patterns (ps : A.patterns) =
     (types "on for=1s linger=1s /IP {}")
   "line 1, column 6: The subject of case must be a variant, such as a layer of a packet, not an int" \
     (types "case 3 IP {}")
-  "line 1, column 36: Foo is none of Answer, DNS, DestUnreachable, Echo, Eth, ICMP, ICMP6, IP, IP6, PacketTooBig, Query, Raw, Reply, Request, TCP, TimeExceeded, UDP" \
+  "line 1, column 36: Foo is none of Answer, DNS, DestUnreachable, Echo, Eth, HTTP, HttpAnswer, HttpRequest, ICMP, ICMP6, IP, IP6, PacketTooBig, Query, Raw, Reply, Request, TCP, TimeExceeded, UDP" \
     (types "expect /IP { case MATCH[0] IP {} | Foo {} }")
   "line 1, column 36: IP already has a block in this case" \
     (types "expect /IP { case MATCH[0] IP {} | ip {} }")
-  "line 1, column 18: This case needs an else, or a block for each of Answer, DNS, DestUnreachable, Echo, Eth, ICMP, ICMP6, IP6, PacketTooBig, Query, Raw, Reply, Request, TimeExceeded, UDP, to have a value" \
+  "line 1, column 18: This case needs an else, or a block for each of Answer, DNS, DestUnreachable, Echo, Eth, HTTP, HttpAnswer, HttpRequest, ICMP, ICMP6, IP6, PacketTooBig, Query, Raw, Reply, Request, TimeExceeded, UDP, to have a value" \
     (types "expect /IP { x = case MATCH[1] IP { 1 } | TCP { 2 } }")
   "line 1, column 18: The branches of this case are of different types: a string and an int" \
     (types "expect /IP { x = case MATCH[1] Raw { \"a\" } | IP { 1 } | else { 2 } }")
-  "line 1, column 18: This case has a block for each of Answer, DNS, DestUnreachable, Echo, Eth, ICMP, ICMP6, IP, IP6, PacketTooBig, Query, Raw, Reply, Request, TCP, TimeExceeded, UDP: its else is never run" \
-    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } | IP6 { 14 } | ICMP6 { 15 } | PacketTooBig { 16 } | else { 0 } }")
+  "line 1, column 18: This case has a block for each of Answer, DNS, DestUnreachable, Echo, Eth, HTTP, HttpAnswer, HttpRequest, ICMP, ICMP6, IP, IP6, PacketTooBig, Query, Raw, Reply, Request, TCP, TimeExceeded, UDP: its else is never run" \
+    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } | IP6 { 14 } | ICMP6 { 15 } | PacketTooBig { 16 } | HTTP { 17 } | HttpRequest { 18 } | HttpAnswer { 19 } | else { 0 } }")
   "line 1, column 38: Unknown variable l" \
     (types "expect /IP { case MATCH[1] Raw { x = l.data } }")
 *)

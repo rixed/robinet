@@ -4,7 +4,7 @@ Crafty sends traffic from a real interface and reacts to what comes back,
 to check a port is open, find where packets are lost, measure round trips,
 or see how a TCP connection behaves. Packets are crafted to the bit, or built
 by crafty's own stacks (ARP and neighbor discovery, IPv4, IPv6, TCP, UDP,
-ICMP, ICMPv6, DNS).
+ICMP, ICMPv6, DNS, HTTP).
 
 ## 1. Introduction
 
@@ -53,7 +53,8 @@ stack goes on top of the current one.
 
 Some layers are terminal (`Raw`, `Request`, `Reply`, `Query`, `Answer`): they
 end the stack and send the message. An incomplete stack is followed instead by
-a block of further instructions.
+a block of further instructions. `HttpRequest` and `HttpAnswer` send too,
+unless followed by a block or a layer (`Raw`, their body).
 
 The layers of a stack are streams: `UDP` picks its source port once (from
 `--udp`), and every message sent and every pattern on top of it belong to that
@@ -136,7 +137,8 @@ So far, streams were *self-driven*: crafty resolves addresses with ARP or
 neighbor discovery, connects, retransmits, fragments and reassembles. A bang makes a layer
 *manual*, for packets as on the wire: `TCP!(flags=SYN, ack_num=0)` is a SYN
 packet with this sequence number regardless of the state of the TCP connection.
-On reception, `IP!` sees each fragment and `TCP!` each segment, even without
+On reception, `IP!` sees each fragment, the first also as the start of what
+it carries (`IP!/UDP`, `IP!/TCP!`), and `TCP!` each segment, even without
 data.
 
 ```
@@ -377,7 +379,8 @@ layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 - `/IP/UDP(dst == 7)/Raw`: *absolute*, matched from the interface up, on
   any stream.
 - `Raw("pong")`: *relative*, on top of the current stack, so only on its
-  stream.
+  stream, as its layers see it: in `/IP/UDP { expect Raw }`, reassembled
+  datagrams only.
 - `../ICMP/DestUnreachable`: relative to a layer below the top of the current
   stack.
 - `Raw("pong") | ../ICMP`: alternatives.
@@ -396,7 +399,7 @@ layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 A packet matches in one mode only: a fragment `IP!`, a reassembled packet `IP`
 (or `IP6`);
 TCP data `TCP/Raw`, in order and once per chunk delivered, and each segment
-`TCP!`.
+`TCP!`. A pattern matches a packet once, but for HTTP: each message matches.
 
 **`MATCH`** is the packet that matched, as an array of layers: `MATCH[IP].src`,
 `MATCH[Raw].data`, with paths as in conditions (`MATCH[/IP]`,
@@ -688,12 +691,42 @@ The stream of a DNS id, for `Query` and `Answer` messages.
 A message has one question (`name`, `type`, `class`): the first, of a
 received message with several.
 
-#### `Raw` (on `Eth`, `IP`, `TCP`, `UDP`, `ICMP`, the ICMP errors and the quoted layers, terminal)
+#### `HTTP` (on `TCP`)
+
+The stream of the HTTP/1.x messages of a TCP connection. On `TCP`, each
+message is seen once complete, however segments cut it; on `TCP!`, those a
+segment holds whole. An answer without a length ends with the connection
+(or the segment's FIN). Not seen: the answer to a `HEAD` (it waits for a
+body).
+
+#### `HttpRequest` and `HttpAnswer` (on `HTTP`)
+
+- `method`: string; set M; read M. Of `HttpRequest`. Default `"GET"`.
+- `url`: string; set M; read M. Of `HttpRequest`. Default field; default
+  `"/"`.
+- `code`: int; set M; read M. Of `HttpAnswer`. Default field; required.
+- `version`: string; set M; read M. Default `"HTTP/1.1"`.
+- `headers`: records; set M; read M. Default none. Each is `{name: string,
+  value: string}`, sent in order, as given: give a `Host`.
+
+Alone, a message has no body; `Raw` on top is its body, sent as given.
+`Content-Length` is added unless a length or `Transfer-Encoding` header is
+given: to an answer (but 1xx, 204 and 304), to a request with a body.
+Received, `MATCH[Raw].data` is the body, dechunked.
+
+```
+/IP(dst=192.0.2.10)/TCP(dst=80)/HTTP {
+  HttpRequest("/upload", method="POST", headers=[{name: "Host", value: "example.com"}])/Raw("data")
+  expect timeout=1s HttpAnswer(code >= 400) { print("refused: ${MATCH[HttpAnswer].code}") }
+}
+```
+
+#### `Raw` (on `Eth`, `IP`, `TCP`, `UDP`, `ICMP`, the ICMP errors, the quoted layers, `HttpRequest` and `HttpAnswer`, terminal)
 
 - `data`: bytes; set M; read M. Default field.
 
 What a layer carries when not decoded further: the payload of UDP, the data
-of TCP, a fragment, a quote, an unknown protocol. Sent as given.
+of TCP, a fragment, a quote, an unknown protocol, an HTTP body. Sent as given.
 
 ## 3. Examples
 
@@ -789,6 +822,32 @@ for the next.
 ```
 
 The first record is an address only if the name has no CNAME.
+
+### Fetch a page
+
+```
+/IP(dst=192.0.2.10)/TCP(dst=80)/HTTP {
+  HttpRequest("/", headers=[{name: "Host", value: "example.com"}])
+  expect timeout=2s HttpAnswer {
+    print("${MATCH[HttpAnswer].code}, ${length(MATCH[Raw].data)} bytes")
+  }
+}
+```
+
+### An HTTP server
+
+```
+on for=1h /IP/TCP(dst == 80)/HTTP/HttpRequest {
+  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP {
+    if MATCH[HttpRequest].url == "/" { HttpAnswer(200)/Raw("hello\n") }
+    else { HttpAnswer(404) }
+  }
+}
+```
+
+```
+% sudo crafty --tcp 80 --fw server.cfty
+```
 
 ### A UDP echo server
 

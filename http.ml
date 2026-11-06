@@ -128,20 +128,25 @@ let must_close_cnx = header_present "Connection" "close"
 
 module Pdu =
 struct
-    type t = { cmd : cmd ; headers : header list ; body : string }
+    (* [version] as on the first line, such as "HTTP/1.1": *)
+    type t = { cmd : cmd ; version : string ; headers : header list ; body : string }
 
-    let string_of_cmd = function
-        | Request (req, path) -> Printf.sprintf "%s %s HTTP/1.1" req (if String.length path <> 0 then path else "/")
-        | Status c -> Printf.sprintf "HTTP/1.1 %d %s" c (text_of_code c)
+    let default_version = "HTTP/1.1"
+
+    let string_of_cmd version = function
+        | Request (req, path) -> Printf.sprintf "%s %s %s" req (if String.length path <> 0 then path else "/") version
+        | Status c -> Printf.sprintf "%s %d %s" version c (text_of_code c)
 
     let make_request req path ?(body="") headers =
         { cmd = Request (req, path) ;
+          version = default_version ;
           headers = headers ;
           body = body }
 
     let make_response ?(headers=[]) ?(body="") code =
         let content_length = "Content-Length", string_of_int (String.length body) in
         { cmd = Status code ;
+          version = default_version ;
           headers = content_length :: headers ;
           body }
 
@@ -161,10 +166,10 @@ struct
     let cmd_of_line l =
         match List.filter ((<>) "") (String.split_on_char ' ' l) with
         | [ meth ; url ; v ] when is_version v ->
-            Request (String.uppercase_ascii meth, url)
+            Request (String.uppercase_ascii meth, url), v
         | v :: code :: _ when is_version v && String.length code = 3 &&
                               String.for_all Char.is_digit code ->
-            Status (int_of_string code)
+            Status (int_of_string code), v
         | _ -> raise Bad
 
     let header_of_line l =
@@ -207,7 +212,7 @@ struct
         try
             let i = skip_crlfs 0 in
             let j = eol i in
-            let cmd = cmd_of_line (line i j) in
+            let cmd, version = cmd_of_line (line i j) in
             let headers, i = headers [] (j + 2) in
             let body, stop =
                 match cmd with
@@ -233,13 +238,13 @@ struct
                     | _ ->
                         if eof then String.sub s i (len - i), len
                         else raise (Need max_int) in
-            Parsed ({ cmd ; headers ; body }, stop)
+            Parsed ({ cmd ; version ; headers ; body }, stop)
         with Need n -> Truncated n
            | Bad -> Not_http
 
-    let pack { cmd = cmd ; headers = headers ; body = body } =
+    let pack { cmd ; version ; headers ; body } =
         bitstring_of_string (
-            (string_of_cmd cmd) ^ "\r\n" ^
+            (string_of_cmd version cmd) ^ "\r\n" ^
             (string_of_headers headers) ^ "\r\n" ^
             body)
 
@@ -342,6 +347,7 @@ struct
         let str = string_of_bitstring bits in
         TRXtop.tx t.top {
             Pdu.cmd = t.cmd ;
+            version = Pdu.default_version ;
             Pdu.headers = ("Content-Length", string_of_int (String.length str)) :: t.headers ;
             body = str }
 

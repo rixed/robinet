@@ -858,10 +858,11 @@ let register t b env (cases : (T.pattern list * _) list) ~failed =
                         Option.map_default (fun c -> c packet) true cond) in
                 Crafty_tree.{ player = pl.pl_layer ; pmode = pl.pl_mode ; test }
             ) p.pat_layers in
-        if p.depth = 0 then t.tree, layers else
-        let (e : Crafty_tree.entry) =
-            List.nth env.stack (List.length env.stack - p.depth) in
+        if p.depth = 0 then t.tree, [], layers else
+        let i = List.length env.stack - p.depth in
+        let (e : Crafty_tree.entry) = List.nth env.stack i in
         e.node,
+        List.map (fun (e : Crafty_tree.entry) -> e.mode) (List.drop (i + 1) env.stack),
         Crafty_tree.{ player = e.node.layer ; pmode = e.mode ; test = None } :: layers in
     let cases = List.map (fun (ps, matched) -> List.map alternative ps, matched) cases in
     Crafty_tree.register cases ~failed ~hold:(fun n ->
@@ -1884,6 +1885,15 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
                (Ip.Pdu.fragment 36 (udp_packet ~id:2 53 1000 "in two fragments")))) \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { repeat count=2 every=1s { print(\"\") } }")
 *)
+(* The first fragment is seen as the start of its datagram by manual
+ * stacks, and as Raw, as the others are; the self-driven stack sees the
+ * reassembled datagram: *)
+(*$= runs & ~printer:identity
+  "500ms: IP!/UDP to 1000, 8 bytes\n500ms: IP!/Raw 16 bytes\n500ms1ps: IP!/Raw 8 bytes\n500ms1ps: IP/UDP #696e2074776f20667261676d656e7473\n1s2ps: done" \
+    (runs ~inject:(List.map (fun f -> 0.5, incoming f) \
+               (Ip.Pdu.fragment 36 (udp_packet ~id:2 53 1000 "in two fragments"))) \
+        "on for=1s /IP!/UDP { print(\"IP!/UDP to ${MATCH[UDP].dst}, ${length(MATCH[Raw].data)} bytes\") }\non for=1s /IP!/Raw { print(\"IP!/Raw ${length(MATCH[Raw].data)} bytes\") }\non for=1s /IP/UDP/Raw { print(\"IP/UDP ${MATCH[Raw].data}\") }")
+*)
 (* The interface answers ARP, and sends what waited for an answer: *)
 (*$= runs & ~printer:identity
   "> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP\n4µs320ns2ps: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 ARP\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.3 ttl=64 UDP 1>2 \"who\"" \
@@ -2348,20 +2358,49 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
               Tools.tx cnx.trx (Bitstring.bitstring_of_string "hello"))
 *)
 (*$= & ~printer:identity
-  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1460,nop,wscale 7] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460,nop,wscale 7] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hello\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hello\"\na 0.000s: hello\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Raw#2}}}\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckFin \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckFin \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"" \
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1460,nop,wscale 7] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460,nop,wscale 7] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hello\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hello\"\na 0.000s: hello\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Raw#1}}}\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckFin \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckFin \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Raw(\"hello\")\n  expect timeout=1s Raw { print(MATCH[Raw].data) } }")
   "a< 0.000s: ARP\na> 0.000s: ARP\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 5000>80 Syn opts=[mss 1460,nop,wscale 7] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 80>5000 AckSyn opts=[mss 1460,nop,wscale 7] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 5000>80 Ack \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 5000>80 AckPsh \"hello\"\na 0.000s: hello\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 80>5000 AckPsh \"world\"\nhost 0.000s: got world\na< 0.040s: 10.0.0.2>10.0.0.1 ttl=64 TCP 5000>80 Ack \"\"\na 1.000s: done Eth#5{IP(src=10.0.0.1, dst=10.0.0.2)#4{TCP(src=80, dst=5000)#4{Raw}}}\na> 1.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 80>5000 AckFin \"\"\nhost 1.000s: closed\na< 1.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 5000>80 AckFin \"\"\na> 1.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 80>5000 Ack \"\"" \
     (with_host ~setup:tcp_client ~frames:true \
         "on for=1s /IP/TCP(dst == 80)/Raw {\n  print(MATCH[Raw].data)\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/Raw(\"world\") }")
-  "a 0.000s: pong\na 0.000s: pong\na 0.000s: pong\na 0.000s: done Eth#5{IP(src=10.0.0.1, dst=10.0.0.2)#4{TCP(src=5000, dst=80)#4{Raw#6}}}\nb 1.000s: done Eth#8{IP(src=10.0.0.2, dst=10.0.0.1)#7{TCP(src=80, dst=5000)#7{Raw#4}}}" \
+  "a 0.000s: pong\na 0.000s: pong\na 0.000s: pong\na 0.000s: done Eth#5{IP(src=10.0.0.1, dst=10.0.0.2)#4{TCP(src=5000, dst=80)#4{Raw#3}}}\nb 1.000s: done Eth#8{IP(src=10.0.0.2, dst=10.0.0.1)#7{TCP(src=80, dst=5000)#7{Raw#2}}}" \
     (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  repeat count=3 { Raw(\"ping ${I}\")\n    expect timeout=1s Raw { print(MATCH[Raw].data) } } }" \
          "on for=1s /IP/TCP(dst == 80)/Raw {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/Raw(\"pong\") }")
+*)
+(* HTTP between two programs: a request, written in two parts, and its
+ * answer; two requests in a segment, each seen, as they are in manual mode: *)
+(*$= & ~printer:identity
+  "b 0.000s: GET /index.html [{name: Host, value: b}]\na 0.000s: HTTP/1.1 200 [{name: Content-Length, value: 17}] #68656c6c6f202f696e6465782e68746d6c\nb 0.000s: POST /two [{name: Host, value: b}, {name: Content-Length, value: 4}]\na 0.000s: HTTP/1.1 200 [{name: Content-Length, value: 10}] #68656c6c6f202f74776f\na 0.000s: done Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=5000, dst=80)#3{Raw#2}}}\nb 1.000s: done Eth#8{IP(src=10.0.0.2, dst=10.0.0.1)#7{TCP(src=80, dst=5000)#7}}" \
+    (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  Raw(\"GET /index.html HTTP/1.1\\r\\nHo\")\n  Raw(\"st: b\\r\\n\\r\\n\")\n  HTTP/HttpRequest(\"/two\", method=\"POST\", headers=[{name: \"Host\", value: \"b\"}])/Raw(\"body\")\n  repeat count=2 {\n    expect timeout=1s HTTP/HttpAnswer { a = MATCH[HttpAnswer]\n      print(\"${a.version} ${a.code} ${a.headers} ${MATCH[Raw].data}\") } } }" \
+         "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  r = MATCH[HttpRequest]\n  print(\"${r.method} ${r.url} ${r.headers}\")\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP/HttpAnswer(200)/Raw(\"hello ${r.url}\") }")
+  "a 0.000s: done Eth{IP(src=10.0.0.1, dst=10.0.0.2){TCP(src=5000, dst=80){Raw}}}\nb 0.000s: segment /a\nb 0.000s: segment /b\nb 0.000s: stream /a\nb 0.000s: stream /b\nb 1.000s: done Eth#6{IP(src=10.0.0.2, dst=10.0.0.1)#5{TCP(src=80, dst=5000)#5}}" \
+    (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80)/Raw(\"GET /a HTTP/1.1\\r\\n\\r\\nGET /b HTTP/1.1\\r\\n\\r\\n\")" \
+         "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest { print(\"stream ${MATCH[HttpRequest].url}\") }\non for=1s /IP/TCP!(dst == 80)/HTTP/HttpRequest { print(\"segment ${MATCH[HttpRequest].url}\") }")
+*)
+(* Messages sent alone have no body, as those of a block have what it
+ * sends on top: *)
+(*$= & ~printer:identity
+  "b 0.000s: GET /a []\na 0.000s: 404 [{name: Content-Length, value: 0}]\nb 0.000s: PUT /b #6231\na 0.000s: 404 [{name: Content-Length, value: 0}]\nb 0.000s: PUT /b #6232\na 0.000s: 404 [{name: Content-Length, value: 0}]\na 0.000s: done Eth#5{IP(src=10.0.0.1, dst=10.0.0.2)#4{TCP(src=5000, dst=80)#4}}\nb 1.000s: done Eth#8{IP(src=10.0.0.2, dst=10.0.0.1)#7{TCP(src=80, dst=5000)#7}}" \
+    (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80)/HTTP {\n  HttpRequest(\"/a\")\n  HttpRequest(\"/b\", method=\"PUT\") { Raw(\"b1\")\n    Raw(\"b2\") }\n  repeat count=3 { expect timeout=1s HttpAnswer { print(\"${MATCH[HttpAnswer].code} ${MATCH[HttpAnswer].headers}\") } } }" \
+         "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  print(\"${MATCH[HttpRequest].method} ${MATCH[HttpRequest].url} ${MATCH[Raw].data}\")\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP/HttpAnswer(404) }")
+*)
+(* An answer without a length ends with the connection; its end is no Raw: *)
+(*$= & ~printer:identity
+  "b 0.000s: done Eth#4{IP(src=10.0.0.2, dst=10.0.0.1)#3{TCP(src=80, dst=5000)#3{Raw}}}\na 0.000s: raw 29\na 0.000s: 200 #746f2074686520656e64\na 1.000s: done Eth#5{IP(src=10.0.0.1, dst=10.0.0.2)#4{TCP(src=5000, dst=80)#4}}" \
+    (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  on Raw { print(\"raw ${length(MATCH[Raw].data)}\") }\n  HTTP/HttpRequest(\"/\")\n  expect timeout=2s HTTP/HttpAnswer { print(\"${MATCH[HttpAnswer].code} ${MATCH[Raw].data}\") }\n  wait 1s }" \
+         "expect timeout=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/Raw(\"HTTP/1.1 200 OK\\r\\n\\r\\nto the end\") }")
+*)
+(* The HTTP server of the manual: *)
+(*$= & ~printer:identity
+  "a 0.000s: 200, 6 bytes\na 0.000s: 404, 0 bytes\na 0.000s: done Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=5000, dst=80)#3}}\nb 1.000s: done Eth#7{IP(src=10.0.0.2, dst=10.0.0.1)#6{TCP(src=80, dst=5000)#6}}" \
+    (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80)/HTTP {\n  HttpRequest(\"/\")\n  HttpRequest(\"/missing\")\n  repeat count=2 {\n    expect timeout=2s HttpAnswer { print(\"${MATCH[HttpAnswer].code}, ${length(MATCH[Raw].data)} bytes\") } } }" \
+         "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP {\n    if MATCH[HttpRequest].url == \"/\" { HttpAnswer(200)/Raw(\"hello\\n\") }\n    else { HttpAnswer(404) }\n  }\n}")
 *)
 (* The stats of a TCP stream, as data is echoed, then of each stream as it
  * goes away; of a UDP one; with losses: *)
 (*$= & ~printer:identity
-  "a 0.000s: out 3 5, in 2 5, acked 5, received 5, retrans 0, mss 1460, established true\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Raw#2}}}" \
+  "a 0.000s: out 3 5, in 2 5, acked 5, received 5, retrans 0, mss 1460, established true\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Raw#1}}}" \
     (with_host ~setup:tcp_echo \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Raw(\"hello\")\n  expect timeout=1s Raw {\n    s = stats()\n    print(\"out ${s.packets_out} ${s.bytes_out}, in ${s.packets_in} ${s.bytes_in}, acked ${s.bytes_acked}, received ${s.bytes_received}, retrans ${s.retrans}, mss ${s.snd_mss}, established ${s.established}\") } }")
   "a 0.000s: 2 echoes, out 2 12, in 2 12\na 0.000s: done Eth#3" \
@@ -2404,10 +2443,10 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1400,sackOK,TS val 5 ecr 0,nop,wscale 3] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460,nop,wscale 7] \"\"\na 0.000s: 1460 7 false -1 #020405b401030307\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst opts=[nop,nop,nop,nop] \"\"\na 0.000s: done Eth#2" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  ../TCP!(flags=SYN, seq_num=123, mss=1400, sack_ok=true, ts_val=5, wscale=3)/Raw()\n  expect timeout=1s ../TCP!(flags == SYN | ACK) {\n    t = MATCH[TCP]\n    print(\"${t.mss} ${t.wscale} ${t.sack_ok} ${t.ts_val} ${t.options}\")\n    ../TCP!(flags=RST, seq_num=124, options=#01010101)/Raw() } }")
-  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1000,nop,wscale 2] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460,nop,wscale 7] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hi\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hi\"\na 0.000s: 1000 2\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst \"\"\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Raw#2}}}" \
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1000,nop,wscale 2] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460,nop,wscale 7] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hi\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hi\"\na 0.000s: 1000 2\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst \"\"\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Raw#1}}}" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7, mss=1000, wscale=2) {\n  Raw(\"hi\")\n  expect timeout=1s Raw {\n    s = stats()\n    print(\"${s.rcv_mss} ${s.rcv_wscale}\")\n    ../TCP!(flags=RST)/Raw() } }")
-  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1460] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hi\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hi\"\na 0.000s: -1 -1 65535\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Raw#2}}}\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckFin \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckFin \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"" \
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1460] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hi\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hi\"\na 0.000s: -1 -1 65535\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Raw#1}}}\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckFin \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckFin \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7, wscale=-1) {\n  Raw(\"hi\")\n  expect timeout=1s Raw {\n    s = stats()\n    print(\"${s.rcv_wscale} ${s.snd_wscale} ${s.rcv_wnd}\") } }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4001>22 Syn opts=[mss 1460,nop,wscale 7] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 22>4001 AckRst \"\"\na 0.000s: reset\na 0.000s: done Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4001, dst=22)#1{Raw}}}" \
@@ -2416,7 +2455,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na 0.000s: connected!\na 0.000s: done Eth#2" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  ../TCP!(flags=SYN, seq_num=123)/Raw()\n  expect timeout=1s ../TCP!(flags == SYN | ACK) {\n    ../TCP!(flags=ACK, seq_num=124, ack_num=MATCH[TCP].seq_num + 1)/Raw()\n    print(\"connected!\") } }")
-  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1460,nop,wscale 7] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460,nop,wscale 7] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hello\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hello\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \" world\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \" world\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst \"\"\na 0.000s: failed: line 7, column 3: This TCP connection is closed Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=4000, dst=7)#3{Raw#4}}}" \
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1460,nop,wscale 7] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460,nop,wscale 7] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hello\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hello\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \" world\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \" world\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst \"\"\na 0.000s: failed: line 7, column 3: This TCP connection is closed Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=4000, dst=7)#3{Raw#2}}}" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Raw(\"hello\")\n  expect timeout=1s Raw(\"hello\") {}\n  ../TCP!/Raw(\" world\")\n  expect timeout=1s Raw(\" world\") {}\n  ../TCP!(flags=RST)/Raw()\n  Raw(\"too late\") }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckRst \"\"\na 0.000s: 101\na 0.000s: done Eth#2" \
@@ -2439,7 +2478,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         "/IP6(dst=2001:db8::2) {\n  UDP(src=4000, dst=7) {\n    Raw(randbytes(3000))\n    expect timeout=1s Raw {} }\n  s = stats()\n  print(\"fragmented ${s.fragmented}, frags out ${s.frags_out}, in ${s.frags_in}, reassembled ${s.reassembled}, timeouts ${s.reasm_timeouts}\") }")
   "a 0.000s: port 9 of 2001:db8::2, from 2001:db8::2, length 15\na 0.000s: done Eth#3" \
     (with_host ~v6:true "/IP6(dst=2001:db8::2)/UDP(src=4000, dst=9)/Raw(\"anyone?\")\nexpect timeout=1s /IP6/ICMP6/DestUnreachable(code == PORT_UNREACHABLE6)/IP6/UDP(src == 4000) {\n  print(\"port ${MATCH[UDP].dst} of ${MATCH[DestUnreachable/IP6].dst}, from ${MATCH[/IP6].src}, length ${MATCH[UDP].length}\") }")
-  "a 0.000s: hello\na 0.000s: 1440\na 0.000s: done Eth#4{IP6(src=2001:db8::1, dst=2001:db8::2)#2{TCP(src=4000, dst=7)#2{Raw#2}}}" \
+  "a 0.000s: hello\na 0.000s: 1440\na 0.000s: done Eth#4{IP6(src=2001:db8::1, dst=2001:db8::2)#2{TCP(src=4000, dst=7)#2{Raw#1}}}" \
     (with_host ~v6:true ~setup:tcp_echo \
         "/IP6(dst=2001:db8::2)/TCP(src=4000, dst=7) {\n  Raw(\"hello\")\n  expect timeout=1s Raw { print(MATCH[Raw].data)\n    print(stats().snd_mss) } }")
   "a 0.000s: failed: line 1, column 1: IP takes IPv4 addresses, not 2001:db8::2: use IP6 Eth" \
