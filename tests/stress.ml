@@ -1515,13 +1515,13 @@ let test_http net cable duration nthreads
         check "a router is built with the ports it was ordered with"
             ((widget r).ports.count () = 3) ;
         (* An interface is its adapter, named after the port it is: there is
-           nothing else to it. And unconfigured means unconfigured -- an
-           interface with no address of its own has no admin host hanging off
-           it, so each of them is bare. *)
+           nothing else to it. The router's own IP stack is one "admin" host
+           beside them, not under any of them. *)
         check "and arrives with a bare adapter per interface"
             (List.sort compare
                 (List.map (fun (c : Widget.t) -> c.name)
-                          (widget r).children) = [ "#0" ; "#1" ; "#2" ] &&
+                          (widget r).children) =
+                [ "#0" ; "#1" ; "#2" ; "admin" ] &&
              List.for_all (fun (c : Widget.t) -> c.children = [])
                           (widget r).children) ;
         let macs_of id =

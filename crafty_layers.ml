@@ -634,7 +634,7 @@ let unpack_tcp hints bits =
                  ~up_hints:[ "more", V.Bool (not f.fin) ] ~payload bits
 
 (*$T unpack_tcp
-  match unpack_tcp () Tcp.Pdu.(pack (make ~syn:true ~ece:true ~cwr:true \
+  match unpack_tcp [] Tcp.Pdu.(pack (make ~syn:true ~ece:true ~cwr:true \
                                           Bitstring.empty_bitstring)) with \
   | Some u -> List.assoc "flags" u.values = V.Int (2 lor 64 lor 128) \
   | None -> false
@@ -1280,6 +1280,7 @@ let http_node ctx =
                 length = Tools.bytelength payload ; frame_length = 0 ;
                 mask = if masked then Some mask else None ;
                 payload = Payload.o payload }
+        | Some _, _ -> V.fail "A WebSocket opcode is an integer"
         | None, Some (V.Int 101) ->
             client := false ;
             upgraded := true ;

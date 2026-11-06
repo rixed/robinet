@@ -694,6 +694,7 @@ let () =
                 | Firewall.Inside ip -> "local address "^ Ip.Addr.to_dotted_string ip
                 | Outside ip -> "remote address "^ Ip.Addr.to_dotted_string ip
                 | Mac m -> "source MAC "^ Eth.Addr.to_hexstring m
+                | Tcp_flags f -> "TCP flags "^ Tcp.Pdu.string_of_flags f
                 | Uninspectable -> "uninspectable frame" in
             Printf.sprintf "stopped: %s not permitted, in %s" what
                 (Packet.Pdu.Printer.oneline (Packet.of_frame bits)), 4

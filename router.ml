@@ -1775,7 +1775,7 @@ let make_from_addrs
  *)
 
 (* What the filter drops is not routed, and is counted. *)
-(*$R rpf_passes
+(*$R
     let c = Ip.Cidr.of_string and a = Ip.Addr.of_string in
     let sim = Simulation.make ~realtime:false "router-rpf-drop" in
     let addrs =
@@ -1807,7 +1807,7 @@ let make_from_addrs
 (* Hosts with SLAAC take an address in the prefix of the interface they are
  * on and route through it, once it advertises; the others keep to their
  * link-local address. *)
-(*$R make
+(*$R
     let a = Ip.Addr.of_string and c = Ip.Cidr.of_string in
     let sim = Simulation.make ~realtime:false "router-slaac" in
     let r =
@@ -2148,7 +2148,7 @@ let make_from_addrs
 (* A host told by the router that its packets are too big for the next hop
  * resizes them, for the connections already open as for later ones; with
  * path MTU discovery off, IPv4 is fragmented on the way instead. *)
-(*$R make
+(*$R
     let a = Ip.Addr.of_string and c = Ip.Cidr.of_string in
     let sim = Simulation.make ~realtime:false "router-pmtud" in
     let r =

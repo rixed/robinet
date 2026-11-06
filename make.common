@@ -7,7 +7,7 @@ OCAMLDOC   = OCAMLFIND_IGNORE_DUPS_IN="$(DUPS_IN)" ocamlfind ocamldoc -html -col
 OCAMLMKTOP = OCAMLFIND_IGNORE_DUPS_IN="$(DUPS_IN)" ocamlfind ocamlmktop -thread -g
 QTEST      = qtest
 DOCDIR    ?= docs/
-WARNS      = -w -40-31+27
+WARNS      = -w -40-31+27 -warn-error +8
 override OCAMLOPTFLAGS += $(INCS) $(WARNS) -annot
 override OCAMLFLAGS    += $(INCS) $(WARNS) -annot
 
