@@ -377,12 +377,11 @@ let rules_of_json =
             verdict_of_int
                 (to_field "verdict" (to_choice (choices verdict_names)) row)
         and cidr =
-            to_field "CIDR" (to_option (cidr_of_string % to_string)) row
-        (* Absent from rules written before it existed: *)
+            to_field ~absent:`Null "CIDR"
+                     (to_option (cidr_of_string % to_string)) row
         and flags =
-            match row with
-            | `Assoc l when not (List.mem_assoc "TCP flags" l) -> []
-            | _ -> to_field "TCP flags" (to_choices Tcp.Pdu.flag_choices) row in
+            to_field ~absent:(`List []) "TCP flags"
+                     (to_choices Tcp.Pdu.flag_choices) row in
         match cidr, flags with
         | Some cidr, [] -> v, Ip cidr
         | None, _ :: _ -> v, HasTcpFlags (Tcp.Pdu.flags_of_raised flags)
@@ -398,6 +397,13 @@ let rules_of_json =
       Accept, Ip (cidr_of_string "0.0.0.0/0") ]
   rules_of_json (`List [ `Assoc [ "verdict", `Int 0 ; \
                                   "CIDR", `String "10.0.0.0/8" ] ]) = \
+    [ Accept, Ip (cidr_of_string "10.0.0.0/8") ]
+  rules_of_json (`List [ `Assoc [ "verdict", `Int 1 ; \
+                                  "TCP flags", `List [ `Int 4 ] ] ]) = \
+    [ Deny, HasTcpFlags (Tcp.Pdu.flags_of_raised [ 4 ]) ]
+  rules_of_json (Widget.coerce "rules" rules_kind \
+                   (`List [ `Assoc [ "verdict", `Int 0 ; \
+                                     "CIDR", `String "10.0.0.0/8" ] ])) = \
     [ Accept, Ip (cidr_of_string "10.0.0.0/8") ]
   (try ignore (rules_of_json (`List [ `Assoc [ "verdict", `Int 0 ; \
                                                "CIDR", `String "nope" ] ])) ; false \

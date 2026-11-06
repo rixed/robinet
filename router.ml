@@ -1209,7 +1209,8 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                                     let s = String.trim (to_string v) in
                                     if s = "" then None else Some (f s)
                             ) row in
-                        let num what f = to_field what (to_option f) row in
+                        let num what f =
+                            to_field ~absent:`Null what (to_option f) row in
                         let iface what =
                             num what (to_int_range ~min:0
                                                    ~max:(num_ifaces - 1)) in
@@ -1226,12 +1227,7 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                         and ip_proto =
                             num "ip proto" (fun v ->
                                 Ip.Proto.o (to_int_range ~min:0 ~max:255 v))
-                        (* Absent from tables written before it existed: *)
-                        and dscp =
-                            match row with
-                            | `Assoc l when not (List.mem_assoc "dscp" l) ->
-                                None
-                            | _ -> num "dscp" (to_int_range ~min:0 ~max:63)
+                        and dscp = num "dscp" (to_int_range ~min:0 ~max:63)
                         and src_port = text "src port" Route.port_range_of_string
                         and dst_port = text "dst port" Route.port_range_of_string
                         and out_iface = iface "output port"

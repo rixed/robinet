@@ -297,7 +297,8 @@ accepting and `1` denying, IPv4 or IPv6; an address stands for itself alone
 the segments that have all those flags raised, whatever their addresses:
 `{"verdict": 1, "CIDR": null, "TCP flags": [4, 6, 7]}` denies those with SYN,
 CWR and ECE. The flags are numbered `0`–`7`: URG, ACK, PSH, RST, SYN, FIN,
-CWR, ECE. `"TCP flags"` may be left out, for none. The rules are tried in
+CWR, ECE. Either field may be left out: `"TCP flags"` for none, `"CIDR"`
+for `null`. The rules are tried in
 order, the first that matches decides, and an address none matches is
 denied.
 

@@ -495,6 +495,8 @@ let to_choice ?range choices v =
  *)
 
 (*$T to_field
+  to_field ~absent:(`Int 2) "b" to_int (`Assoc [ "a", `Int 1 ]) = 2
+  to_field ~absent:(`Int 2) "a" to_int (`Assoc [ "a", `Int 1 ]) = 1
   (try ignore (to_field "a" to_int (`Assoc [ "a", `String "x" ])) ; false \
    with Bad_value m -> m = "a: not a whole number: \"x\"")
   (try ignore (to_field "b" to_int (`Assoc [ "a", `Int 1 ])) ; false \
@@ -591,10 +593,14 @@ let json_of_field name = function
  * kind, one field at a time, which is how a setter rebuilds its own record:
  * it knows what it wants out of it, and in what order.
  *
- * A field that is not there is refused rather than read as absent: absence is
- * [`Null], and only for a field whose kind says it may be. *)
-let to_field name f js =
-    let v = json_of_field name js in
+ * A field that is not there is read as [absent], or refused if none is given:
+ * only a field whose kind says it may be absent should give one (see
+ * {!absent_value}). *)
+let to_field ?absent name f js =
+    let v =
+        match absent, js with
+        | Some a, `Assoc l -> List.assoc_opt name l |? a
+        | _ -> json_of_field name js in
     try f v with Bad_value msg -> bad_value "%s: %s" name msg
 
 (** The names of the fields of a [Record] or [Row] kind, in their order. *)
@@ -832,6 +838,14 @@ let param ?(descr="") ?(units="") ?(placeholder="") ?(default=`Null) ~kind
           name =
     { name ; descr ; units ; kind ; placeholder ; default }
 
+(** What a field of kind [k] left out of a record reads as, if it may be left
+ * out: [`Null] for an optional one, nothing for a set. *)
+let rec absent_value = function
+    | Optional _ -> Some `Null
+    | Set _ -> Some (`List [])
+    | Hint (_, k) -> absent_value k
+    | _ -> None
+
 (* Coerce a value to what the parameter says it is, and check whatever the kind
  * knows how to check. Every refusal a parameter can meet before the call is
  * made happens here, once, rather than in each callee. *)
@@ -872,7 +886,8 @@ let rec coerce name (kind : kind) v =
         (* Every field declared, in that order, and nothing else: a name it
            does not know is a misspelling, and quietly dropping it would call
            for something other than what was asked for -- the same reason
-           [args_of] refuses an unknown parameter. *)
+           [args_of] refuses an unknown parameter. One left out reads as its
+           [absent_value], if it has one. *)
         (match v with
         | `Assoc given ->
             List.iter (fun (n, _) ->
@@ -883,8 +898,11 @@ let rec coerce name (kind : kind) v =
                 Array.to_list fields |>
                 List.map (fun (fname, k) ->
                     match List.assoc_opt fname given with
-                    | None -> bad_value "%s has no %S" name fname
-                    | Some v -> fname, coerce (name ^"."^ fname) k v))
+                    | Some v -> fname, coerce (name ^"."^ fname) k v
+                    | None ->
+                        (match absent_value k with
+                        | Some v -> fname, v
+                        | None -> bad_value "%s has no %S" name fname)))
         | v ->
             bad_value "%s must be a set of named fields, not %s" name
                 (Yojson.Basic.to_string v))
