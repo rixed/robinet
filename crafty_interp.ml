@@ -2391,6 +2391,19 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  on Raw { print(\"raw ${length(MATCH[Raw].data)}\") }\n  HTTP/HttpRequest(\"/\")\n  expect timeout=2s HTTP/HttpAnswer { print(\"${MATCH[HttpAnswer].code} ${MATCH[Raw].data}\") }\n  wait 1s }" \
          "expect timeout=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/Raw(\"HTTP/1.1 200 OK\\r\\n\\r\\nto the end\") }")
 *)
+(* WebSocket: the upgrade, then frames, masked by the client; two in a
+ * segment, each seen, as they are in manual mode: *)
+(*$= & ~printer:identity
+  "a 0.000s: [{name: Upgrade, value: websocket}, {name: Sec-WebSocket-Accept, value: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=}]\nb 0.000s: segment 1\nb 0.000s: got 1 masked true #68656c6c6f\na 0.000s: 1 false #6563686f\nb 0.000s: segment 9\nb 0.000s: got 9 masked true []\na 0.000s: 10 false []\nb 0.000s: segment 1\nb 0.000s: segment 1\nb 0.000s: got 1 masked false #61\nb 0.000s: got 1 masked false #62\na 0.000s: 1 false #6563686f\na 0.000s: 1 false #6563686f\na 0.000s: done Eth#7{IP(src=10.0.0.1, dst=10.0.0.2)#6{TCP(src=5000, dst=80)#6{Raw#4}}}\nb 1.000s: done Eth#9{IP(src=10.0.0.2, dst=10.0.0.1)#8{TCP(src=80, dst=5000)#8}}" \
+    (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  HTTP/HttpRequest(\"/ws\", headers=[{name: \"Upgrade\", value: \"websocket\"}, {name: \"Connection\", value: \"Upgrade\"}, {name: \"Sec-WebSocket-Key\", value: \"dGhlIHNhbXBsZSBub25jZQ==\"}])\n  expect timeout=1s HTTP/HttpAnswer(101) { print(\"${MATCH[HttpAnswer].headers}\") }\n  HTTP/WebSocket(WS_TEXT)/Raw(\"hello\")\n  HTTP/WebSocket(WS_PING)\n  Raw(#810161810162)\n  repeat count=4 { expect timeout=1s HTTP/WebSocket { print(\"${MATCH[WebSocket].opcode} ${MATCH[WebSocket].masked} ${MATCH[Raw].data}\") } } }" \
+         "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP/HttpAnswer(101, headers=[{name: \"Upgrade\", value: \"websocket\"}]) }\non for=1s /IP/TCP!(dst == 80)/HTTP/WebSocket { print(\"segment ${MATCH[WebSocket].opcode}\") }\non for=1s /IP/TCP(dst == 80)/HTTP/WebSocket {\n  w = MATCH[WebSocket]\n  print(\"got ${w.opcode} masked ${w.masked} ${MATCH[Raw].data}\")\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP {\n    if w.opcode == WS_PING { WebSocket(WS_PONG) } else { WebSocket(WS_TEXT)/Raw(\"echo\") } } }")
+*)
+(* A WebSocket mask is in the order of the wire: *)
+(*$= & ~printer:identity
+  "a> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 1>80 Psh \"\\129\\130\\001\\002\\003\\004``\"\nb 0.000s: 16909060 #6162\nb 0.000s: done Eth#1\na 0.000s: done Eth" \
+    (two ~arp:true ~frames:true "/IP!(dst=10.0.0.2)/TCP!(src=1, dst=80)/HTTP/WebSocket(WS_TEXT, masked=true, mask=0x01020304)/Raw(\"ab\")" \
+         "expect timeout=1s /IP/TCP!(dst == 80)/HTTP/WebSocket { print(\"${MATCH[WebSocket].mask} ${MATCH[Raw].data}\") }")
+*)
 (* The HTTP server of the manual: *)
 (*$= & ~printer:identity
   "a 0.000s: 200, 6 bytes\na 0.000s: 404, 0 bytes\na 0.000s: done Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=5000, dst=80)#3}}\nb 1.000s: done Eth#7{IP(src=10.0.0.2, dst=10.0.0.1)#6{TCP(src=80, dst=5000)#6}}" \

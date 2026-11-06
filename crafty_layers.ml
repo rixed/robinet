@@ -1173,58 +1173,132 @@ let dns_message_node layer ~query _ =
             additional_rrs = rrs "additional" } |>
         Dns.Pdu.pack, [])
 
-(* HTTP. The HTTP layer tells messages apart, those of the stream of its TCP
- * connection as they complete, and those a segment holds whole; the messages
- * on top, a request or an answer, have their body as Raw on top. *)
+(* HTTP. The HTTP layer tells apart the messages of its TCP connection, those
+ * of its stream as they complete and those a segment holds whole: a request
+ * or an answer, which has its body as Raw on top, then once upgraded by a
+ * 101 answer, WebSocket frames, which have their payload as Raw on top. *)
 
 let http_message_layer (msg : Http.Pdu.t) =
     match msg.cmd with Http.Request _ -> N.HttpRequest | Http.Status _ -> N.HttpAnswer
 
-(* The messages at the start of [s], with what is left; [eof] ends the last
- * one (an answer without a length). What is not HTTP is dropped: *)
-let http_messages s eof =
-    let rec loop acc s =
-        match Http.Pdu.parse s eof with
-        | Http.Pdu.Parsed (msg, n) ->
-            let rest = String.sub s n (String.length s - n) in
-            let acc = (msg, String.sub s 0 n) :: acc in
-            if rest = "" then List.rev acc, "" else loop acc rest
-        | Http.Pdu.Truncated _ -> List.rev acc, s
-        | Http.Pdu.Not_http -> List.rev acc, "" in
-    loop [] s
-
-let http_unpacked (msg, s) =
+let unpacked_as layer s =
     let bits = bitstring_of_string s in
     with_length ~terminal:false
-        { values = [] ; upper = Only (http_message_layer msg) ; payload = bits ;
-          up_hints = [] ; bits }
+        { values = [] ; upper = Only layer ; payload = bits ; up_hints = [] ; bits }
+
+(* The HTTP messages at the start of [s], each told to [seen] as it is
+ * parsed, with what is left; [eof] ends the last one (an answer without a
+ * length). Once [upgraded], [s] is frames. What is neither is dropped: *)
+let rec http_units ?(seen=ignore) ~upgraded s eof =
+    if upgraded () then ws_units s else
+    match Http.Pdu.parse s eof with
+    | Http.Pdu.Parsed (msg, n) ->
+        seen msg ;
+        let us, rest =
+            if n = String.length s then [], ""
+            else http_units ~seen ~upgraded (String.sub s n (String.length s - n)) eof in
+        unpacked_as (http_message_layer msg) (String.sub s 0 n) :: us, rest
+    | Http.Pdu.Truncated _ -> [], s
+    | Http.Pdu.Not_http -> [], ""
+
+(* The WebSocket frames at the start of [s], with what is left: *)
+and ws_units s =
+    match Websocket.Pdu.unpack (bitstring_of_string s) with
+    | Ok f ->
+        let n = f.frame_length in
+        let us, rest = ws_units (String.sub s n (String.length s - n)) in
+        unpacked_as N.WebSocket (String.sub s 0 n) :: us, rest
+    | Error (Websocket.Pdu.TooShort _) -> [], s
+    | Error _ -> [], ""
+
+(* The units that fill segment [s] whole: HTTP messages or frames, those of
+ * a stream [upgraded] or not first: *)
+let segment_units ~upgraded s eof =
+    let fill upgraded =
+        match http_units ~upgraded:(fun () -> upgraded) s eof with
+        | us, "" -> us
+        | _ -> [] in
+    match fill upgraded with
+    | [] -> fill (not upgraded)
+    | us -> us
 
 let is_stream hints = List.assoc_opt "stream" hints = Some (V.Bool true)
 
 (* The data of a TCP stream goes to the node, with whether more follows; a
- * segment, to the message it starts with, its node seeing them all: *)
+ * segment, to the first of its units, its node seeing them all: *)
 let unpack_http hints bits =
     if is_stream hints then unpacked [] ~up_hints:hints ~payload:bits bits else
-    match http_messages (string_of_bitstring bits) (not (more hints)) with
-    | m :: _, _ -> Some { (http_unpacked m) with bits ; up_hints = hints }
-    | [], _ -> None
+    match segment_units ~upgraded:false (string_of_bitstring bits) (not (more hints)) with
+    | u :: _ -> Some { u with bits ; up_hints = hints }
+    | [] -> None
 
-(* What the stream delivers waits for the rest of its message, or the end of
- * the stream; a segment's messages are all seen, in manual mode only: *)
+(* Websocket keeps a mask with its first byte on the wire as its lowest: *)
+let bswap32 m =
+    let b i = let n = 8 * i in Int32.(logand (shift_right_logical m n) 0xffl) in
+    Int32.(logor (shift_left (b 0) 24) (logor (shift_left (b 1) 16)
+                                         (logor (shift_left (b 2) 8) (b 3))))
+
+let header_value name headers =
+    List.find_map_opt (fun (n, v) ->
+        if String.icompare n name = 0 then Some v else None) headers
+
+(* The frames of a stream follow the 101 answer it received or sent, which
+ * sends the Sec-WebSocket-Accept of the last request's key unless given.
+ * Frames are masked, unless told, by the side that sent the request: *)
 let http_node _ =
     let pending = Stdlib.Buffer.create 4096 in
-    { (manual (fun _ _ payload -> payload, [])) with
+    let upgraded = ref false and client = ref false and ws_key = ref None in
+    let seen (msg : Http.Pdu.t) =
+        match msg.cmd with
+        | Http.Request _ -> ws_key := header_value "Sec-WebSocket-Key" msg.headers
+        | Http.Status 101 -> upgraded := true
+        | Http.Status _ -> () in
+    let upgraded_now () = !upgraded in
+    let pack _ hints payload =
+        (match List.assoc_opt "opcode" hints, List.assoc_opt "code" hints with
+        | Some (V.Int op), _ ->
+            let opcode =
+                match Websocket.opcode_of_int op with
+                | Some o -> o
+                | None -> V.fail "WebSocket has no opcode %d" op in
+            let masked =
+                match List.assoc_opt "masked" hints with
+                | Some (V.Bool m) -> m
+                | _ -> !client in
+            let mask =
+                match List.assoc_opt "mask" hints with
+                | Some (V.Int m) -> bswap32 (Int32.of_int m)
+                | _ -> Websocket.Pdu.rand_mask () in
+            Websocket.Pdu.pack {
+                fin = List.assoc_opt "final" hints <> Some (V.Bool false) ; opcode ;
+                length = Tools.bytelength payload ; frame_length = 0 ;
+                mask = if masked then Some mask else None ;
+                payload = Payload.o payload }
+        | None, Some (V.Int 101) ->
+            client := false ;
+            upgraded := true ;
+            (match Http.Pdu.parse (string_of_bitstring payload) true, !ws_key with
+            | Http.Pdu.Parsed (msg, _), Some key
+              when header_value "Sec-WebSocket-Accept" msg.headers = None ->
+                Http.Pdu.pack { msg with headers =
+                    msg.headers @ [ "Sec-WebSocket-Accept", Websocket.accept_key key ] }
+            | _ -> payload)
+        | None, Some _ -> client := false ; payload
+        | None, None -> client := true ; payload),
+        [] in
+    { (manual pack) with
       receive = (fun modes u ->
         let eof = not (more u.up_hints) in
         if List.mem Driven modes then (
             Stdlib.Buffer.add_string pending (string_of_bitstring u.payload) ;
-            let msgs, rest = http_messages (Stdlib.Buffer.contents pending) eof in
+            let us, rest =
+                http_units ~seen ~upgraded:upgraded_now (Stdlib.Buffer.contents pending) eof in
             Stdlib.Buffer.clear pending ;
             Stdlib.Buffer.add_string pending rest ;
-            List.map (fun m -> http_unpacked m, both) msgs
+            List.map (fun u -> u, both) us
         ) else
-            fst (http_messages (string_of_bitstring u.bits) eof) |>
-            List.map (fun m -> http_unpacked m, [ Manual ])) ;
+            segment_units ~upgraded:!upgraded (string_of_bitstring u.bits) eof |>
+            List.map (fun u -> u, [ Manual ])) ;
       messages = true }
 
 (* Records sorted by field name, as every record: *)
@@ -1263,32 +1337,56 @@ let unpack_http_message kind _ bits =
     | _ -> None
 
 (* The headers as given, with a Content-Length unless they tell the length
- * already, if [length_needed]; the body as given: *)
-let pack_http_message fields cmd ~length_needed payload =
+ * already, if [length_needed]; the body as given. HTTP is told [hints]: *)
+let pack_http_message fields cmd ~length_needed hints payload =
     let headers = http_headers fields
     and body = string_of_bitstring payload in
-    let tells n = List.exists (fun (h, _) -> String.icompare h n = 0) headers in
+    let tells n = header_value n headers <> None in
     let headers =
         if length_needed body && not (tells "Content-Length" || tells "Transfer-Encoding")
         then headers @ [ "Content-Length", string_of_int (String.length body) ]
         else headers in
     Http.Pdu.pack { cmd ; headers ; body ;
                     version = string_of ~def:Http.Pdu.default_version fields "version" },
-    []
+    hints
 
 (* A request has a length if it has a body: *)
 let http_request_node _ =
     manual (fun fields _ payload ->
         let cmd = Http.Request (string_of ~def:"GET" fields "method",
                                 string_of ~def:"/" fields "url") in
-        pack_http_message fields cmd ~length_needed:(fun b -> b <> "") payload)
+        pack_http_message fields cmd ~length_needed:(fun b -> b <> "") [] payload)
 
 (* An answer has a length, but those that have no body: *)
 let http_answer_node _ =
     manual (fun fields _ payload ->
         let code = int_of fields "HttpAnswer" "code" 100 999 in
-        pack_http_message fields (Http.Status code) payload ~length_needed:(fun _ ->
-            not ((code >= 100 && code < 200) || code = 204 || code = 304)))
+        pack_http_message fields (Http.Status code) [ "code", V.Int code ] payload
+            ~length_needed:(fun _ ->
+                not ((code >= 100 && code < 200) || code = 204 || code = 304)))
+
+(* The mask in the order of the wire: *)
+let unpack_ws _ bits =
+    match Websocket.Pdu.unpack bits with
+    | Ok f ->
+        let payload = (f.payload :> bitstring) in
+        unpacked [ "final", V.Bool f.fin ;
+                   "opcode", V.Int (Websocket.int_of_opcode f.opcode) ;
+                   "masked", V.Bool (f.mask <> None) ;
+                   "mask", V.Int (match f.mask with
+                                  | Some m -> Int32.to_int (bswap32 m) land 0xffff_ffff
+                                  | None -> 0) ]
+                 ~upper:(if bitstring_length payload = 0 then Nothing else Only N.Raw)
+                 ~payload bits
+    | Error _ -> None
+
+(* HTTP builds the frame around its payload, from what it is told: *)
+let ws_node _ =
+    manual (fun fields _ payload ->
+        let opt name = Option.map (fun v -> name, v) (fields name) in
+        payload,
+        [ "opcode", V.Int (int_of ~def:2 fields "WebSocket" "opcode" 0 15) ] @
+        List.filter_map opt [ "final" ; "masked" ; "mask" ])
 
 (** {2 Layers} *)
 
@@ -1553,6 +1651,18 @@ let http_request =
         field "version" Type.String ;
         field "headers" (Type.Array http_header) ]
 
+(* A frame, whose payload is on top: *)
+let websocket =
+    layer N.WebSocket ~above:[ http ] ~ends:true ~default:"opcode" ~node:ws_node
+          ~unpack:unpack_ws
+          ~constants:(List.map (fun (n, c) -> n, Int c) [
+              "WS_CONTINUATION", 0 ; "WS_TEXT", 1 ; "WS_BINARY", 2 ;
+              "WS_CLOSE", 8 ; "WS_PING", 9 ; "WS_PONG", 10 ]) [
+        field "final" Type.Bool ;
+        field "opcode" Type.Int ;
+        field "masked" Type.Bool ;
+        field "mask" Type.Int ]
+
 let http_answer =
     layer N.HttpAnswer ~above:[ http ] ~ends:true ~default:"code" ~node:http_answer_node
           ~unpack:(unpack_http_message N.HttpAnswer) [
@@ -1566,7 +1676,7 @@ let raw =
         ~above:[ eth ; ip ; ip6 ; tcp ; udp ; icmp ; icmp6 ; dest_unreachable ;
                  time_exceeded ; dest_unreachable6 ; packet_too_big ; time_exceeded6 ;
                  quoted_ip ; quoted_ip6 ; quoted_udp ; quoted_tcp ;
-                 http_request ; http_answer ]
+                 http_request ; http_answer ; websocket ]
         ~node:raw_node ~unpack:unpack_raw
         ~default:"data" [ field "data" Type.bytes ]
 
@@ -1614,7 +1724,7 @@ let all =
       dest_unreachable ; time_exceeded ; dest_unreachable6 ; packet_too_big ;
       time_exceeded6 ; quoted_ip ; quoted_ip6 ; quoted_udp ; quoted_tcp ;
       dns ; dns_message N.Query ~query:true ; dns_message N.Answer ~query:false ;
-      http ; http_request ; http_answer ; raw ]
+      http ; http_request ; http_answer ; websocket ; raw ]
 
 let same_name a b = String.lowercase_ascii a = String.lowercase_ascii b
 

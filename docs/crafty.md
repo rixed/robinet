@@ -4,7 +4,7 @@ Crafty sends traffic from a real interface and reacts to what comes back,
 to check a port is open, find where packets are lost, measure round trips,
 or see how a TCP connection behaves. Packets are crafted to the bit, or built
 by crafty's own stacks (ARP and neighbor discovery, IPv4, IPv6, TCP, UDP,
-ICMP, ICMPv6, DNS, HTTP).
+ICMP, ICMPv6, DNS, HTTP, WebSocket).
 
 ## 1. Introduction
 
@@ -53,8 +53,8 @@ stack goes on top of the current one.
 
 Some layers are terminal (`Raw`, `Request`, `Reply`, `Query`, `Answer`): they
 end the stack and send the message. An incomplete stack is followed instead by
-a block of further instructions. `HttpRequest` and `HttpAnswer` send too,
-unless followed by a block or a layer (`Raw`, their body).
+a block of further instructions. `HttpRequest`, `HttpAnswer` and `WebSocket`
+send too, unless followed by a block or a layer (`Raw`, their body).
 
 The layers of a stack are streams: `UDP` picks its source port once (from
 `--udp`), and every message sent and every pattern on top of it belong to that
@@ -399,7 +399,8 @@ layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 A packet matches in one mode only: a fragment `IP!`, a reassembled packet `IP`
 (or `IP6`);
 TCP data `TCP/Raw`, in order and once per chunk delivered, and each segment
-`TCP!`. A pattern matches a packet once, but for HTTP: each message matches.
+`TCP!`. A pattern matches a packet once, but for HTTP: each message or
+WebSocket frame matches.
 
 **`MATCH`** is the packet that matched, as an array of layers: `MATCH[IP].src`,
 `MATCH[Raw].data`, with paths as in conditions (`MATCH[/IP]`,
@@ -693,11 +694,11 @@ received message with several.
 
 #### `HTTP` (on `TCP`)
 
-The stream of the HTTP/1.x messages of a TCP connection. On `TCP`, each
-message is seen once complete, however segments cut it; on `TCP!`, those a
-segment holds whole. An answer without a length ends with the connection
-(or the segment's FIN). Not seen: the answer to a `HEAD` (it waits for a
-body).
+The stream of the HTTP/1.x messages of a TCP connection, then, after a 101
+answer received or sent, of its WebSocket frames. On `TCP`, each is seen
+once complete, however segments cut it; on `TCP!`, those that fill a
+segment. An answer without a length ends with the connection (or the
+segment's FIN). Not seen: the answer to a `HEAD` (it waits for a body).
 
 #### `HttpRequest` and `HttpAnswer` (on `HTTP`)
 
@@ -712,7 +713,9 @@ body).
 Alone, a message has no body; `Raw` on top is its body, sent as given.
 `Content-Length` is added unless a length or `Transfer-Encoding` header is
 given: to an answer (but 1xx, 204 and 304), to a request with a body.
-Received, `MATCH[Raw].data` is the body, dechunked.
+Received, `MATCH[Raw].data` is the body, dechunked. A 101 answer to a
+request with a `Sec-WebSocket-Key` gets its `Sec-WebSocket-Accept`, unless
+given.
 
 ```
 /IP(dst=192.0.2.10)/TCP(dst=80)/HTTP {
@@ -721,12 +724,41 @@ Received, `MATCH[Raw].data` is the body, dechunked.
 }
 ```
 
-#### `Raw` (on `Eth`, `IP`, `TCP`, `UDP`, `ICMP`, the ICMP errors, the quoted layers, `HttpRequest` and `HttpAnswer`, terminal)
+#### `WebSocket` (on `HTTP`)
+
+- `opcode`: int; set M; read M. Default field; default `WS_BINARY`.
+  Constants `WS_CONTINUATION`, `WS_TEXT`, `WS_BINARY`, `WS_CLOSE`,
+  `WS_PING`, `WS_PONG`.
+- `final`: bool; set M; read M. Default true.
+- `masked`: bool; set M; read M. Default: whether this side sent the
+  request.
+- `mask`: int; set M; read M. As on the wire (0 if not masked). Default:
+  random.
+
+A frame; `Raw` on top is its payload, unmasked. Pings, closes and
+fragmented messages are the program's to handle.
+
+```
+/IP(dst=192.0.2.10)/TCP(dst=80)/HTTP {
+  HttpRequest("/chat", headers=[{name: "Host", value: "example.com"},
+                                {name: "Upgrade", value: "websocket"},
+                                {name: "Connection", value: "Upgrade"},
+                                {name: "Sec-WebSocket-Key", value: "dGhlIHNhbXBsZSBub25jZQ=="},
+                                {name: "Sec-WebSocket-Version", value: "13"}])
+  expect timeout=1s HttpAnswer(101) {}
+  WebSocket(WS_TEXT)/Raw("hello")
+  expect timeout=1s WebSocket(WS_TEXT) { print(MATCH[Raw].data) }
+  WebSocket(WS_CLOSE)
+}
+```
+
+#### `Raw` (on `Eth`, `IP`, `TCP`, `UDP`, `ICMP`, the ICMP errors, the quoted layers, `HttpRequest`, `HttpAnswer` and `WebSocket`, terminal)
 
 - `data`: bytes; set M; read M. Default field.
 
 What a layer carries when not decoded further: the payload of UDP, the data
-of TCP, a fragment, a quote, an unknown protocol, an HTTP body. Sent as given.
+of TCP, a fragment, a quote, an unknown protocol, an HTTP body, a WebSocket
+payload. Sent as given.
 
 ## 3. Examples
 

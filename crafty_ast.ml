@@ -39,12 +39,12 @@ struct
     type t =
         | Eth | IP | IP6 | TCP | UDP | ICMP | ICMP6 | Echo | Request | Reply
         | DestUnreachable | TimeExceeded | PacketTooBig | DNS | Query | Answer
-        | HTTP | HttpRequest | HttpAnswer | Raw
+        | HTTP | HttpRequest | HttpAnswer | WebSocket | Raw
 
     let all =
         [ Eth ; IP ; IP6 ; TCP ; UDP ; ICMP ; ICMP6 ; Echo ; Request ; Reply ;
           DestUnreachable ; TimeExceeded ; PacketTooBig ; DNS ; Query ; Answer ;
-          HTTP ; HttpRequest ; HttpAnswer ; Raw ]
+          HTTP ; HttpRequest ; HttpAnswer ; WebSocket ; Raw ]
 
     let to_string = function
         | Eth -> "Eth" | IP -> "IP" | IP6 -> "IP6" | TCP -> "TCP" | UDP -> "UDP"
@@ -52,7 +52,8 @@ struct
         | Reply -> "Reply" | DestUnreachable -> "DestUnreachable"
         | TimeExceeded -> "TimeExceeded" | PacketTooBig -> "PacketTooBig"
         | DNS -> "DNS" | Query -> "Query" | Answer -> "Answer" | HTTP -> "HTTP"
-        | HttpRequest -> "HttpRequest" | HttpAnswer -> "HttpAnswer" | Raw -> "Raw"
+        | HttpRequest -> "HttpRequest" | HttpAnswer -> "HttpAnswer"
+        | WebSocket -> "WebSocket" | Raw -> "Raw"
 
     (* However written; IP4 is an alias for IP: *)
     let of_string s =
