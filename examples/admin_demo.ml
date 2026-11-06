@@ -49,7 +49,12 @@ let main =
                                     netmask =
                                         Some (Ip.Addr.of_string
                                                   "255.255.255.0") ;
-                                    addresses = [] ; slaac = false ; dad = false ; gateway = None ; nameserver = None ;
+                                    addresses = [] ; slaac = false ; dad = false ;
+                                    pmtud = None ;
+                                    pmtu_timeout = Some Host.default_pmtu_timeout ;
+                                    mtu_plateaus = Host.default_mtu_plateaus ;
+                                    min_pmtu = 68 ;
+                                    gateway = None ; nameserver = None ;
                                     search_sfx = None ; mac = None }) in
             (* Spread around the switch, each one further out than the last, so
              * that the three cables are of three different lengths. Before the
