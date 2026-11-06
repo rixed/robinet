@@ -479,6 +479,9 @@ let register cases ~hold ~failed =
             List.map (fun (node, below, layers) ->
                 let p = { seq = !next_seq ; layers ; below ; hold ; matched ; failed } in
                 acquire node ;
+                (match layers with
+                | { pmode = L.Driven ; _ } :: _ -> node.ops.drive ()
+                | _ -> ()) ;
                 node.patterns <- node.patterns @ [ p ] ;
                 node, p) alternatives) cases in
     let registered = ref true in

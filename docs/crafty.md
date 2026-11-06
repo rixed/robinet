@@ -399,8 +399,9 @@ layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 A packet matches in one mode only: a fragment `IP!`, a reassembled packet `IP`
 (or `IP6`);
 TCP data `TCP/Raw`, in order and once per chunk delivered, and each segment
-`TCP!`. A pattern matches a packet once, but for HTTP: each message or
-WebSocket frame matches.
+`TCP!`; a WebSocket message `WebSocket`, and each frame `WebSocket!`. A
+pattern matches a packet once, but for HTTP: each message or WebSocket frame
+matches.
 
 **`MATCH`** is the packet that matched, as an array of layers: `MATCH[IP].src`,
 `MATCH[Raw].data`, with paths as in conditions (`MATCH[/IP]`,
@@ -726,7 +727,7 @@ given.
 
 #### `WebSocket` (on `HTTP`)
 
-- `opcode`: int; set M; read M. Default field; default `WS_BINARY`.
+- `opcode`: int; set M, S; read M, S. Default field; default `WS_BINARY`.
   Constants `WS_CONTINUATION`, `WS_TEXT`, `WS_BINARY`, `WS_CLOSE`,
   `WS_PING`, `WS_PONG`.
 - `final`: bool; set M; read M. Default true.
@@ -735,8 +736,10 @@ given.
 - `mask`: int; set M; read M. As on the wire (0 if not masked). Default:
   random.
 
-A frame; `Raw` on top is its payload, unmasked. Pings, closes and
-fragmented messages are the program's to handle.
+`Raw` on top is the payload, unmasked. `WebSocket!` is each frame, sent as
+given. `WebSocket` is each message, its fragments joined, and each close;
+once a self-driven stack or pattern uses the stream, it answers pings
+(which it does not show) and a close it did not send.
 
 ```
 /IP(dst=192.0.2.10)/TCP(dst=80)/HTTP {

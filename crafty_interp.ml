@@ -808,6 +808,7 @@ let push t b env depth overlay (layers : T.layer list) =
                     Crafty_tree.acquire node ;
                     b.cleanups <- (fun () -> Crafty_tree.release node) :: b.cleanups) ;
                 node in
+        if l.mode = Crafty_layers.Driven then node.ops.drive () ;
         Crafty_tree.{ node ; mode = l.mode ; options } :: stack
     ) base layers
 
@@ -2395,14 +2396,21 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
  * segment, each seen, as they are in manual mode: *)
 (*$= & ~printer:identity
   "a 0.000s: [{name: Upgrade, value: websocket}, {name: Sec-WebSocket-Accept, value: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=}]\nb 0.000s: segment 1\nb 0.000s: got 1 masked true #68656c6c6f\na 0.000s: 1 false #6563686f\nb 0.000s: segment 9\nb 0.000s: got 9 masked true []\na 0.000s: 10 false []\nb 0.000s: segment 1\nb 0.000s: segment 1\nb 0.000s: got 1 masked false #61\nb 0.000s: got 1 masked false #62\na 0.000s: 1 false #6563686f\na 0.000s: 1 false #6563686f\na 0.000s: done Eth#7{IP(src=10.0.0.1, dst=10.0.0.2)#6{TCP(src=5000, dst=80)#6{Raw#4}}}\nb 1.000s: done Eth#9{IP(src=10.0.0.2, dst=10.0.0.1)#8{TCP(src=80, dst=5000)#8}}" \
-    (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  HTTP/HttpRequest(\"/ws\", headers=[{name: \"Upgrade\", value: \"websocket\"}, {name: \"Connection\", value: \"Upgrade\"}, {name: \"Sec-WebSocket-Key\", value: \"dGhlIHNhbXBsZSBub25jZQ==\"}])\n  expect timeout=1s HTTP/HttpAnswer(101) { print(\"${MATCH[HttpAnswer].headers}\") }\n  HTTP/WebSocket(WS_TEXT)/Raw(\"hello\")\n  HTTP/WebSocket(WS_PING)\n  Raw(#810161810162)\n  repeat count=4 { expect timeout=1s HTTP/WebSocket { print(\"${MATCH[WebSocket].opcode} ${MATCH[WebSocket].masked} ${MATCH[Raw].data}\") } } }" \
-         "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP/HttpAnswer(101, headers=[{name: \"Upgrade\", value: \"websocket\"}]) }\non for=1s /IP/TCP!(dst == 80)/HTTP/WebSocket { print(\"segment ${MATCH[WebSocket].opcode}\") }\non for=1s /IP/TCP(dst == 80)/HTTP/WebSocket {\n  w = MATCH[WebSocket]\n  print(\"got ${w.opcode} masked ${w.masked} ${MATCH[Raw].data}\")\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP {\n    if w.opcode == WS_PING { WebSocket(WS_PONG) } else { WebSocket(WS_TEXT)/Raw(\"echo\") } } }")
+    (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  HTTP/HttpRequest(\"/ws\", headers=[{name: \"Upgrade\", value: \"websocket\"}, {name: \"Connection\", value: \"Upgrade\"}, {name: \"Sec-WebSocket-Key\", value: \"dGhlIHNhbXBsZSBub25jZQ==\"}])\n  expect timeout=1s HTTP/HttpAnswer(101) { print(\"${MATCH[HttpAnswer].headers}\") }\n  HTTP/WebSocket!(WS_TEXT)/Raw(\"hello\")\n  HTTP/WebSocket!(WS_PING)\n  Raw(#810161810162)\n  repeat count=4 { expect timeout=1s HTTP/WebSocket! { print(\"${MATCH[WebSocket].opcode} ${MATCH[WebSocket].masked} ${MATCH[Raw].data}\") } } }" \
+         "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP/HttpAnswer(101, headers=[{name: \"Upgrade\", value: \"websocket\"}]) }\non for=1s /IP/TCP!(dst == 80)/HTTP/WebSocket! { print(\"segment ${MATCH[WebSocket].opcode}\") }\non for=1s /IP/TCP(dst == 80)/HTTP/WebSocket! {\n  w = MATCH[WebSocket]\n  print(\"got ${w.opcode} masked ${w.masked} ${MATCH[Raw].data}\")\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP {\n    if w.opcode == WS_PING { WebSocket!(WS_PONG) } else { WebSocket!(WS_TEXT)/Raw(\"echo\") } } }")
 *)
 (* A WebSocket mask is in the order of the wire: *)
 (*$= & ~printer:identity
   "a> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 1>80 Psh \"\\129\\130\\001\\002\\003\\004``\"\nb 0.000s: 16909060 #6162\nb 0.000s: done Eth#1\na 0.000s: done Eth" \
-    (two ~arp:true ~frames:true "/IP!(dst=10.0.0.2)/TCP!(src=1, dst=80)/HTTP/WebSocket(WS_TEXT, masked=true, mask=0x01020304)/Raw(\"ab\")" \
-         "expect timeout=1s /IP/TCP!(dst == 80)/HTTP/WebSocket { print(\"${MATCH[WebSocket].mask} ${MATCH[Raw].data}\") }")
+    (two ~arp:true ~frames:true "/IP!(dst=10.0.0.2)/TCP!(src=1, dst=80)/HTTP/WebSocket!(WS_TEXT, masked=true, mask=0x01020304)/Raw(\"ab\")" \
+         "expect timeout=1s /IP/TCP!(dst == 80)/HTTP/WebSocket! { print(\"${MATCH[WebSocket].mask} ${MATCH[Raw].data}\") }")
+*)
+(* Self-driven WebSocket: messages, their fragments joined; pings answered
+ * but not seen; closes answered: *)
+(*$= & ~printer:identity
+  "b 0.000s: frame 1 true #68656c6c6f\nb 0.000s: message 1 #68656c6c6f\na 0.000s: frame 9\nb 0.000s: frame 1 false #66726167\na 0.000s: message 1 #627965\nb 0.000s: frame 0 true #6d656e746564\nb 0.000s: message 1 #667261676d656e746564\nb 0.000s: frame 10 true #70\nb 0.000s: frame 8 true #03e8\nb 0.000s: message 8 #03e8\na 0.000s: closed #03e8\na 0.000s: done Eth#6{IP(src=10.0.0.1, dst=10.0.0.2)#5{TCP(src=5000, dst=80)#5}}\nb 1.000s: done Eth#11{IP(src=10.0.0.2, dst=10.0.0.1)#10{TCP(src=80, dst=5000)#10}}" \
+    (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80)/HTTP {\n  HttpRequest(\"/ws\", headers=[{name: \"Upgrade\", value: \"websocket\"}, {name: \"Connection\", value: \"Upgrade\"}, {name: \"Sec-WebSocket-Key\", value: \"dGhlIHNhbXBsZSBub25jZQ==\"}])\n  expect timeout=1s HttpAnswer(101) {}\n  on WebSocket!(opcode != WS_TEXT && opcode != WS_CLOSE) { print(\"frame ${MATCH[WebSocket].opcode}\") }\n  WebSocket(WS_TEXT)/Raw(\"hello\")\n  WebSocket!(WS_TEXT, final=false)/Raw(\"frag\")\n  WebSocket!(WS_CONTINUATION)/Raw(\"mented\")\n  expect timeout=1s WebSocket { print(\"message ${MATCH[WebSocket].opcode} ${MATCH[Raw].data}\") }\n  WebSocket(WS_CLOSE)/Raw(#03e8)\n  expect timeout=1s WebSocket(WS_CLOSE) { print(\"closed ${MATCH[Raw].data}\") } }" \
+         "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP/HttpAnswer(101, headers=[{name: \"Upgrade\", value: \"websocket\"}]) }\non for=1s /IP/TCP(dst == 80)/HTTP/WebSocket! { print(\"frame ${MATCH[WebSocket].opcode} ${MATCH[WebSocket].final} ${MATCH[Raw].data}\") }\non for=1s /IP/TCP(dst == 80)/HTTP/WebSocket {\n  print(\"message ${MATCH[WebSocket].opcode} ${MATCH[Raw].data}\")\n  if MATCH[Raw].data == \"hello\" {\n    /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP { WebSocket!(WS_PING)/Raw(\"p\")\n      WebSocket(WS_TEXT)/Raw(\"bye\") } } }")
 *)
 (* The HTTP server of the manual: *)
 (*$= & ~printer:identity

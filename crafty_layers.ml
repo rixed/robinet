@@ -131,6 +131,9 @@ type ops =
       receive : mode list -> unpacked -> (unpacked * mode list) list ;
       (* A self-driven pattern made the node (TCP accepts a connection): *)
       listen : unit -> unit ;
+      (* A self-driven stack or pattern uses the node (WebSocket answers
+       * pings): *)
+      drive : unit -> unit ;
       (* The node is no longer used: once what it has to finish is (TCP
        * closing), the continuation removes it: *)
       close : (unit -> unit) -> unit ;
@@ -212,7 +215,8 @@ let pass u = [ u, both ]
  * mode: *)
 let manual pack =
     { pack ; send = not_driven ; receive = (fun _ u -> pass u) ;
-      listen = ignore ; close = (fun k -> k ()) ; busy_for = Tools.never_busy ;
+      listen = ignore ; drive = ignore ; close = (fun k -> k ()) ;
+      busy_for = Tools.never_busy ;
       buffered = false ; on_ready = ignore ; messages = false ;
       stats = (fun () -> []) }
 
@@ -813,6 +817,7 @@ let tcp_node ctx =
                                         "more", V.Bool (not ended') ] }, [ Driven ] ])
         | Idle | Listening -> [ raw ])) ;
       listen = (fun () -> match !state with Idle -> state := Listening | _ -> ()) ;
+      drive = ignore ;
       close = (fun k ->
         match !state with
         | Idle | Listening -> k ()
@@ -1245,7 +1250,8 @@ let header_value name headers =
 (* The frames of a stream follow the 101 answer it received or sent, which
  * sends the Sec-WebSocket-Accept of the last request's key unless given.
  * Frames are masked, unless told, by the side that sent the request: *)
-let http_node _ =
+let http_node ctx =
+    let below = Option.get ctx.below in
     let pending = Stdlib.Buffer.create 4096 in
     let upgraded = ref false and client = ref false and ws_key = ref None in
     let seen (msg : Http.Pdu.t) =
@@ -1287,6 +1293,9 @@ let http_node _ =
         | None, None -> client := true ; payload),
         [] in
     { (manual pack) with
+      (* For self-driven WebSocket, into the TCP connection: *)
+      send = (fun fields hints payload ->
+        below.send ctx.below_key [] (fst (pack fields hints payload))) ;
       receive = (fun modes u ->
         let eof = not (more u.up_hints) in
         if List.mem Driven modes then (
@@ -1381,12 +1390,68 @@ let unpack_ws _ bits =
     | Error _ -> None
 
 (* HTTP builds the frame around its payload, from what it is told: *)
-let ws_node _ =
-    manual (fun fields _ payload ->
+let ws_opcode fields = int_of ~def:2 fields "WebSocket" "opcode" 0 15
+
+(* Of the payload of a close, the status code, which its answer echoes: *)
+let ws_status data =
+    if bitstring_length data >= 16 then takebits 16 data else empty_bitstring
+
+(* Each frame is seen in manual mode. Self-driven, the stream sees the
+ * messages, their fragments joined, and the closes; once a self-driven stack
+ * or pattern uses it, it answers pings, and a close unless it sent one: *)
+let ws_node ctx =
+    let below = Option.get ctx.below
+    and power = ctx.eth.iface.widget.power in
+    let active = ref false and sent_close = ref false
+    (* The opcode and the payloads, the last first, of a fragmented message: *)
+    and fragments = ref None in
+    let send opcode payload =
+        if opcode = 8 then sent_close := true ;
+        below.send (fun _ -> None) [ "opcode", V.Int opcode ] payload in
+    let answer opcode payload =
+        if !active then Simulation.asap power (fun () -> send opcode payload) () in
+    let message (u : unpacked) opcode payload =
+        let values =
+            List.map (function
+                | "opcode", _ -> "opcode", V.Int opcode
+                | "final", _ -> "final", V.Bool true
+                | v -> v) u.values in
+        with_length ~terminal:false
+            { u with values ; payload ; bits = payload ;
+                     upper = if bitstring_length payload = 0 then Nothing else Only N.Raw },
+        [ Driven ] in
+    let receive modes (u : unpacked) =
+        let frame = u, [ Manual ] in
+        if not (List.mem Driven modes) then [ frame ] else
+        let data = u.payload
+        and final = List.assoc "final" u.values = V.Bool true in
+        frame :: (
+            match List.assoc "opcode" u.values with
+            | V.Int 9 -> answer 10 data ; []
+            | V.Int 10 -> []
+            | V.Int 8 ->
+                if not !sent_close then answer 8 (ws_status data) ;
+                [ message u 8 data ]
+            | V.Int 0 ->
+                (match !fragments with
+                | None -> []
+                | Some (op, ds) when final ->
+                    fragments := None ;
+                    [ message u op (Bitstring.concat (List.rev (data :: ds))) ]
+                | Some (op, ds) -> fragments := Some (op, data :: ds) ; [])
+            | V.Int op when final -> [ message u op data ]
+            | V.Int op -> fragments := Some (op, [ data ]) ; []
+            | _ -> invalid_arg "Crafty_layers: a WebSocket opcode is not an int") in
+    { (manual (fun fields _ payload ->
         let opt name = Option.map (fun v -> name, v) (fields name) in
+        let opcode = ws_opcode fields in
+        if opcode = 8 then sent_close := true ;
         payload,
-        [ "opcode", V.Int (int_of ~def:2 fields "WebSocket" "opcode" 0 15) ] @
-        List.filter_map opt [ "final" ; "masked" ; "mask" ])
+        ("opcode", V.Int opcode) :: List.filter_map opt [ "final" ; "masked" ; "mask" ])) with
+      send = (fun fields _ payload -> active := true ; send (ws_opcode fields) payload) ;
+      receive ;
+      listen = (fun () -> active := true) ;
+      drive = (fun () -> active := true) }
 
 (** {2 Layers} *)
 
@@ -1653,13 +1718,13 @@ let http_request =
 
 (* A frame, whose payload is on top: *)
 let websocket =
-    layer N.WebSocket ~above:[ http ] ~ends:true ~default:"opcode" ~node:ws_node
+    layer N.WebSocket ~above:[ http ] ~driven:true ~ends:true ~default:"opcode" ~node:ws_node
           ~unpack:unpack_ws
           ~constants:(List.map (fun (n, c) -> n, Int c) [
               "WS_CONTINUATION", 0 ; "WS_TEXT", 1 ; "WS_BINARY", 2 ;
               "WS_CLOSE", 8 ; "WS_PING", 9 ; "WS_PONG", 10 ]) [
         field "final" Type.Bool ;
-        field "opcode" Type.Int ;
+        field "opcode" Type.Int ~set_in:both ~read_in:both ;
         field "masked" Type.Bool ;
         field "mask" Type.Int ]
 

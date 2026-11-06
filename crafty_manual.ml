@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 448735ca40b609828483591b13dd6c22) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 aa8d74def7e016ea4c18c4177dbf8cfe) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -368,8 +368,9 @@ layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 
 A packet matches in one mode only: a fragment `IP!`, a reassembled packet `IP`
 (or `IP6`); TCP data `TCP/Raw`, in order and once per chunk delivered, and each
-segment `TCP!`. A pattern matches a packet once, but for HTTP: each message or
-WebSocket frame matches.
+segment `TCP!`; a WebSocket message `WebSocket`, and each frame `WebSocket!`. A
+pattern matches a packet once, but for HTTP: each message or WebSocket frame
+matches.
 
 **`MATCH`** is the packet that matched, as an array of layers: `MATCH[IP].src`,
 `MATCH[Raw].data`, with paths as in conditions (`MATCH[/IP]`,
@@ -684,15 +685,18 @@ given: to an answer (but 1xx, 204 and 304), to a request with a body. Received,
 
 #### `WebSocket` (on `HTTP`)
 
--   `opcode`: int; set M; read M. Default field; default `WS_BINARY`. Constants
-    `WS_CONTINUATION`, `WS_TEXT`, `WS_BINARY`, `WS_CLOSE`, `WS_PING`, `WS_PONG`.
+-   `opcode`: int; set M, S; read M, S. Default field; default `WS_BINARY`.
+    Constants `WS_CONTINUATION`, `WS_TEXT`, `WS_BINARY`, `WS_CLOSE`, `WS_PING`,
+    `WS_PONG`.
 -   `final`: bool; set M; read M. Default true.
 -   `masked`: bool; set M; read M. Default: whether this side sent the request.
 -   `mask`: int; set M; read M. As on the wire (0 if not masked). Default:
     random.
 
-A frame; `Raw` on top is its payload, unmasked. Pings, closes and fragmented
-messages are the program's to handle.
+`Raw` on top is the payload, unmasked. `WebSocket!` is each frame, sent as
+given. `WebSocket` is each message, its fragments joined, and each close; once a
+self-driven stack or pattern uses the stream, it answers pings (which it does
+not show) and a close it did not send.
 
     /IP(dst=192.0.2.10)/TCP(dst=80)/HTTP {
       HttpRequest("/chat", headers=[{name: "Host", value: "example.com"},
