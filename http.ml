@@ -21,7 +21,6 @@
 open Batteries
 open Bitstring
 open Tools
-open Peg
 
 let debug = false
 
@@ -135,12 +134,6 @@ struct
         | Request (req, path) -> Printf.sprintf "%s %s HTTP/1.1" req (if String.length path <> 0 then path else "/")
         | Status c -> Printf.sprintf "HTTP/1.1 %d %s" c (text_of_code c)
 
-    (* An HTTP parser *)
-
-    type parse_item = [ `HttpRequest of string * string
-                      | `HttpResponse of int * string
-                      | `HttpHeaders of header list ]
-
     let make_request req path ?(body="") headers =
         { cmd = Request (req, path) ;
           headers = headers ;
@@ -152,112 +145,97 @@ struct
           headers = content_length :: headers ;
           body }
 
-    let parzer () =
-        let crlf = [ '\r'; '\n' ] in
-        let msg_of status_line headers body =
-            Option.Monad.bind (match status_line with
-                | `HttpRequest (cmd, url) -> Some (Request (String.uppercase cmd, url))
-                | `HttpResponse (code, _) -> Some (Status code)
-                | _ -> None) (fun cmd ->
-                    Some { cmd = cmd ;
-                           headers = headers ;
-                           body = String.of_list body }) in
-        let spaces () = several (item ' ') in
-        let non_spaces () = several (cond (fun c -> c <> ' ' && c <> '\r' && c <> '\n')) in
-        let http_version () =
-            seq [ item 'H' ; item 'T' ; item 'T' ; item 'P' ; item '/' ;
-                  numeric () ; item '.' ; numeric () ] in
-        let request_line () =
-            map (seqf [ some (map (non_spaces ()) String.of_list) ;
-                        none (spaces ()) ;
-                        some (map (non_spaces ()) String.of_list) ;
-                        none (spaces ()) ;
-                        none (http_version ()) ;
-                        none (Peg.crlf ()) ]) (function
-                    | [c;u] -> `HttpRequest (c, u)
-                    | _ -> should_not_happen ())
-        and status_line () =
-            map (seqf [ none (http_version ()) ;
-                        none (spaces ()) ;
-                        some (map (several (numeric ())) String.of_list) ;
-                        none (spaces ()) ;
-                        some (map (many (cond (fun c -> c <> '\r'))) String.of_list) ;
-                        none (Peg.crlf ()) ]) (function
-                    | [s;m] ->
-                        if debug then Printf.printf "Http: got response %s, %s\n" s m ;
-                        `HttpResponse (int_of_string s, m)
-                    | _ -> should_not_happen ()) in
-        let start_line () =
-            either [ request_line () ; status_line () ] in
-        let header () =
-            map (seqf [ some (map (several (cond (fun c -> c <> ':' && c <> '\r' && c <> '\n'))) String.of_list) ;
-                        none (item ':') ;
-                        none (spaces ()) ;
-                        some (map (upto ['\r' ; '\n']) (fun l ->
-                            String.strip ~chars:"\t\r\n " (String.of_list l))) ]) (function
-                    | [f;v] ->
-                        if debug then Printf.printf "Http: Got header %s, %s\n" f v ;
-                        f, v
-                    | _ -> should_not_happen ()) in
-        let headers () = map (many (header ())) (fun hs ->
-            if debug then Printf.printf "Http: got headers\n" ;
-            `HttpHeaders hs) in
-        let chunk_header () = map (upto crlf) (fun l ->
-            let str = String.of_list l in
-            let str = String.strip ~chars:" \t\r\n" str in
-            if debug then Printf.printf "Http: got a chunk of size %s\n" str ;
-            Option.default 0 (int_of_hexstring str)) in
-        let chunk () =
-            map (seq [ bind (chunk_header ()) take ;
-                       Peg.crlf () ]) (fun x ->
-                    if debug then Printf.printf "Http: chunk completed\n" ;
-                    List.hd x) in
-        let chunks () =
-            map (repeat_until List.is_empty (chunk ())) (fun x ->
-                if debug then Printf.printf "Http: got all chunks\n" ;
-                List.concat x) in
-        let body () = function
-            | [ start ; `HttpHeaders hs ] ->
-                (* "Any response message which "MUST NOT" include a message-body (such as the 1xx,
-                   204, and 304 responses and any response to a HEAD request) is always terminated
-                   by the first empty line after the header fields, regardless of the entity-header
-                   fields present in the message."
-                    - http://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.4.
-                   TODO: for responses to HEAD, we do not handle this case yet. *)
-                let body_parser = (match start with
-                    | `HttpResponse (code, _) when (code >= 100 && code <= 199) || code = 204 || code = 304 ->
-                        if debug then Printf.printf "Http: msg required to have no body\n" ;
-                        return []
-                    | _ -> (match headers_find "Transfer-Encoding" hs with
-                        (* FIXME: when te _contains_ "chunked"? *)
-                        | Some te when String.icompare te "chunked" = 0 ->
-                            if debug then Printf.printf "Http: msg chunked\n" ;
-                            chunks ()
-                        | _ -> (match headers_find "Content-Length" hs with
-                            | Some cl ->
-                                let cl = int_of_string cl in
-                                if debug then Printf.printf "Http: msg of size %d\n" cl ;
-                                take cl
-                            | _ ->
-                                (match start with
-                                | `HttpRequest _ ->
-                                    (* A request with neither Transfer-Encoding
-                                     * nor Content-Length has no body at all
-                                     * (RFC 7230 3.3.3). Only a response may be
-                                     * delimited by the end of the connection,
-                                     * so waiting for more data here would hang
-                                     * every bodyless GET, DELETE, HEAD... *)
-                                    if debug then Printf.printf "Http: request has no body\n" ;
-                                    return []
-                                | _ ->
-                                    if debug then Printf.printf "Http: msg up to end of data\n" ;
-                                    all ())))) in
-                map_filter body_parser (msg_of start hs)
-            | _ -> should_not_happen () in
-        bind (seqf [ none (many (Peg.crlf ())) ;
-                     some (start_line ()) ;
-                     some (headers ());
-                     none (Peg.crlf ()) ]) (body ())
+    (* What the beginning of a buffer holds: *)
+    type parsed =
+        | Parsed of t * int (* the message and how many bytes it took *)
+        | Truncated of int  (* the buffer length below which parsing again is useless *)
+        | Not_http
+
+    exception Need of int
+    exception Bad
+
+    let is_version v =
+        String.length v = 8 && String.starts_with v "HTTP/" &&
+        Char.is_digit v.[5] && v.[6] = '.' && Char.is_digit v.[7]
+
+    let cmd_of_line l =
+        match List.filter ((<>) "") (String.split_on_char ' ' l) with
+        | [ meth ; url ; v ] when is_version v ->
+            Request (String.uppercase_ascii meth, url)
+        | v :: code :: _ when is_version v && String.length code = 3 &&
+                              String.for_all Char.is_digit code ->
+            Status (int_of_string code)
+        | _ -> raise Bad
+
+    let header_of_line l =
+        match String.index_opt l ':' with
+        | Some k when k > 0 ->
+            String.sub l 0 k,
+            String.strip ~chars:" \t" (String.sub l (k + 1) (String.length l - k - 1))
+        | _ -> raise Bad
+
+    (** Parse the message at the beginning of [s]. [eof] tells that nothing
+        will follow [s], which ends a body that has no explicit length. *)
+    let parse s eof =
+        let len = String.length s in
+        let need n = if len < n then raise (Need n) in
+        (* Position of the CRLF ending the line starting at [i]: *)
+        let eol i =
+            try String.find_from s i "\r\n"
+            with Not_found -> raise (Need (len + 1)) in
+        let line i j = String.sub s i (j - i) in
+        let rec skip_crlfs i =
+            if i + 1 < len && s.[i] = '\r' && s.[i + 1] = '\n' then skip_crlfs (i + 2)
+            else i in
+        let rec headers hs i =
+            let j = eol i in
+            if j = i then List.rev hs, i + 2
+            else headers (header_of_line (line i j) :: hs) (j + 2) in
+        let rec chunks buf i =
+            let j = eol i in
+            (* Chunk extensions, after ';', are ignored *)
+            let size = String.strip (List.hd (String.split_on_char ';' (line i j))) in
+            let n = match int_of_string_opt ("0x" ^ size) with
+                | Some n when n >= 0 -> n
+                | _ -> raise Bad in
+            let i = j + 2 in
+            need (i + n + 2) ;
+            if s.[i + n] <> '\r' || s.[i + n + 1] <> '\n' then raise Bad ;
+            Stdlib.Buffer.add_substring buf s i n ;
+            if n = 0 then Stdlib.Buffer.contents buf, i + 2
+            else chunks buf (i + n + 2) in
+        try
+            let i = skip_crlfs 0 in
+            let j = eol i in
+            let cmd = cmd_of_line (line i j) in
+            let headers, i = headers [] (j + 2) in
+            let body, stop =
+                match cmd with
+                | Status c when (c >= 100 && c <= 199) || c = 204 || c = 304 ->
+                    (* TODO: so is the response to a HEAD *)
+                    "", i
+                | _ ->
+                    (* FIXME: when Transfer-Encoding _contains_ "chunked"? *)
+                    match headers_find "Transfer-Encoding" headers,
+                          headers_find "Content-Length" headers, cmd with
+                    | Some te, _, _ when String.icompare te "chunked" = 0 ->
+                        chunks (Stdlib.Buffer.create 4096) i
+                    | _, Some cl, _ ->
+                        let n = match int_of_string_opt (String.trim cl) with
+                            | Some n when n >= 0 -> n
+                            | _ -> raise Bad in
+                        need (i + n) ;
+                        String.sub s i n, i + n
+                    | _, _, Request _ ->
+                        (* Only a response can be delimited by the end of the connection
+                           (RFC 7230 3.3.3) *)
+                        "", i
+                    | _ ->
+                        if eof then String.sub s i (len - i), len
+                        else raise (Need max_int) in
+            Parsed ({ cmd ; headers ; body }, stop)
+        with Need n -> Truncated n
+           | Bad -> Not_http
 
     let pack { cmd = cmd ; headers = headers ; body = body } =
         bitstring_of_string (
@@ -266,13 +244,12 @@ struct
             body)
 
     let unpack bits =
-        let str = string_of_bitstring bits
-        and p = parzer () in
-        match p (String.to_list str) false with
-            | Res (msg, []) -> Ok msg
-            | Wait          -> Error "Http: unpack: Cannot unpack (truncated?)"
-            | Fail          -> Error "Http: unpack: not HTTP"
-            | Res (_, l)    -> Error (Printf.sprintf "Http: unpack: %d bytes left" (List.length l))
+        let str = string_of_bitstring bits in
+        match parse str true with
+            | Parsed (msg, n) when n = String.length str -> Ok msg
+            | Parsed (_, n) -> Error (Printf.sprintf "Http: unpack: %d bytes left" (String.length str - n))
+            | Truncated _ -> Error "Http: unpack: Cannot unpack (truncated?)"
+            | Not_http -> Error "Http: unpack: not HTTP"
 end
 
 
@@ -285,7 +262,8 @@ struct
     type result =
         | HttpError of string
         | HttpMsg of Pdu.t * bool (* tells whether the underlying transport is still open *)
-    type t = { parzer  : (Pdu.t, char) parzer ; (* The parser we use for reconstructing the PDU *)
+    type t = { pending : Stdlib.Buffer.t ; (* received bytes not yet part of a message *)
+               mutable wanted : int ; (* no message before [pending] is that long *)
                mutable emit : bitstring -> unit ;
                mutable emit_busy_for : unit -> Clock.Interval.t ;
                mutable recv : result -> unit }
@@ -299,7 +277,7 @@ struct
     let set_recv t recv = t.recv <- recv
 
     let make () =
-        { parzer = Pdu.parzer () ;
+        { pending = Stdlib.Buffer.create 4096 ; wanted = 0 ;
           emit = ignore ; emit_busy_for = never_busy ; recv = ignore }
 
     let tx t pdu =
@@ -307,23 +285,30 @@ struct
         if debug then Printf.printf "Http: sending '%s'\n%!" (abbrev ~len:100 (string_of_bitstring pdu)) ;
         t.emit pdu
 
-    let rec rx t bits =
-        let str = string_of_bitstring bits in
-        if debug then Printf.printf "Http: have to parse %d bytes\n" (String.length str) ;
-        let items = String.to_list str in
-        (match t.parzer items (not (bitstring_is_empty bits)) with
-            | Fail ->
-                if debug then Printf.printf "Http: Cannot parse as HTTP : '%s'\n" (string_of_bitstring bits) ;
-                (* Close the socket since we lost the cursor *)
-                t.recv (HttpError "Cannot parse as HTTP")
-            | Wait ->
-                if debug then Printf.printf "Http:...wait\n" (* except if bits = empty_bitstring maybe? *)
-            | Res (res, rem) ->
-                if debug then Printf.printf "Http:...got a result\n" ;
-                t.recv (HttpMsg (res, not (bitstring_is_empty bits))) ;
-                if rem <> [] then (
-                    rx t (bitstring_of_string (String.of_list rem))
-                ))
+    (* An empty [bits] tells the transport is closed. *)
+    let rx t bits =
+        let eof = bitstring_is_empty bits in
+        Stdlib.Buffer.add_string t.pending (string_of_bitstring bits) ;
+        let error msg =
+            Stdlib.Buffer.clear t.pending ;
+            t.wanted <- 0 ;
+            t.recv (HttpError msg) in
+        let rec parse () =
+            let str = Stdlib.Buffer.contents t.pending in
+            match Pdu.parse str eof with
+            | Pdu.Not_http ->
+                if debug then Printf.printf "Http: Cannot parse as HTTP: '%s'\n" (abbrev str) ;
+                error "Cannot parse as HTTP"
+            | Pdu.Truncated n ->
+                if eof then error "Truncated HTTP message"
+                else t.wanted <- n
+            | Pdu.Parsed (msg, n) ->
+                Stdlib.Buffer.clear t.pending ;
+                Stdlib.Buffer.add_substring t.pending str n (String.length str - n) ;
+                t.wanted <- 0 ;
+                t.recv (HttpMsg (msg, not eof)) ;
+                if Stdlib.Buffer.length t.pending > 0 then parse () in
+        if eof || Stdlib.Buffer.length t.pending >= t.wanted then parse ()
 end
 
 

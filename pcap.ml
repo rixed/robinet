@@ -793,12 +793,10 @@ module Library = struct
 
     (* The largest file the library will take in one upload.
      *
-     * Not a disk limit but a memory one, and a low one for that reason: a
-     * request is parsed by the simulated HTTP stack (see [Http.Pdu.parzer]),
-     * which holds the body as a list of characters while it does so -- some
-     * forty bytes of heap per byte of file, briefly. Eight megabytes of
-     * capture is already a third of a gigabyte of parsing, and a capture worth
-     * replaying into a simulated network is rarely near that.
+     * Not a disk limit but a memory one: the simulated HTTP stack (see
+     * [Http.TRXtop.rx]) holds the whole request, a few copies of it briefly,
+     * and a capture worth replaying into a simulated network is rarely near
+     * eight megabytes.
      *
      * A ref, so that a program that knows what it is doing can raise it. *)
     let max_upload = ref (8 * 1024 * 1024)
