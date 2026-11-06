@@ -565,7 +565,8 @@ that interface is reported with the product of the router's probability and
 the interface's, after the sum of both delays.
 
 A router's interface with an IPv6 address also has a link-local one, from its
-MAC as a host's. With `router advertisements`, off unless set, it advertises
+MAC as a host's. Its neighbor advertisements say it is a router, without
+which a host would drop it from its default routers. With `router advertisements`, off unless set, it advertises
 from it the IPv6 prefixes on its link — those of its addresses, and those
 routed out of it without a `via` that hold one of them — autonomous if /64,
 with its MTU and `router lifetime` (0…9000 seconds, 1800 unless set; 0 is not

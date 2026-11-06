@@ -875,6 +875,9 @@ struct
           (* IPv6 multicast groups joined beside all-nodes and the
            * solicited-node ones: *)
           mutable groups : Ip.Addr.t list ;
+          (* Whether its neighbor advertisements say it is a router, which
+           * a host otherwise removes from its default routers: *)
+          mutable is_router : bool ;
           mutable promisc : (bitstring -> unit) option ;
           rx_otherhost_dropped : Metric.Counter.t ;
           mutable do_proxy_arp : Arp.Pdu.t -> bool ;
@@ -1037,7 +1040,8 @@ struct
                 Arp.Pdu.pack |>
                 emit Proto.arp Addr.broadcast
             else
-                Icmp6.Pdu.make_neighbor_advert ~tgt_lla:(Ndp.lla t.mac)
+                Icmp6.Pdu.make_neighbor_advert ~router:t.is_router
+                    ~tgt_lla:(Ndp.lla t.mac)
                     (Ip.Addr.of_bitstring my_addr.addr) |>
                 Ndp.packet my_addr.addr Ndp.all_nodes |>
                 emit Proto.ip6 Ndp.all_nodes_mac
@@ -1110,7 +1114,8 @@ struct
             neighbors = BitHash.create 3 ;
             confirmed = BitHash.create 3 ;
             neighbor_timeout = Some 60. ;
-            postponed = BitHash.create 3 ; unresolved = ignore } in
+            postponed = BitHash.create 3 ; unresolved = ignore ;
+            is_router = false } in
         (* Enrich the underlying dumb adapter with more properties: *)
         Widget.add_properties iface.widget Widget.[
             property "MAC" ~kind:String ~descr:"MAC address."
@@ -1455,8 +1460,8 @@ struct
                 let dst, dst_hw =
                     if from_dad then Ndp.all_nodes, Ndp.all_nodes_mac
                     else ip.src, src_hw in
-                Icmp6.Pdu.make_neighbor_advert ~solicited:(not from_dad)
-                    ~tgt_lla:(Ndp.lla st.mac) target |>
+                Icmp6.Pdu.make_neighbor_advert ~router:st.is_router
+                    ~solicited:(not from_dad) ~tgt_lla:(Ndp.lla st.mac) target |>
                 Ndp.packet target_bits dst |>
                 send ~control:true st Proto.ip6 dst_hw)
         | Neighbor_advert { target ; solicited ; options ; _ } ->

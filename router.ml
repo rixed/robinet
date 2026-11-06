@@ -971,6 +971,7 @@ let iface_make ?speeds ?mtu ?delay ?loss ?inter_frame_gap
                        ?can_forward_after ?mac ?my_addresses ~name
                        ~parent () in
     eth.groups <- [ Eth.Ndp.all_routers ] ;
+    eth.is_router <- true ;
     let trx = Eth.TRX.make eth in
     let iface =
         { trx ; eth ; admin_host = None ; link_fragmentation ;
@@ -1525,6 +1526,20 @@ let make_from_addrs
     send (a "2001:db8:2::9") ;
     out.(1) <- [] ;
     assert_equal (Some (1, 3, 0)) (error ()) ;
+    (* Its neighbor advertisements say it is a router: *)
+    Array.fill out 0 2 [] ;
+    Icmp6.Pdu.make_neighbor_solicit ~src_lla:(Eth.Ndp.lla (Eth.Addr.random ()))
+                                    (a "2001:db8:1::fe") |>
+    Eth.Ndp.packet (Ip.Addr.to_bitstring src) (a "2001:db8:1::fe") |>
+    Eth.Pdu.make Arp.HwProto.ip6 (Eth.Addr.random ()) macs.(0) |>
+    Eth.Pdu.pack |>
+    Simulation.delay sim.root.power (Clock.Interval.msec 1.)
+                     r.ifaces.(0).trx.out.write ;
+    Simulation.run sim false ;
+    assert_bool "advertised as a router" (List.exists (fun ip ->
+        match Icmp6.Pdu.unpack (ip.Ip6.Pdu.payload :> bitstring) with
+        | Ok { payload = Neighbor_advert { router ; _ } ; _ } -> router
+        | _ -> false) out.(0)) ;
     send (a "ff02::1") ;
     "link-scoped destination" @? nothing () ;
     send ~src:(a "fe80::1") dst ;
