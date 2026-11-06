@@ -1559,8 +1559,9 @@ module TRX = struct
         power : Simulation.power ;
         src : Addr.t ; dst : Addr.t ;
         proto : Proto.t ;
-        (* Fragment if the packet is larger than that (set to max_int to disable fragmentation: *)
-        mtu : int ;
+        (* Fragment if the packet is larger than that (set to max_int to
+         * disable fragmentation). See [set_mtu]. *)
+        mutable mtu : int ;
         (* Set the DF bit of emitted packets (and fragments!) to this value,
          * unless [tx] is told otherwise: *)
         dont_frag : bool ;
@@ -1590,6 +1591,15 @@ module TRX = struct
 
     let check_options options =
         ensure (options_len options <= Pdu.Opt.max_len) "Ip: options must fit in 40 bytes"
+
+    let check_mtu options mtu =
+        ensure (mtu >= Pdu.no_opt_hdr_len + options_len options + 8)
+            "Ip: MTU must leave room for at least 8 bytes of payload"
+
+    (* Applies from the next packet [tx] is given: *)
+    let set_mtu t mtu =
+        check_mtu t.options mtu ;
+        t.mtu <- mtu
 
     (* Raises Invalid_argument if the MTU leaves no room for 8 bytes of
      * payload after the options: *)
@@ -1716,8 +1726,7 @@ module TRX = struct
                ?(tos=ToS.o 0) ?(ttl=64) ?(options=[]) ?(next_id=Pdu.next_id)
                ?(counters=make_counters ()) src dst proto logger =
         check_options options ;
-        ensure (mtu >= Pdu.no_opt_hdr_len + options_len options + 8)
-            "Ip: MTU must leave room for at least 8 bytes of payload" ;
+        check_mtu options mtu ;
         { logger ; power ; src ; dst ; proto ; mtu ; dont_frag ; reassemble ;
           tos ; ttl ; options ; next_id ;
           emit = ignore_bits ~logger ; emit_busy_for = never_busy ;
@@ -1827,6 +1836,18 @@ module TRX = struct
       [ msg ] (receive (Pdu.fragment 36 with_opts))
       [ msg ] (receive (Pdu.fragment 40 with_opts))
       (receive (frags_of ~mtu:1500 udp_wants_chk)) (receive (frags_of udp_wants_chk))
+    *)
+    (*$T set_mtu
+      let t = create sim.root.power a b Proto.udp sim.root.logger in \
+      let sizes () = \
+        let out = ref [] in \
+        (trx_of t).out --> sink (fun bits -> out := Tools.bytelength bits :: !out) ; \
+        tx t (Bitstring.bitstring_of_string msg) ; \
+        Simulation.run sim false ; \
+        List.rev !out in \
+      let before = sizes () in \
+      set_mtu t 36 ; \
+      before = [ 60 ] && sizes () = [ 36 ; 36 ; 28 ]
     *)
     (*$R
       (* Fragments [d] apart, and the counters of

@@ -1013,8 +1013,9 @@ module TRX = struct
                power : Simulation.power ;
                src : Ip.Addr.t ; dst : Ip.Addr.t ;
                proto : Ip.Proto.t ;
-               (* Hosts do not fragment: a larger packet is dropped. *)
-               mtu : int ;
+               (* Hosts do not fragment: a larger packet is dropped. See
+                * [set_mtu]. *)
+               mutable mtu : int ;
                (* The traffic class, as [Ip.TRX]'s type of service, and the
                 * hop limit of all emitted packets unless [tx] is told
                 * otherwise: *)
@@ -1024,6 +1025,14 @@ module TRX = struct
                mutable emit_busy_for : unit -> Clock.Interval.t ;
                mutable recv : bitstring -> unit ;
                mutable recv_busy_for : unit -> Clock.Interval.t }
+
+    let check_mtu mtu =
+        ensure (mtu >= 1280) "Ip6: MTU must be at least 1280 bytes"
+
+    (* Applies from the next packet [tx] is given: *)
+    let set_mtu t mtu =
+        check_mtu mtu ;
+        t.mtu <- mtu
 
     let tx ?tos ?ttl t bits =
         let tos = (tos |? t.tos :> int) and ttl = ttl |? t.ttl in
@@ -1059,7 +1068,7 @@ module TRX = struct
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
     let create power ?(mtu=1500) ?(tos=Ip.ToS.o 0) ?(ttl=64) src dst proto logger =
-        ensure (mtu >= 1280) "Ip6: MTU must be at least 1280 bytes" ;
+        check_mtu mtu ;
         { logger ; power ; src ; dst ; proto ; mtu ; tos ; ttl ;
           emit = ignore_bits ~logger ; emit_busy_for = never_busy ;
           recv = ignore_bits ~logger ; recv_busy_for = never_busy }
@@ -1104,6 +1113,18 @@ module TRX = struct
       | _ -> false
       emitted (1500 - 40) |> List.length = 1
       emitted (1500 - 39) = []
+    *)
+    (*$T set_mtu
+      let t = create sim.root.power a b Ip.Proto.udp sim.root.logger in \
+      let count () = \
+        let out = ref 0 in \
+        (trx_of t).out --> sink (fun _ -> incr out) ; \
+        tx t (randbs (1300 - 40)) ; \
+        Simulation.run sim false ; \
+        !out in \
+      let before = count () in \
+      set_mtu t 1280 ; \
+      before = 1 && count () = 0
     *)
     (*$T received
       received [ Pdu.make Ip.Proto.udp a b (Bitstring.bitstring_of_string "x") ; \
