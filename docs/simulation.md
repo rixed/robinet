@@ -527,6 +527,9 @@ not to fragment it. One that is not fragmented, either way, is dropped and
 reported with an ICMP *fragmentation needed* giving that MTU — as the router's
 `errors probability` allows, which at 0 makes it a silent black hole. An IPv6
 packet is never fragmented, and is reported with an ICMPv6 *packet too big*.
+A packet whose next hop does not answer three ARP requests or neighbor
+solicitations, a second apart, is dropped and reported with an ICMP *host
+unreachable*, or an ICMPv6 *address unreachable*.
 
 IPv6 is routed as IPv4 is, its hop limit standing for the TTL and its errors
 reported with ICMPv6, except for link-local addresses and link-scoped

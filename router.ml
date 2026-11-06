@@ -529,6 +529,7 @@ let unwelcome t (ip : Ip6.Pdu.t) =
 (* The errors a router reports: *)
 type error =
     | No_route
+    | Unresolved (* no neighbor answered for the next hop *)
     | Expired
     | Too_big of int (* the MTU of the next hop *)
 
@@ -701,7 +702,8 @@ let rec maybe_send_icmp t n p err =
                 | V4 ip ->
                     let icmp =
                         match err with
-                        | No_route -> Icmp.Pdu.make_host_unreachable ip
+                        | No_route | Unresolved ->
+                            Icmp.Pdu.make_host_unreachable ip
                         | Expired -> Icmp.Pdu.make_ttl_expired_in_transit ip
                         | Too_big mtu ->
                             Icmp.(Pdu.make_destination_unreachable
@@ -716,6 +718,9 @@ let rec maybe_send_icmp t n p err =
                         | No_route ->
                             Icmp6.(Pdu.make_destination_unreachable
                                 Unreachable.no_route ip)
+                        | Unresolved ->
+                            Icmp6.(Pdu.make_destination_unreachable
+                                Unreachable.address ip)
                         | Expired -> Icmp6.Pdu.make_hop_limit_exceeded ip
                         | Too_big mtu -> Icmp6.Pdu.make_packet_too_big mtu ip in
                     Icmp6.Pdu.pack icmp |>
@@ -779,6 +784,12 @@ and route in_iface_opt t bits =
                             let len = Eth.Pdu.header_length + bytelength bits in
                             if buffer_alloc t out_iface len then (
                                 iface.eth.via <- via ;
+                                (match in_iface_opt, p_opt with
+                                | Some n, Some p ->
+                                    iface.eth.unresolved <- (fun () ->
+                                        maybe_send_icmp t n p Unresolved)
+                                | _ ->
+                                    iface.eth.unresolved <- ignore) ;
                                 tx iface.trx bits
                             )
                         ) frags
@@ -1501,6 +1512,10 @@ let make_from_addrs
     assert_equal (Some (1, 0, 0)) (error ()) ;
     send ~len:1500 dst ;
     assert_equal (Some (2, 0, 1500)) (error ()) ;
+    (* Solicited in vain on the far side, then reported: *)
+    send (a "2001:db8:2::9") ;
+    out.(1) <- [] ;
+    assert_equal (Some (1, 3, 0)) (error ()) ;
     send (a "ff02::1") ;
     "link-scoped destination" @? nothing () ;
     send ~src:(a "fe80::1") dst ;

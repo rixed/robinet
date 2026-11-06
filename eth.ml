@@ -895,9 +895,12 @@ struct
            * without one are kept: *)
           confirmed : Time.t BitHash.t ;
           mutable neighbor_timeout : float option ;
-          (* Hash of messages waiting for a neighbor resolution.
-           * dest_proto_addr -> msg *)
-          postponed : bitstring BitHash.t ;
+          (* Messages waiting for a neighbor resolution, each with what to
+           * do if it is given up on. dest_proto_addr -> (msg, drop) *)
+          postponed : (bitstring * (unit -> unit)) BitHash.t ;
+          (* What to do if the next message sent is given up on, which
+           * routers set for every packet, as [via]: *)
+          mutable unresolved : unit -> unit ;
           (* TODO: a gauge for how many packets are postponed *)
           (* Optional average delay to add to transmissions: *)
           mutable delay : Interval.t ;
@@ -1015,6 +1018,7 @@ struct
         BitHash.clear t.postponed ;
         t.tentative <- [] ;
         t.via <- None ;
+        t.unresolved <- ignore ;
         Iface.reset t.iface
 
     (** Announce every address of this adapter: an ARP request asking for
@@ -1106,7 +1110,7 @@ struct
             neighbors = BitHash.create 3 ;
             confirmed = BitHash.create 3 ;
             neighbor_timeout = Some 60. ;
-            postponed = BitHash.create 3 } in
+            postponed = BitHash.create 3 ; unresolved = ignore } in
         (* Enrich the underlying dumb adapter with more properties: *)
         Widget.add_properties iface.widget Widget.[
             property "MAC" ~kind:String ~descr:"MAC address."
@@ -1267,10 +1271,10 @@ struct
             send ~control:true st Proto.ip6 (Addr.of_ip6_multicast group)
     (* Asks again while unanswered, then gives up on the address, dropping what
      * waited for it, so that the next frame for it asks anew: *)
-    let resolve_proto_addr (st : State.t) bits sender_proto_addr target_proto_addr =
+    let resolve_proto_addr (st : State.t) msg sender_proto_addr target_proto_addr =
         (* Add the msg to postponed messages _before_ sending the query *)
         Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Postponing a msg for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
-        BitHash.add st.postponed target_proto_addr bits ;
+        BitHash.add st.postponed target_proto_addr msg ;
         let rec ask n =
             solicit st sender_proto_addr target_proto_addr ;
             Simulation.delay st.iface.widget.power retrans_time (fun () ->
@@ -1279,7 +1283,9 @@ struct
                 | Some None ->
                     Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "No answer for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
                     BitHash.remove_all st.neighbors target_proto_addr ;
-                    BitHash.remove_all st.postponed target_proto_addr
+                    let dropped = List.rev (BitHash.find_all st.postponed target_proto_addr) in
+                    BitHash.remove_all st.postponed target_proto_addr ;
+                    List.iter (fun (_, drop) -> drop ()) dropped
                 | _ -> ()) () in
         ask 1
 
@@ -1307,7 +1313,7 @@ struct
                 | [] -> zeroes_bitstring len))
 
     (* [target_ip] may be a view on [bits]: what is kept of it is a copy. *)
-    let resolve (st : State.t) bits target_ip =
+    let resolve (st : State.t) msg target_ip =
         match Option.get (BitHash.find st.neighbors target_ip) with
         | dst ->
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "found HW addr for '%s' in the neighbor cache" (hexstring_of_bitstring target_ip)))) ;
@@ -1316,19 +1322,20 @@ struct
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Cannot find HW addr for '%s' in the neighbor cache" (hexstring_of_bitstring target_ip)))) ;
             let target_ip = concat [ target_ip ] in
             BitHash.add st.neighbors target_ip None ;
-            resolve_proto_addr st bits (sender_for st target_ip) target_ip ;
+            resolve_proto_addr st msg (sender_for st target_ip) target_ip ;
             Postponed
         | exception Invalid_argument _ ->
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "HW addr for '%s' is still resolving" (hexstring_of_bitstring target_ip)))) ;
             (* Every frame waiting on that address, and not merely the one that
              * asked for it: they all leave together when the reply comes (see
              * [learn]). *)
-            BitHash.add st.postponed (concat [ target_ip ]) bits ;
+            BitHash.add st.postponed (concat [ target_ip ]) msg ;
             Postponed
 
     let broadcast_bits = Ip.Addr.(to_bitstring broadcast)
 
-    let dst_for (st : State.t) bits =
+    let dst_for (st : State.t) ?(drop=ignore) bits =
+        let msg = bits, drop in
         match Pdu.extract_dst_proto (proto_of bits) bits with
         | Ok dst when bits_equal dst broadcast_bits ->
             Ok (Dst Addr.broadcast)
@@ -1339,30 +1346,32 @@ struct
                       (bitstring_length dst = 128 &&
                        Ip.Addr.is_link_local (Ip.Addr.of_bitstring dst)) ->
             Log.(log st.iface.widget.logger Debug (lazy "Same network as me, sending directly")) ;
-            Ok (resolve st bits dst) (* FIXME: should also tell us which source address to use *)
+            Ok (resolve st msg dst) (* FIXME: should also tell us which source address to use *)
         | Ok dst ->
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf2 "Not on my LAN (my addresses = %a)" (List.print State.print_my_address) st.my_addresses))) ;
             (match gw_for_ip st (Ip.Addr.of_bitstring dst) with
             | None ->
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "No GW, resolving directly"))) ;
-                Ok (resolve st bits dst)
+                Ok (resolve st msg dst)
             | Some (Mac addr) ->
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Using GW MAC %s" (Addr.to_string addr)))) ;
                 Ok (Dst addr)
             | Some (Ip ip)  ->
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Using GW IP %s" (Ip.Addr.to_string ip)))) ;
-                Ok (resolve st bits (Ip.Addr.to_bitstring ip)))
+                Ok (resolve st msg (Ip.Addr.to_bitstring ip)))
         | Error s ->
             Error (lazy ("Cannot extract dest IP: "^ Lazy.force s))
 
     (** Transmit function. [tx t payload] sends the IP packet [payload], as
      * IPv4 or IPv6 according to its version. *)
     let tx (st : State.t) bits =
+        let drop = st.unresolved in
+        st.unresolved <- ignore ;
         Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "TX a payload of %d bytes (while MTU=%d)" (bytelength bits) st.mtu))) ;
         if bytelength bits > st.mtu then
             Log.(log st.iface.widget.logger Warning (lazy (Printf.sprintf "Dropping a frame larger than MTU (%d > %d)" (bytelength bits) st.mtu)))
         else
-            match dst_for st bits with
+            match dst_for st ~drop bits with
             | Ok (Dst dst) -> send st (proto_of bits) dst bits
             | Ok Postponed -> Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...postponed")))
             | Error s -> Log.(log st.iface.widget.logger Debug s)
@@ -1377,7 +1386,7 @@ struct
             State.confirm_neighbor st (concat [ ip ]) hw) ;
         let waiting = List.rev (BitHash.find_all st.postponed ip) in
         BitHash.remove_all st.postponed ip ;
-        List.iter (fun msg -> send st (proto_of msg) hw msg) waiting
+        List.iter (fun (msg, _) -> send st (proto_of msg) hw msg) waiting
 
     let is_mine (st : State.t) ip =
         List.exists (fun my_addr -> bits_equal ip my_addr.State.addr) st.my_addresses
