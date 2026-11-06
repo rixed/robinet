@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 fbfdcb3ec4fd36e7da636e767a6060c7) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 2d88755fa0e8160d99645c71db4a96ce) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -363,9 +363,9 @@ layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 -   The fields that can be read depend on the mode (see [Layers](#layers)): a
     self-driven `TCP` shows its ports, a manual `TCP!` each segment's header.
 
-A packet matches in one mode only: a fragment `IP!`, a reassembled packet `IP`;
-TCP data `TCP/Raw`, in order and once per chunk delivered, and each segment
-`TCP!`.
+A packet matches in one mode only: a fragment `IP!`, a reassembled packet `IP`
+(or `IP6`); TCP data `TCP/Raw`, in order and once per chunk delivered, and each
+segment `TCP!`.
 
 **`MATCH`** is the packet that matched, as an array of layers: `MATCH[IP].src`,
 `MATCH[Raw].data`, with paths as in conditions (`MATCH[/IP]`,
@@ -438,9 +438,10 @@ what their engine computes (checksums).
     `min_rtt`, `rtt_samples`, `rto`, `snd_mss`, `rcv_mss`, `cwnd`, `ssthresh`
     (2\^31-1 before any loss), `snd_wnd` (the peer's window), `rcv_wnd`,
     `snd_wscale` and `rcv_wscale` (the window shifts the peer and we offered, -1
-    if none; scaling is on only if both offered one) and `established`. An IP
-    stream adds `fragmented` (packets sent in fragments), `frags_out`,
-    `frags_in`, `reassembled` and `reasm_timeouts` (incomplete after 30s).
+    if none; scaling is on only if both offered one) and `established`. An IP or
+    IP6 stream adds `fragmented` (packets sent in fragments), `frags_out`,
+    `frags_in`, `reassembled` and `reasm_timeouts` (incomplete after 30s, or 60s
+    for IP6).
 -   `getenv(name, default=s)`: fails if unset and no default.
 -   `arg(n, default=s)`: the n-th argument after the program, from 0; fails if
     missing and no default. `nargs()`: how many there are.
@@ -524,8 +525,7 @@ connection. `IP!` sends the header as given, but for the checksum.
 -   `flow_label`: int; set M; read M, S. Default 0.
 -   `is_fragment`: bool; read M.
 
-Self-driven, a packet over the MTU is an error. Fragments received are seen by
-`IP6!` only, there being no reassembly.
+Self-driven IP6 fragments to the MTU and reassembles, as `IP`.
 
 #### `TCP`
 

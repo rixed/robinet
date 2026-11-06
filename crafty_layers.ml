@@ -339,6 +339,12 @@ let pack_ip next_id fields hints payload =
         (ip_of ~v6:false fields "IP" "src") (ip_of ~v6:false fields "IP" "dst") payload |>
     Ip.Pdu.pack, [ "proto", V.Int ip4 ]
 
+(* What IP and IP6 streams tell of their fragments: *)
+let frag_stats (c : Ip.TRX.counters) =
+    [ "fragmented", V.Int c.fragmented ; "frags_out", V.Int c.frags_out ;
+      "frags_in", V.Int c.frags_in ; "reassembled", V.Int c.reassembled ;
+      "reasm_timeouts", V.Int c.reasm_timeouts ]
+
 (* Both modes share the ids. A self-driven IP has a TRX per protocol. The
  * fragments received are seen in manual mode, and reassembled for the
  * self-driven mode, which sees the whole packet once complete: *)
@@ -389,11 +395,7 @@ let ip_node ctx =
                   ?ttl:(opt_int fields "ttl" 0 0xff)
                   ?dont_frag:(opt_bool fields "dont_frag") ~options t payload) ;
       receive ;
-      stats = (fun () ->
-        let c = counters in
-        [ "fragmented", V.Int c.fragmented ; "frags_out", V.Int c.frags_out ;
-          "frags_in", V.Int c.frags_in ; "reassembled", V.Int c.reassembled ;
-          "reasm_timeouts", V.Int c.reasm_timeouts ]) }
+      stats = (fun () -> frag_stats counters) }
 
 let ip6_upper (ip : Ip6.Pdu.t) =
     if Ip6.Pdu.is_fragment ip then N.Raw
@@ -430,23 +432,34 @@ let pack_ip6 fields hints payload =
         (ip_of ~v6:true fields "IP6" "src") (ip_of ~v6:true fields "IP6" "dst") payload |>
     Ip6.Pdu.pack, [ "proto", V.Int ip6_proto ]
 
-(* A self-driven IP6 has a TRX per protocol, and does not fragment. The
- * fragments received are seen in manual mode only, as there is no
- * reassembly: *)
+(* As IP: a self-driven IP6 has a TRX per protocol, and the fragments
+ * received are seen in manual mode, and reassembled for the self-driven
+ * mode: *)
 let ip6_node ctx =
     let st = ctx.eth in
     let below = Option.get ctx.below in
     let trxs = Hashtbl.create 3 in
+    let fragments = Hashtbl.create 3 in
+    let counters = Ip.TRX.make_counters () in
     let receive (u : unpacked) =
-        if List.assoc "is_fragment" u.values = V.Bool true then [ u, [ Manual ] ]
-        else pass u in
+        if List.assoc "is_fragment" u.values <> V.Bool true then pass u else
+        let fragment = u, [ Manual ] in
+        match Ip6.Pdu.unpack u.bits with
+        | Error _ -> [ fragment ]
+        | Ok ip ->
+            (match Ip6.TRX.reassemble_into st.iface.widget.power counters fragments ip with
+            | None -> [ fragment ]
+            | Some ip ->
+                [ fragment ;
+                  with_length ~terminal:false
+                    { values = ip6_values ip ; upper = Only (ip6_upper ip) ;
+                      payload = (ip.payload :> bitstring) ; up_hints = [] ;
+                      bits = Ip6.Pdu.pack ip }, [ Driven ] ]) in
     { (manual pack_ip6) with
       send = (fun fields hints payload ->
         if Tools.bytelength payload = 0 then
             V.fail "A self-driven IP6 sends no empty packet: use IP6!" ;
-        if 40 + Tools.bytelength payload > st.mtu then
-            V.fail "%d bytes are more than the MTU of %d: IP6 does not fragment"
-                (40 + Tools.bytelength payload) st.mtu ;
+        if Tools.bytelength payload > 0xffff then V.fail "Too long for an IP6 packet" ;
         let proto = ip6_proto_of fields hints in
         let t =
             match Hashtbl.find_option trxs proto with
@@ -455,7 +468,7 @@ let ip6_node ctx =
                 if st.mtu < 1280 then
                     V.fail "IP6 needs an MTU of 1280 bytes at least, not %d" st.mtu ;
                 let t =
-                    Ip6.TRX.create st.iface.widget.power ~mtu:st.mtu
+                    Ip6.TRX.create st.iface.widget.power ~mtu:st.mtu ~counters
                         (ip_of ~v6:true fields "IP6" "src") (ip_of ~v6:true fields "IP6" "dst")
                         (Ip.Proto.o proto) st.iface.widget.logger in
                 Tools.((Ip6.TRX.trx_of t).out -->
@@ -464,7 +477,8 @@ let ip6_node ctx =
                 t in
         Ip6.TRX.tx ?tos:(Option.map Ip.ToS.o (opt_int fields "traffic_class" 0 0xff))
                    ?ttl:(opt_int fields "hop_limit" 0 0xff) t payload) ;
-      receive }
+      receive ;
+      stats = (fun () -> frag_stats counters) }
 
 let unpack_udp _ bits =
     match Udp.Pdu.unpack bits with
@@ -1160,11 +1174,13 @@ let eth =
               ~driven_default:(V.Int 0x800) ;
         field "ts" Type.Time ~set_in:[] ~read_in:both ~about:"when the frame was captured" ]
 
+let ip_stats =
+    Type.[ "fragmented", Int ; "frags_out", Int ; "frags_in", Int ;
+           "reassembled", Int ; "reasm_timeouts", Int ]
+
 let ip =
     layer N.IP ~above:[ eth ] ~driven:true ~node:ip_node ~unpack:unpack_ip
-        ~stats:Type.[
-            "fragmented", Int ; "frags_out", Int ; "frags_in", Int ;
-            "reassembled", Int ; "reasm_timeouts", Int ] [
+        ~stats:ip_stats [
         field "src" Type.Ip ~set_in:both ~read_in:both ~discriminant:true
               ~pick:Local_address ~peer:"dst" ;
         field "dst" Type.Ip ~set_in:both ~read_in:both ~discriminant:true
@@ -1183,7 +1199,8 @@ let ip =
         field "is_fragment" Type.Bool ~set_in:[] ~about:"whether %s is a fragment" ]
 
 let ip6 =
-    layer N.IP6 ~above:[ eth ] ~driven:true ~node:ip6_node ~unpack:unpack_ip6 [
+    layer N.IP6 ~above:[ eth ] ~driven:true ~node:ip6_node ~unpack:unpack_ip6
+        ~stats:ip_stats [
         field "src" Type.Ip ~set_in:both ~read_in:both ~discriminant:true
               ~pick:Local_address ~peer:"dst" ;
         field "dst" Type.Ip ~set_in:both ~read_in:both ~discriminant:true

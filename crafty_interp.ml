@@ -2423,9 +2423,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (with_host ~frames:true \
         "/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=100)/Raw()\nexpect timeout=1s /IP/TCP!(src == 7, flags & RST) { print(MATCH[TCP].ack_num) }")
 *)
-(* IPv6, with neighbor discovery: ping, a UDP echo server, a closed port, a
- * TCP echo server; an address of the wrong family; a packet too big forged
- * by a program, quoting the datagram: *)
+(* IPv6, with neighbor discovery: ping, a UDP echo server, in fragments too,
+ * a closed port, a TCP echo server; an address of the wrong family; a packet
+ * too big forged by a program, quoting the datagram: *)
 (*$= & ~printer:identity
   "a 0.000s: seq 1 from 2001:db8::2 hop 64\na 0.100s: seq 2 from 2001:db8::2 hop 64\na 0.100s: done Eth#4" \
     (with_host ~v6:true "/IP6(dst=2001:db8::2)/ICMP6/Echo { repeat count=2 every=100ms { Request(\"hi\")\n    expect timeout=1s Reply { assert(MATCH[Reply].payload == \"hi\")\n      print(\"seq ${MATCH[Reply].seq} from ${MATCH[IP6].src} hop ${MATCH[IP6].hop_limit}\") } } }")
@@ -2433,6 +2433,10 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (with_host ~v6:true ~setup:(fun h _ -> h.Host.trx.Host.udp_server_start (Udp.Port.o 7) (fun udp -> \
         Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
         "/IP6(dst=2001:db8::2)/UDP(dst=7) { repeat count=2 { Raw(\"echo ${I}\")\n    expect timeout=1s Raw { print(MATCH[Raw].data) } } }")
+  "a 0.001s: fragmented 1, frags out 3, in 3, reassembled 1, timeouts 0\na 0.001s: done Eth#5" \
+    (with_host ~v6:true ~setup:(fun h _ -> h.Host.trx.Host.udp_server_start (Udp.Port.o 7) (fun udp -> \
+        Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
+        "/IP6(dst=2001:db8::2) {\n  UDP(src=4000, dst=7) {\n    Raw(randbytes(3000))\n    expect timeout=1s Raw {} }\n  s = stats()\n  print(\"fragmented ${s.fragmented}, frags out ${s.frags_out}, in ${s.frags_in}, reassembled ${s.reassembled}, timeouts ${s.reasm_timeouts}\") }")
   "a 0.000s: port 9 of 2001:db8::2, from 2001:db8::2, length 15\na 0.000s: done Eth#3" \
     (with_host ~v6:true "/IP6(dst=2001:db8::2)/UDP(src=4000, dst=9)/Raw(\"anyone?\")\nexpect timeout=1s /IP6/ICMP6/DestUnreachable(code == PORT_UNREACHABLE6)/IP6/UDP(src == 4000) {\n  print(\"port ${MATCH[UDP].dst} of ${MATCH[DestUnreachable/IP6].dst}, from ${MATCH[/IP6].src}, length ${MATCH[UDP].length}\") }")
   "a 0.000s: hello\na 0.000s: 1440\na 0.000s: done Eth#4{IP6(src=2001:db8::1, dst=2001:db8::2)#2{TCP(src=4000, dst=7)#2{Raw#2}}}" \
