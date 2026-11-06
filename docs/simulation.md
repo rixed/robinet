@@ -111,7 +111,8 @@ Ethernet speeds are numbered `0`–`8`: 10Mbps, 100Mbps, 1Gbps, 2.5Gbps, 5Gbps,
 
 A router's `load balancing` is numbered `0`–`3`: first matching, track flow,
 random, round robin. It says which of the routes that matched a packet actually
-carries it — see *Routing tables* below.
+carries it — see *Routing tables* below. A router interface's `reverse path
+filter` is numbered `0`–`2`: off, strict, loose.
 
 ## Environment variables
 
@@ -499,7 +500,7 @@ under:
 | policer | `""` | `max packets`, `max volume`, `max duration`, `max packet rate`, `max throughput`, `max syns`, `max syn rate`; the flags `max packets reached`, `max volume reached`, `max syns reached`, `expired` (which are only reset); and, read only, `start`, `packets`, `volume`, `syns`, `elapsed` |
 | firewall | `""` | `inside rules`, `outside rules`, `uninspectable`, `MAC` |
 | router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `buffer capacity`, `drop hop-by-hop`, `drop segment routing`, `drop IPv6 fragments` |
-| | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay`, `router advertisements`, `router lifetime` |
+| | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay`, `router advertisements`, `router lifetime`, `reverse path filter` |
 | | `admin` | `hostname`, `search suffix`, `prefer IPv6` — the stack answering for all the router's addresses, whichever interface they arrive at |
 | gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
 | | `nat` | `min port`, `port forwards`, `NAT pings`, `send errors`, `answer pings` |
@@ -563,6 +564,16 @@ A router's interface also has its own `errors probability` and `errors delay`,
 1 and 0 unless set otherwise. An error about a packet that came in through
 that interface is reported with the product of the router's probability and
 the interface's, after the sum of both delays.
+
+A router's interface's `reverse path filter`, off unless set, silently drops
+the packets it receives unless the router's way back to their source leaves
+by that interface (strict) or exists at all (loose), as in RFC 3704. The way
+back is the route the router's own packet to that source would take: the
+first that matches its destination with `first matching`, any of them
+otherwise, so that one of several balanced links does not drop what comes in
+through another. A source that is one of the router's addresses never
+passes, and unspecified and link-local ones always do. Drops are counted
+under the interface's `rpf-dropped`.
 
 A router's interface with an IPv6 address also has a link-local one, from its
 MAC as a host's. Its neighbor advertisements say it is a router, without
@@ -636,7 +647,10 @@ its `dst mask`, and each further one another address, of either family. So `"dst
 interface 0 answer for 10.0.1.1 and treat 10.0.1.0/24 as directly reachable,
 while `"10.0.1.1/32"` would make it answer for the same address and need a
 `via` to reach anything at all. That is the shape to use between routers, where
-every hop is named explicitly.
+every hop is named explicitly. The router answers for each of its addresses
+through any interface: a packet for one that comes in through another
+interface is matched against these rows as if it had come in through the one
+holding it.
 
 ### The packet synthesizer
 

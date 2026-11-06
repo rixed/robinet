@@ -329,6 +329,15 @@ type icmp_probability = {
 let notify_never = { probability = 0. ; delay = 0. }
 let notify_always ?(delay=0.) () = { probability = 1. ; delay }
 
+(* Reverse path filtering (RFC 3704) of the packets a port receives: *)
+type rpf =
+    | No_rpf
+    | Strict_rpf (* the way back to their source leaves by that port *)
+    | Loose_rpf (* there is a way back to their source *)
+    [@@deriving enum]
+
+let all_rpf = [| "off" ; "strict" ; "loose" |]
+
 type iface = { mutable trx : trx ; (** Can come handy to splice another trx there. *)
                        eth : Eth.State.t ;
 (** Fragment IPv4 packets larger than the MTU, unless they have DF set. *)
@@ -348,7 +357,10 @@ mutable link_fragmentation : bool ;
                 * [start_router_adverts] stop when this changes: *)
                mutable ra_gen : int ;
                (* Whether a solicited advertisement is due: *)
-               mutable ra_pending : bool }
+               mutable ra_pending : bool ;
+               mutable rpf : rpf ;
+               (** Packets received here that [rpf] dropped: *)
+               rpf_dropped : Metric.Counter.t }
 
 type load_balancing =
     | First (* Forward a packet to its first matching route *)
@@ -705,6 +717,25 @@ let is_router_solicit (ip : Ip6.Pdu.t) =
     | Ok { payload = Router_solicit _ ; _ } -> true
     | _ -> false
 
+(* Whether a packet from [src] received at port [n] passes its reverse path
+ * filter. The way back to [src] is the route the router's own packet to
+ * [src] would take: the first matching one with [First], any of them
+ * otherwise. A source that is the router's own address never passes, and
+ * unspecified and link-local ones, which no table routes, always do. *)
+let rpf_passes t n src =
+    match t.ifaces.(n).rpf with
+    | No_rpf -> true
+    | _ when Ip.Addr.(compare src zero = 0 || compare src zero6 = 0 ||
+                      is_link_local src) -> true
+    | _ when Host.is_mine t.admin src -> false
+    | mode ->
+        let targets = target_routes ~dst_ip:src t in
+        List.exists (function
+            | Route.Forward { out_iface ; _ } ->
+                mode = Loose_rpf || out_iface = n
+            | Admin -> false
+        ) (if t.load_balancing = First then List.take 1 targets else targets)
+
 (* The port holding [dst] among the router's own addresses, [n] first: *)
 let holder t n dst =
     let dst = Ip.Addr.to_bitstring dst in
@@ -787,6 +818,14 @@ and route in_iface_opt t bits =
         match p_opt with
         | Some (V6 ip) -> is_link_scoped ip.src || is_link_scoped ip.dst
         | _ -> false in
+    match in_iface_opt, src_opt with
+    | Some n, Some src when not (rpf_passes t n src) ->
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf
+            "Reverse path filter of iface %d drops a packet from %s"
+            n (Ip.Addr.to_string src)))) ;
+        Metric.Counter.inc t.ifaces.(n).rpf_dropped
+                           ~now:(Simulation.Widget.now t.widget)
+    | _ ->
     (* A packet for one of the router's own addresses is for its admin host
      * if the [Admin] routes take it as if it had arrived at the port holding
      * that address, whichever it arrived at -- but a link-scoped one only
@@ -1000,7 +1039,8 @@ let iface_make ?speeds ?mtu ?delay ?loss ?inter_frame_gap
     let iface =
         { trx ; eth ; link_fragmentation ;
           max_queue_delay ; notify_errs ; advertise = false ;
-          router_lifetime = 1800 ; ra_gen = 0 ; ra_pending = false } in
+          router_lifetime = 1800 ; ra_gen = 0 ; ra_pending = false ;
+          rpf = No_rpf ; rpf_dropped = Metric.Counter.make () } in
     Widget.add_properties eth.iface.widget Widget.[
         property "link fragmentation" ~kind:Bool
             ~descr:"Fragment IPv4 packets larger than the MTU, unless they \
@@ -1025,7 +1065,20 @@ let iface_make ?speeds ?mtu ?delay ?loss ?inter_frame_gap
             ~descr:"Report ICMP errors about packets received here after \
                     that delay, on top of the router's."
             ~getter:(fun () -> `Float iface.notify_errs.delay)
-            ~setter:(fun v -> iface.notify_errs.delay <- to_float v) ] ;
+            ~setter:(fun v -> iface.notify_errs.delay <- to_float v) ;
+        property "reverse path filter" ~kind:(one_of (choices all_rpf))
+            ~descr:"Drop the packets received here unless the route back to \
+                    their source leaves by this interface (strict) or exists \
+                    at all (loose)."
+            ~getter:(fun () -> `Int (rpf_to_enum iface.rpf))
+            ~setter:(fun v ->
+                match rpf_of_enum (to_int v) with
+                | None -> bad_value "Invalid enum for reverse path filter: %s"
+                            (Yojson.Basic.to_string v)
+                | Some m -> iface.rpf <- m) ;
+        metric_property "rpf-dropped"
+            ~descr:"Number of packets dropped by the reverse path filter."
+            (Metric.Counter.T iface.rpf_dropped) ] ;
     iface
 
 let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
@@ -1638,6 +1691,66 @@ let make_from_addrs
     Simulation.run sim false ;
     assert_equal ~printer:(IO.to_string (List.print Int.print))
         [ 3 ; 4 ] (List.sort Int.compare !replies)
+ *)
+
+(* Reverse path filtering looks for the way back to the source. *)
+(*$R rpf_passes
+    let c = Ip.Cidr.of_string in
+    let sim = Simulation.make ~realtime:false "router-rpf" in
+    let r =
+        make_from_addrs ~parent:sim.root
+            [| [ c "10.0.1.254/24", None ], Eth.Addr.random () ;
+               [ c "10.0.2.254/24", None ], Eth.Addr.random () |] "r" in
+    let passes n src = rpf_passes r n (Ip.Addr.of_string src) in
+    "off by default" @? passes 0 "10.0.2.1" ;
+    r.ifaces.(0).rpf <- Strict_rpf ;
+    "strict: from its own side" @? passes 0 "10.0.1.1" ;
+    "strict: not from the other side" @? not (passes 0 "10.0.2.1") ;
+    "strict: nor from where no route goes" @? not (passes 0 "192.0.2.1") ;
+    "nor from the router's own address" @? not (passes 0 "10.0.1.254") ;
+    "unspecified sources pass" @? (passes 0 "0.0.0.0" && passes 0 "::") ;
+    "and so do link-local ones" @? passes 0 "fe80::1" ;
+    r.ifaces.(0).rpf <- Loose_rpf ;
+    "loose: from the other side" @? passes 0 "10.0.2.1" ;
+    "loose: not from where no route goes" @? not (passes 0 "192.0.2.1") ;
+    (* Two ways to the same network: *)
+    let dst_mask = c "10.0.9.0/24" in
+    r.routes <- r.routes @ [ Route.forward ~dst_mask 0 ; Route.forward ~dst_mask 1 ] ;
+    r.ifaces.(1).rpf <- Strict_rpf ;
+    "strict, first matching: only the first way" @?
+        not (passes 1 "10.0.9.1") ;
+    r.load_balancing <- RoundRobin ;
+    "strict, balanced: any of the ways" @? passes 1 "10.0.9.1"
+ *)
+
+(* What the filter drops is not routed, and is counted. *)
+(*$R rpf_passes
+    let c = Ip.Cidr.of_string and a = Ip.Addr.of_string in
+    let sim = Simulation.make ~realtime:false "router-rpf-drop" in
+    let addrs =
+        [| [ c "10.0.1.254/24", None ], Eth.Addr.random () ;
+           [ c "10.0.2.254/24", None ], Eth.Addr.random () |] in
+    let r = make_from_addrs ~parent:sim.root addrs "r" in
+    Simulation.run_startup sim ;
+    let out = ref 0 in
+    r.ifaces.(1).trx =-> sink (fun _ -> incr out) ;
+    let send src =
+        Ip.Pdu.{ (random ()) with src = a src ; dst = a "10.0.2.1" ; ttl = 9 } |>
+        Ip.Pdu.pack |>
+        Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (snd addrs.(0)) |>
+        Eth.Pdu.pack |>
+        Simulation.delay sim.root.power (Clock.Interval.msec 1.)
+                         r.ifaces.(0).trx.out.write ;
+        Simulation.run sim false in
+    r.ifaces.(0).rpf <- Strict_rpf ;
+    send "10.0.2.7" ;
+    "a spoofed source is not forwarded" @? (!out = 0) ;
+    assert_equal ~printer:string_of_int 1
+        (Metric.Counter.get r.ifaces.(0).rpf_dropped) ;
+    send "10.0.1.7" ;
+    "a genuine one is" @? (!out > 0) ;
+    assert_equal ~printer:string_of_int 1
+        (Metric.Counter.get r.ifaces.(0).rpf_dropped)
  *)
 
 (* Hosts with SLAAC take an address in the prefix of the interface they are
