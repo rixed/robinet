@@ -609,7 +609,7 @@ of the tests may be `null`, which is no test at all:
 
 ```json
 { "input port": 0, "src mask": null, "dst mask": "10.0.1.1/24",
-  "ip proto": null, "src port": null, "dst port": null,
+  "ip proto": null, "dscp": null, "src port": null, "dst port": null,
   "output port": null, "via": null }
 ```
 
@@ -618,6 +618,7 @@ of the tests may be `null`, which is no test at all:
 | `input port` | Only packets that came in there. |
 | `src mask`, `dst mask` | CIDR the address must fall in, IPv4 or IPv6. |
 | `ip proto` | 0…255 (6 TCP, 17 UDP, 1 ICMP, 58 ICMPv6), past IPv6 extension headers. |
+| `dscp` | 0…63, the top 6 bits of IPv4's ToS or IPv6's traffic class (46 EF, 0 best effort). May be left out. |
 | `src port`, `dst port` | `"80"`, `"1024-65535"`, `"1024-"`, `"-1023"`. |
 | `output port` | Where it goes… |
 | `via` | …and through which gateway, as an IP or a MAC. `null` for directly. |

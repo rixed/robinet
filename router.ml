@@ -59,25 +59,28 @@ struct
                dst_mask : (Ip.Cidr.t * (Ip.Addr.t -> bool)) option ;
                                                     (** Test on dest IP *)
                ip_proto : Ip.Proto.t option ;       (** Test on IP protocol *)
+                   dscp : int option ;              (** Test on DSCP (0…63) *)
                src_port : port_range option ;       (** Test on source IP port *)
                dst_port : port_range option ;       (** Test on dest IP port *)
                  target : target }
 
-    let make ?in_iface ?src_mask ?dst_mask ?ip_proto ?src_port ?dst_port
+    let make ?in_iface ?src_mask ?dst_mask ?ip_proto ?dscp ?src_port ?dst_port
              target =
         let to_mask_test = Option.map (fun cidr -> cidr, Ip.Cidr.mem cidr) in
         { src_mask = to_mask_test src_mask ;
           dst_mask = to_mask_test dst_mask ;
-          in_iface ; ip_proto ; src_port ; dst_port ; target }
+          in_iface ; ip_proto ; dscp ; src_port ; dst_port ; target }
 
-    let forward ?in_iface ?src_mask ?dst_mask ?ip_proto ?src_port ?dst_port
-                ?via out_iface =
+    let forward ?in_iface ?src_mask ?dst_mask ?ip_proto ?dscp ?src_port
+                ?dst_port ?via out_iface =
         let target = Forward { out_iface  ; via } in
-        make ?in_iface ?src_mask ?dst_mask ?ip_proto ?src_port ?dst_port target
+        make ?in_iface ?src_mask ?dst_mask ?ip_proto ?dscp ?src_port ?dst_port
+             target
 
-    let admin ?in_iface ?src_mask ?ip_proto ?src_port ?dst_port my_ip =
+    let admin ?in_iface ?src_mask ?ip_proto ?dscp ?src_port ?dst_port my_ip =
         let dst_mask = Ip.Cidr.single my_ip in
-        make ?in_iface ?src_mask ~dst_mask ?ip_proto ?src_port ?dst_port Admin
+        make ?in_iface ?src_mask ~dst_mask ?ip_proto ?dscp ?src_port ?dst_port
+             Admin
 
     let print oc t =
         let optionally f = function
@@ -85,6 +88,7 @@ struct
             | None -> "" in
         let string_of_in_iface n = "received at iface#"^ string_of_int n ^", "
         and string_of_proto p = "of "^ Ip.Proto.to_string p ^" protocol, "
+        and string_of_dscp d = "with DSCP "^ string_of_int d ^", "
         and string_of_ip_mask what (cidr, _) = what ^ Ip.Cidr.to_string cidr ^" "
         and string_of_port r = "port "^ string_of_port_range r ^" "
         and string_of_target = function
@@ -99,6 +103,7 @@ struct
         "Packets " ^
             (optionally string_of_in_iface t.in_iface) ^
             (optionally string_of_proto t.ip_proto) ^
+            (optionally string_of_dscp t.dscp) ^
             (optionally (string_of_ip_mask "from ") t.src_mask) ^
             (optionally string_of_port t.src_port) ^
             (optionally (string_of_ip_mask "to ") t.dst_mask) ^
@@ -117,17 +122,21 @@ struct
 
     (** Test an incoming packet against a route, considering all fields but for
      * its destination. *)
-    let test_but_dst t ifn src_opt proto_opt src_port_opt dst_port_opt =
+    let test_but_dst t ifn src_opt proto_opt dscp_opt src_port_opt
+                     dst_port_opt =
         test_opt t.in_iface (=) ifn &&
         test_opt t.src_mask cidr_mem_rev src_opt &&
         test_opt t.ip_proto (=) proto_opt &&
+        test_opt t.dscp (=) dscp_opt &&
         test_opt t.src_port port_in_range src_port_opt &&
         test_opt t.dst_port port_in_range dst_port_opt
 
     (** Test an incoming packet against a route. *)
-    let test t ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
+    let test t ifn src_opt dst_opt proto_opt dscp_opt src_port_opt
+             dst_port_opt =
         test_opt t.dst_mask cidr_mem_rev dst_opt &&
-        test_but_dst t ifn src_opt proto_opt src_port_opt dst_port_opt
+        test_but_dst t ifn src_opt proto_opt dscp_opt src_port_opt
+                     dst_port_opt
 
     (*$Q test
       (Q.make (fun st -> \
@@ -141,18 +150,27 @@ struct
         let proto () = if rnd 2 = 0 then Ip.Proto.tcp else Ip.Proto.udp in \
         let routes = List.init (rnd 20) (fun _ -> \
           forward ?in_iface:(opt (fun () -> rnd 3)) ?dst_mask:(opt cidr) \
-                  ?ip_proto:(opt proto) (rnd 3)) \
+                  ?ip_proto:(opt proto) ?dscp:(opt (fun () -> rnd 2)) \
+                  (rnd 3)) \
         and pkts = List.init 20 (fun _ -> \
-          opt (fun () -> rnd 3), opt addr, opt proto) in \
+          opt (fun () -> rnd 3), opt addr, opt proto, \
+          opt (fun () -> rnd 2)) in \
         routes, pkts)) \
       (fun (routes, pkts) -> \
         let t = Table.make routes in \
-        List.for_all (fun (ifn, dst, proto) -> \
+        List.for_all (fun (ifn, dst, proto, dscp) -> \
           let linear = List.filter (fun r -> \
-            test r ifn None dst proto None None) routes \
-          and indexed = Table.matching t ifn None dst proto None None in \
+            test r ifn None dst proto dscp None None) routes \
+          and indexed = \
+            Table.matching t ifn None dst proto dscp None None in \
           List.length linear = List.length indexed && \
           List.for_all2 (==) linear indexed) pkts)
+     *)
+    (*$T test
+      test (forward ~dscp:46 1) None None None None (Some 46) None None
+      not (test (forward ~dscp:46 1) None None None None (Some 0) None None)
+      not (test (forward ~dscp:46 1) None None None None None None None)
+      test (forward 1) None None None None (Some 46) None None
      *)
 
     (* Widget.kind for a route: the tests a packet must pass, then where it
@@ -167,6 +185,7 @@ struct
             "src mask", optional (hint "192.168.0.0/24" String) ;
             "dst mask", optional (hint "192.168.0.0/24" String) ;
             "ip proto", optional (IRange (0, 255)) ;
+            "dscp", optional (IRange (0, 63)) ;
             "src port", optional (hint "min-max" String) ;
             "dst port", optional (hint "min-max" String) ;
             "output port", optional (IRange (0, num_ports-1)) ;
@@ -285,12 +304,13 @@ struct
             List.sort Int.compare
 
     (** The rows matching that packet, in table order. *)
-    let matching t ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
+    let matching t ifn src_opt dst_opt proto_opt dscp_opt src_port_opt
+                 dst_port_opt =
         candidates t dst_opt |>
         List.filter_map (fun i ->
             let r = t.rows.(i) in
-            if Route.test_but_dst r ifn src_opt proto_opt src_port_opt
-                                  dst_port_opt
+            if Route.test_but_dst r ifn src_opt proto_opt dscp_opt
+                                  src_port_opt dst_port_opt
             then Some r else None)
 end
 
@@ -399,10 +419,11 @@ let add_route (t : t) r =
     Log.(log t.widget.logger Debug (lazy (Printf.sprintf2 "Adding route: %a" Route.print r))) ;
     t.routes <- r :: t.routes
 
-let target_routes ?in_iface ?src_ip ?dst_ip ?proto ?src_port ?dst_port t =
+let target_routes ?in_iface ?src_ip ?dst_ip ?proto ?dscp ?src_port ?dst_port
+                  t =
     if t.table.routes != t.routes then
         t.table <- Table.make t.routes ;
-    Table.matching t.table in_iface src_ip dst_ip proto src_port
+    Table.matching t.table in_iface src_ip dst_ip proto dscp src_port
                          dst_port |>
     List.map (fun (r : Route.t) -> r.target)
 
@@ -502,6 +523,9 @@ let packet_src = function V4 ip -> ip.Ip.Pdu.src | V6 ip -> ip.Ip6.Pdu.src
 let packet_dst = function V4 ip -> ip.Ip.Pdu.dst | V6 ip -> ip.Ip6.Pdu.dst
 let packet_ttl = function V4 ip -> ip.Ip.Pdu.ttl | V6 ip -> ip.Ip6.Pdu.ttl
 let packet_proto = function V4 ip -> ip.Ip.Pdu.proto | V6 ip -> ip.Ip6.Pdu.proto
+let packet_dscp = function
+    | V4 ip -> (ip.Ip.Pdu.tos :> int) lsr 2
+    | V6 ip -> ip.Ip6.Pdu.diff_serv
 let packet_ports = function
     | V4 ip -> Ip.Pdu.get_ports ip
     | V6 ip -> Ip6.Pdu.get_ports ip
@@ -743,7 +767,8 @@ and route in_iface_opt t bits =
     let src_opt = Option.map packet_src p_opt
     and dst_opt = Option.map packet_dst p_opt
     and ttl_opt = Option.map packet_ttl p_opt
-    and proto_opt = Option.map packet_proto p_opt in
+    and proto_opt = Option.map packet_proto p_opt
+    and dscp_opt = Option.map packet_dscp p_opt in
     let src_port_opt, dst_port_opt =
         match Option.bind p_opt (Result.to_option % packet_ports) with
         | Some (src_port, dst_port) -> Some src_port, Some dst_port
@@ -758,7 +783,7 @@ and route in_iface_opt t bits =
     | _ ->
     match target_routes ?in_iface:in_iface_opt
                         ?src_ip:src_opt ?dst_ip:dst_opt ?proto:proto_opt
-                        ?src_port:src_port_opt ?dst_port:dst_port_opt t with
+                        ?dscp:dscp_opt ?src_port:src_port_opt ?dst_port:dst_port_opt t with
     | [] ->
         (match in_iface_opt, p_opt with
         | None, _ ->
@@ -1096,6 +1121,7 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                             "src mask", json_of_optional (fun (c, _) -> `String (Ip.Cidr.to_string c)) r.src_mask ;
                             "dst mask", json_of_optional (fun (c, _) -> `String (Ip.Cidr.to_string c)) r.dst_mask ;
                             "ip proto", json_of_optional (fun (p : Ip.Proto.t) -> `Int (p :> int)) r.ip_proto ;
+                            "dscp", json_of_optional (fun d -> `Int d) r.dscp ;
                             "src port", json_of_optional of_port_range r.src_port ;
                             "dst port", json_of_optional of_port_range r.dst_port ;
                             "output port",
@@ -1145,6 +1171,12 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                         and ip_proto =
                             num "ip proto" (fun v ->
                                 Ip.Proto.o (to_int_range ~min:0 ~max:255 v))
+                        (* Absent from tables written before it existed: *)
+                        and dscp =
+                            match row with
+                            | `Assoc l when not (List.mem_assoc "dscp" l) ->
+                                None
+                            | _ -> num "dscp" (to_int_range ~min:0 ~max:63)
                         and src_port = text "src port" Route.port_range_of_string
                         and dst_port = text "dst port" Route.port_range_of_string
                         and out_iface = iface "output port"
@@ -1160,7 +1192,7 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                             | None -> Route.Admin
                             | Some out_iface -> Route.Forward { out_iface ; via } in
                         Route.{ in_iface ; src_mask ; dst_mask ; ip_proto ;
-                                src_port ; dst_port ; target }
+                                dscp ; src_port ; dst_port ; target }
                     ) v ;
                 (* Which address is the router's is part of what the table
                    says, so the interfaces are told again. *)
@@ -1889,6 +1921,26 @@ let make_from_addrs
     "and a table that stops naming one takes it away" @?
         (r.ifaces.(0).eth.Eth.State.my_addresses = [] &&
          r.ifaces.(0).admin_host = None)
+ *)
+
+(* A route's DSCP is read from and written to the routes property. *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "dscp-route" in
+    let r = make ~parent:sim.root 2 [] "r" in
+    let p = List.find (fun (p : Widget.property) ->
+                p.name = "routes") r.widget.properties in
+    let row = `Assoc [ "input port", `Null ; "src mask", `Null ;
+                       "dst mask", `String "10.0.0.0/8" ;
+                       "ip proto", `Null ; "dscp", `Int 46 ;
+                       "src port", `Null ; "dst port", `Null ;
+                       "output port", `Int 1 ; "via", `Null ] in
+    (Option.get p.setter) (`List [ row ]) ;
+    "the table holds that DSCP" @?
+        (List.map (fun (r : Route.t) -> r.dscp) r.routes = [ Some 46 ]) ;
+    match p.getter () with
+    | `List [ `Assoc l ] ->
+        "and gives it back" @? (List.assoc "dscp" l = `Int 46)
+    | _ -> "one row comes back" @? false
  *)
 
 (* A router announces itself on its ports, and a neighbour learns it from
