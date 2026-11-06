@@ -138,6 +138,32 @@ struct
         test_but_dst t ifn src_opt proto_opt dscp_opt src_port_opt
                      dst_port_opt
 
+    (** How specific a route is, the most specific matching routes being the
+     * only ones used: a route to the router itself comes first, then one
+     * testing anything besides the destination, then the longest destination
+     * prefix, no dst mask being /0. *)
+    let specificity t =
+        (match t.target with Admin -> true | Forward _ -> false),
+        (t.in_iface <> None || t.src_mask <> None || t.ip_proto <> None ||
+         t.dscp <> None || t.src_port <> None || t.dst_port <> None),
+        Option.map_default (fun (cidr, _) -> Ip.Cidr.width cidr) 0 t.dst_mask
+
+    (*$T specificity
+      let c = Ip.Cidr.of_string in \
+      specificity (forward ~dst_mask:(c "10.0.0.0/24") 1) > \
+        specificity (forward ~dst_mask:(c "10.0.0.0/16") 1) && \
+      specificity (forward ~dst_mask:(c "10.0.0.0/16") 1) > \
+        specificity (forward ~dst_mask:(c "0.0.0.0/0") 1) && \
+      specificity (forward ~dst_mask:(c "0.0.0.0/0") 1) = \
+        specificity (forward 1) && \
+      specificity (forward ~dscp:46 1) > \
+        specificity (forward ~dst_mask:(c "10.0.0.1/32") 1) && \
+      specificity (forward ~in_iface:0 ~dst_mask:(c "10.0.0.0/24") 1) > \
+        specificity (forward ~ip_proto:Ip.Proto.tcp ~dst_mask:(c "10.0.0.0/16") 1) && \
+      specificity (admin (Ip.Addr.of_dotted_string "10.0.0.1")) > \
+        specificity (forward ~dscp:46 ~dst_mask:(c "10.0.0.1/32") 1)
+     *)
+
     (*$Q test
       (Q.make (fun st -> \
         let rnd = Random.State.int st in \
@@ -252,6 +278,7 @@ end
  * width. *)
 module Table =
 struct
+    (*$< Table *)
     type t = { routes : Route.t list ; (** What it was made of *)
                rows : Route.t array ;
                any_dst : int list ; (** Rows with no dst mask *)
@@ -312,6 +339,36 @@ struct
             if Route.test_but_dst r ifn src_opt proto_opt dscp_opt
                                   src_port_opt dst_port_opt
             then Some r else None)
+
+    (** The most specific of the rows matching that packet (see
+     * {!Route.specificity}), in table order. *)
+    let best t ifn src_opt dst_opt proto_opt dscp_opt src_port_opt
+             dst_port_opt =
+        let rs = matching t ifn src_opt dst_opt proto_opt dscp_opt
+                          src_port_opt dst_port_opt in
+        let top =
+            List.fold_left (fun m r -> max m (Route.specificity r))
+                           (false, false, -1) rs in
+        List.filter (fun r -> Route.specificity r = top) rs
+
+    (*$T best
+      let c = Ip.Cidr.of_string and a = Ip.Addr.of_dotted_string in \
+      let dflt = Route.forward 0 \
+      and wide = Route.forward ~dst_mask:(c "10.0.0.0/16") 1 \
+      and narrow1 = Route.forward ~dst_mask:(c "10.0.1.0/24") 2 \
+      and narrow2 = Route.forward ~dst_mask:(c "10.0.1.0/24") 3 \
+      and policy = Route.forward ~dscp:46 4 in \
+      let t = make [ dflt ; wide ; narrow1 ; policy ; narrow2 ] in \
+      let is dst dscp rs = \
+        let b = best t None None (Some (a dst)) None dscp None None in \
+        List.length b = List.length rs && List.for_all2 (==) b rs in \
+      is "10.0.1.1" None [ narrow1 ; narrow2 ] && \
+      is "10.0.2.1" None [ wide ] && \
+      is "192.168.0.1" None [ dflt ] && \
+      is "10.0.1.1" (Some 46) [ policy ] && \
+      is "10.0.1.1" (Some 0) [ narrow1 ; narrow2 ]
+     *)
+    (*$>*)
 end
 
 
@@ -363,7 +420,7 @@ mutable link_fragmentation : bool ;
                rpf_dropped : Metric.Counter.t }
 
 type load_balancing =
-    | First (* Forward a packet to its first matching route *)
+    | First (* Forward a packet to the first of its best routes *)
     | Flow (* Forward a packet to one matching route based on the socket pair *)
     | Random (* Pick a matching route at random *)
     | RoundRobin (* Take the matching routes in turn, one packet each *)
@@ -431,8 +488,7 @@ let target_routes ?in_iface ?src_ip ?dst_ip ?proto ?dscp ?src_port ?dst_port
                   t =
     if t.table.routes != t.routes then
         t.table <- Table.make t.routes ;
-    Table.matching t.table in_iface src_ip dst_ip proto dscp src_port
-                         dst_port |>
+    Table.best t.table in_iface src_ip dst_ip proto dscp src_port dst_port |>
     List.map (fun (r : Route.t) -> r.target)
 
 (* Most bytes [iface] may have queued, or [None] while it has no link (and
@@ -719,7 +775,7 @@ let is_router_solicit (ip : Ip6.Pdu.t) =
 
 (* Whether a packet from [src] received at port [n] passes its reverse path
  * filter. The way back to [src] is the route the router's own packet to
- * [src] would take: the first matching one with [First], any of them
+ * [src] would take: the first of the best with [First], any of them
  * otherwise. A source that is the router's own address never passes, and
  * unspecified and link-local ones, which no table routes, always do. *)
 let rpf_passes t n src =
@@ -1192,9 +1248,8 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                 (* The whole table, read before any of it is installed: a
                    table with one bad row leaves the old one alone rather
                    than a half-replaced one behind. The order is the order
-                   the rows arrive in, which is the order they are tried
-                   in -- so moving a row up the table in the interface is
-                   what gives it priority. *)
+                   the rows arrive in, which among equally specific rows is
+                   what [First] goes by. *)
                 t.routes <-
                     to_list (fun row ->
                         (* A field typed into. Blank is a field nobody

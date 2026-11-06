@@ -110,8 +110,8 @@ Ethernet speeds are numbered `0`–`8`: 10Mbps, 100Mbps, 1Gbps, 2.5Gbps, 5Gbps,
 10Gbps, 25Gbps, 40Gbps, 100Gbps. A hub accepts the first two only.
 
 A router's `load balancing` is numbered `0`–`3`: first matching, track flow,
-random, round robin. It says which of the routes that matched a packet actually
-carries it — see *Routing tables* below. A router interface's `reverse path
+random, round robin. It says which of the most specific routes that matched a
+packet actually carries it — see *Routing tables* below. A router interface's `reverse path
 filter` is numbered `0`–`2`: off, strict, loose.
 
 ## Environment variables
@@ -578,8 +578,8 @@ A router's interface's `reverse path filter`, off unless set, silently drops
 the packets it receives unless the router's way back to their source leaves
 by that interface (strict) or exists at all (loose), as in RFC 3704. The way
 back is the route the router's own packet to that source would take: the
-first that matches its destination with `first matching`, any of them
-otherwise, so that one of several balanced links does not drop what comes in
+first of the most specific that match its destination with `first matching`,
+any of them otherwise, so that one of several balanced links does not drop what comes in
 through another. A source that is one of the router's addresses never
 passes, and unspecified and link-local ones always do. Drops are counted
 under the interface's `rpf-dropped`.
@@ -624,8 +624,13 @@ is read against another: a synthesizer's `generators` must come before the
 
 ### Routing tables
 
-A router's `routes` is a list of rows, tried **in order**, first match wins. Any
-of the tests may be `null`, which is no test at all:
+A router's `routes` is a list of rows. Of those matching a packet, only **the
+most specific** are kept: a route to the router itself (`"output port": null`)
+beats any other, then a row testing anything besides the destination
+(input port, source, protocol, DSCP or ports) beats one testing the
+destination only, then the longest `dst mask` wins (/24 beats /16, which beats
+`0.0.0.0/0` and no `dst mask` at all). Any of the tests may be `null`, which is
+no test at all:
 
 ```json
 { "input port": 0, "src mask": null, "dst mask": "10.0.1.1/24",
@@ -643,8 +648,8 @@ of the tests may be `null`, which is no test at all:
 | `output port` | Where it goes… |
 | `via` | …and through which gateway, as an IP or a MAC. `null` for directly. |
 
-Several rows may match one packet, and `load balancing` says which of them
-takes it: the first (the default), the one the source and destination hash to
+Several equally specific rows may match one packet, and `load balancing` says
+which of them takes it: the first in table order (the default), the one the source and destination hash to
 (so that a flow keeps its path), one at random, or each in turn. Write the same
 destination several times, once per outgoing link, and that is how a router is
 given more than one way there.
