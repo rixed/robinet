@@ -22,6 +22,7 @@ LIB_SOURCES  = \
 	pcap.ml \
 	url.ml \
 	http.ml \
+	websocket.ml \
 	tcp.ml \
 	udp.ml \
 	ip.ml \
@@ -135,7 +136,7 @@ EXAMPLES_BYTE = \
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
-REQUIRES = bitstring ppx_bitstring ppx_deriving.enum batteries yojson ppx_deriving_yojson parsercombinator
+REQUIRES = bitstring ppx_bitstring ppx_deriving.enum batteries yojson ppx_deriving_yojson parsercombinator sha
 
 # The administration interface is written as ordinary files in www/ and
 # compiled into the library, so that a robinet program has nothing to install

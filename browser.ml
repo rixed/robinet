@@ -242,6 +242,16 @@ let make_vacant_cnx t tcp http addr port =
     clean_vacant_cnxs t ;
     Hashtbl.add t.vacant_cnxs (addr, port) { tcp ; http ; last_used = Simulation.now (Simulation.of_widget t.widget) }
 
+(* Where to connect for [url]: *)
+let addr_port_of_url url =
+    (* Try to use the port present in the URL *)
+    try let n = String.index url.Url.net_loc ':' in
+        Host.Name (String.sub url.Url.net_loc 0 n),
+        String.lchop ~n:(n+1) url.Url.net_loc |>
+        int_of_string |> Tcp.Port.o
+    with _ ->
+        Host.Name url.Url.net_loc, Tcp.Port.o 80
+
 (* Takes an URL and an optional body and call the continuation with the obtained document *)
 let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
     let get_msg addr port cont =
@@ -294,14 +304,7 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
             fun status ->
                 stop_func Metric.(Params.singleton "status" (Param.String status)) *)
             fun (_ : string) -> () in
-        let addr, port =
-            (* Try to use the port present in the URL *)
-            try let n = String.index url.Url.net_loc ':' in
-                Host.Name (String.sub url.Url.net_loc 0 n),
-                String.lchop ~n:(n+1) url.Url.net_loc |>
-                int_of_string |> Tcp.Port.o
-            with _ ->
-                Host.Name url.Url.net_loc, Tcp.Port.o 80 in
+        let addr, port = addr_port_of_url url in
         get_msg addr port (function
         | None ->
             stop_with_status "no cnx" ;
@@ -367,6 +370,38 @@ let post t ?(headers=[]) url vars cont =
                         vars |>
                String.concat "&" in
     request t ~command:"POST" ~body ~headers url cont
+
+(** Open a websocket to [url] (scheme ws, or http) on a new connection, and
+    call [cont] with it once open, or with [None]. The upgrade request carries
+    the user agent and the cookies, and the cookies of the response are kept.
+    The other optional parameters are those of [Websocket.TRX.make]. *)
+let websocket t ?(headers=[]) ?keep_alive ?timeout ?max_frame url cont =
+    if url.Url.scheme <> "ws" && url.Url.scheme <> "http" then (
+        Log.(log t.widget.logger Error (lazy (Printf.sprintf
+            "Browser: bad websocket scheme: %s" (Url.to_string url)))) ;
+        cont None
+    ) else (
+        let addr, port = addr_port_of_url url in
+        t.host.Host.tcp_connect addr port (function
+        | None -> cont None
+        | Some tcp ->
+            let add n v hs = if headers_find n hs = None then (n, v) :: hs else hs in
+            let headers = add "User-Agent" t.user_agent headers in
+            let headers =
+                match cookie_string t url.Url.net_loc url.Url.path with
+                | "" -> headers
+                | c -> add "Cookie" c headers in
+            let on_handshake (ws : Websocket.TRX.t) =
+                Option.may (fun (resp : Pdu.t) ->
+                    store_cookies t url.Url.net_loc url.Url.path resp.headers
+                ) ws.response ;
+                cont (if ws.state = Websocket.TRX.Open then Some ws else None) in
+            let ws =
+                Websocket.TRX.make t.widget.power ?keep_alive ?timeout ?max_frame
+                                   ~close:tcp.Tcp.TRX.close ~headers ~on_handshake
+                                   (Websocket.TRX.Client url) t.widget.logger in
+            ws.trx <=-> tcp.Tcp.TRX.trx.ins)
+    )
 
 let spider t max_depth start =
     let fetched = Hashtbl.create 100 in

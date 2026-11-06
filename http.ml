@@ -264,6 +264,7 @@ struct
         | HttpMsg of Pdu.t * bool (* tells whether the underlying transport is still open *)
     type t = { pending : Stdlib.Buffer.t ; (* received bytes not yet part of a message *)
                mutable wanted : int ; (* no message before [pending] is that long *)
+               mutable hand_over_to : (bitstring -> unit) option ;
                mutable emit : bitstring -> unit ;
                mutable emit_busy_for : unit -> Clock.Interval.t ;
                mutable recv : result -> unit }
@@ -277,7 +278,7 @@ struct
     let set_recv t recv = t.recv <- recv
 
     let make () =
-        { pending = Stdlib.Buffer.create 4096 ; wanted = 0 ;
+        { pending = Stdlib.Buffer.create 4096 ; wanted = 0 ; hand_over_to = None ;
           emit = ignore ; emit_busy_for = never_busy ; recv = ignore }
 
     let tx t pdu =
@@ -285,8 +286,20 @@ struct
         if debug then Printf.printf "Http: sending '%s'\n%!" (abbrev ~len:100 (string_of_bitstring pdu)) ;
         t.emit pdu
 
+    (** Stop parsing HTTP: from now on [f] receives what the transport
+        delivers, starting with what was received after the last message. *)
+    let hand_over t f =
+        t.hand_over_to <- Some f ;
+        if Stdlib.Buffer.length t.pending > 0 then (
+            let rest = Stdlib.Buffer.contents t.pending in
+            Stdlib.Buffer.clear t.pending ;
+            f (bitstring_of_string rest))
+
     (* An empty [bits] tells the transport is closed. *)
     let rx t bits =
+        match t.hand_over_to with
+        | Some f -> f bits
+        | None ->
         let eof = bitstring_is_empty bits in
         Stdlib.Buffer.add_string t.pending (string_of_bitstring bits) ;
         let error msg =
@@ -307,7 +320,7 @@ struct
                 Stdlib.Buffer.add_substring t.pending str n (String.length str - n) ;
                 t.wanted <- 0 ;
                 t.recv (HttpMsg (msg, not eof)) ;
-                if Stdlib.Buffer.length t.pending > 0 then parse () in
+                if t.hand_over_to = None && Stdlib.Buffer.length t.pending > 0 then parse () in
         if eof || Stdlib.Buffer.length t.pending >= t.wanted then parse ()
 end
 
@@ -492,4 +505,17 @@ let post_encode body =
     (* A response with no length is delimited by the end of the transport: *)
     let before, after = receive [ "HTTP/1.1 200 OK\r\n\r\nabc" ; "de" ] in
     assert_equal ~printer ([], [ 5, false ]) (body_lengths before, body_lengths after)
+*)
+(*$R
+    (* Once handed over, what follows the last message is no longer parsed: *)
+    let t = TRXtop.make () and msgs = ref 0 and rest = ref [] in
+    let f bits = rest := string_of_bitstring bits :: !rest in
+    TRXtop.set_recv t (function
+        | TRXtop.HttpMsg _ -> incr msgs ; TRXtop.hand_over t f
+        | TRXtop.HttpError _ -> assert_failure "error") ;
+    TRXtop.rx t (bitstring_of_string "GET / HTTP/1.1\r\n\r\nGET /x HTTP/1.1\r\n") ;
+    TRXtop.rx t (bitstring_of_string "\r\n") ;
+    TRXtop.rx t empty_bitstring ;
+    assert_equal ~printer:string_of_int 1 !msgs ;
+    assert_equal ~printer:dump [ "" ; "\r\n" ; "GET /x HTTP/1.1\r\n" ] !rest
 *)

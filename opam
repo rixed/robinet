@@ -26,6 +26,7 @@ depends: [
   "ppx_deriving_yojson"
   "qcheck" {with-test}
   "qtest" {with-test}
+  "sha"
   "yojson"
 ]
 depexts: [

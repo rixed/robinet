@@ -78,8 +78,12 @@ let params_of_query q =
 
   Notice that this example, if copied into test.ml, will generate a pcap containing the source code that
   generates the pcap :-)
+
+  A request to upgrade to a websocket is given to [websocket] instead of [f]:
+  if it returns [Some k], the connection becomes the websocket handed to [k]
+  (see [Websocket.TRX]); with [None], the request is refused with a 404.
 *)
-let serve (host : Host.host_trx) ?(port=Tcp.Port.o 80) f =
+let serve (host : Host.host_trx) ?(port=Tcp.Port.o 80) ?(websocket=fun _ -> None) f =
     let widget =
         Widget.make ~parent:host.Host.widget ("httpd:"^ Tcp.Port.to_string port) in
     host.tcp_server_start port (fun (tcp : Tcp.TRX.tcp_trx) ->
@@ -91,6 +95,19 @@ let serve (host : Host.host_trx) ?(port=Tcp.Port.o 80) f =
             | TRXtop.HttpError x ->
                 Log.(log widget.logger Debug (lazy (Printf.sprintf "Got error %s" x))) ;
                 tcp.close ()
+            | TRXtop.HttpMsg (pdu, true) when Websocket.is_upgrade pdu ->
+                (match websocket pdu with
+                | Some k ->
+                    Log.(log widget.logger Debug (lazy "Upgrading to websocket")) ;
+                    let ws = Websocket.TRX.(make widget.power ~close:tcp.close Server widget.logger) in
+                    ws.trx =-> tcp.trx.ins ;
+                    Websocket.TRX.accept ws pdu ;
+                    if ws.state = Websocket.TRX.Open then (
+                        k ws ;
+                        TRXtop.hand_over http ws.trx.out.write)
+                | None ->
+                    TRXtop.tx http (Pdu.make_response ~headers:[ "Content-Type", "text/plain" ]
+                                                      ~body:"No such websocket\n" 404))
             | TRXtop.HttpMsg (pdu, opened) ->
                 Log.(log widget.logger Debug (lazy "Got HTTP msg")) ;
                 if not opened then (
@@ -258,3 +275,52 @@ let multiplexer res _host http msg (widget : Widget.t) =
                          Pdu.headers = [ "Content-Length", Printf.sprintf "%d" (String.length body) ;
                                          "Content-Type", "text/plain" ] ;
                          Pdu.body = body }
+
+(* A browser's websocket upgraded from an HTTP connection, echoing in upper
+   case; and one to a URL that has none. *)
+(*$R
+    let sim = Simulation.make ~realtime:false "opache-websocket" in
+    let ip n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n) in
+    let host n =
+        Host.make ~parent:sim.root ~static_ip:(ip n)
+                  ~netmask:(Ip.Addr.of_string "255.255.255.0")
+                  ("h" ^ string_of_int n) in
+    let a = host 1 and b = host 2 in
+    let st = Eth.Cable.State.make ~parent:sim.root ~name:"c" () in
+    Eth.Cable.plug st (a.trx.widget, 0) (b.trx.widget, 0) ;
+    Simulation.run_startup sim ;
+    let req_headers = ref [] in
+    let websocket (req : Http.Pdu.t) =
+        match req.cmd with
+        | Http.Request (_, "/echo") ->
+            req_headers := req.headers ;
+            Some (fun (ws : Websocket.TRX.t) ->
+                sink (fun bits ->
+                    if bitstring_length bits > 0 then
+                        tx ws.trx (bitstring_of_string
+                            (String.uppercase_ascii (string_of_bitstring bits)))) <-= ws.trx |> ignore)
+        | _ -> None in
+    serve b.trx ~websocket (fun _ _ _ _ -> ()) ;
+    let browser = Browser.make ~user_agent:"Test" ~parent:sim.root a.trx in
+    Browser.store_cookies browser "192.168.0.2" "/" [ "Set-Cookie", "SID=42" ] ;
+    let connect path =
+        let got = ref [] and ws = ref None in
+        Browser.websocket browser (Url.of_string ("ws://192.168.0.2"^ path)) (fun w ->
+            ws := w ;
+            Option.may (fun (w : Websocket.TRX.t) ->
+                sink (fun b -> got := string_of_bitstring b :: !got) <-= w.trx |> ignore ;
+                tx w.trx (bitstring_of_string "hello")) w) ;
+        Simulation.run sim false ;
+        !ws, got in
+    (match connect "/echo" with
+    | Some ws, got ->
+        assert_equal ~printer:dump [ "HELLO" ] !got ;
+        assert_equal ~printer:dump (Some "Test") (Http.headers_find "User-Agent" !req_headers) ;
+        assert_equal ~printer:dump (Some "SID=42") (Http.headers_find "Cookie" !req_headers) ;
+        tx ws.trx empty_bitstring ;
+        Simulation.run sim false ;
+        assert_bool "closed" (ws.state = Websocket.TRX.Closed) ;
+        assert_equal ~printer:dump [ "" ; "HELLO" ] !got
+    | None, _ -> assert_failure "cannot open") ;
+    assert_bool "refused" (fst (connect "/nope") = None)
+*)
