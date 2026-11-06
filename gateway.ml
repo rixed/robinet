@@ -657,3 +657,52 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     assert_bool "Desktop was NATed" (!src = Some public_ip)
  *)
 
+
+(* An error about a packet the NAT translated reaches the LAN host that sent
+   it, which then sizes its packets for the path. *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "gw-pmtud" in
+    let a = Ip.Addr.of_string and c = Ip.Cidr.of_string in
+    let gw =
+        make ~parent:sim.root ~public_netmask:(a "255.255.255.0")
+             ~public_gw:(Eth.Gateway.Ip (a "80.82.17.254"))
+             (a "80.82.17.127") (c "192.168.0.0/24") in
+    let r =
+        Router.make_from_addrs ~parent:sim.root
+            [| [ c "80.82.17.254/24", None ], Eth.Addr.random () ;
+               [ c "10.0.1.254/24", None ], Eth.Addr.random () |] "r" in
+    r.ifaces.(1).eth.mtu <- 1400 ;
+    let far : Host.t =
+        Host.make ~parent:sim.root ~static_ip:(a "10.0.1.1")
+                  ~netmask:(a "255.255.255.0")
+                  ~gateways:[ Eth.State.gw_selector (),
+                              Some (Eth.Gateway.Ip (a "10.0.1.254")) ]
+                  "far" in
+    let client : Host.t =
+        Host.make ~parent:sim.root ~static_ip:(a "192.168.0.10")
+                  ~netmask:(a "255.255.255.0") ~pmtud:true
+                  ~gateways:[ Eth.State.gw_selector (),
+                              Some (Eth.Gateway.Ip (a "192.168.0.1")) ]
+                  "client" in
+    let plug name w1 p1 w2 p2 =
+        Eth.Cable.plug (Eth.Cable.State.make ~parent:sim.root ~name ())
+                       (w1, p1) (w2, p2) in
+    plug "c1" client.trx.widget 0 gw.widget 1 ;
+    plug "c2" gw.widget 0 r.widget 0 ;
+    plug "c3" r.widget 1 far.trx.widget 0 ;
+    Simulation.run_startup sim ;
+    let received = ref 0 in
+    far.trx.tcp_server_start (Tcp.Port.o 9) (fun (cnx : Tcp.TRX.tcp_trx) ->
+        cnx.trx.ins --> sink (fun bits ->
+            received := !received + Bitstring.bitstring_length bits / 8)) ;
+    client.trx.tcp_connect (Host.Ip (a "10.0.1.1")) (Tcp.Port.o 9) (function
+        | None -> ()
+        | Some (cnx : Tcp.TRX.tcp_trx) ->
+            tx cnx.trx (Bitstring.zeroes_bitstring (50_000 * 8))) ;
+    Simulation.run sim false ;
+    assert_equal ~printer:string_of_int ~msg:"all received" 50_000 !received ;
+    assert_equal ~printer:(IO.to_string (Option.print Int.print))
+        ~msg:"path MTU learnt" (Some 1400) (Host.path_mtu client (a "10.0.1.1")) ;
+    assert_equal ~printer:string_of_int ~msg:"not fragmented" 0
+        far.ip_counters.Ip.TRX.frags_in
+ *)
