@@ -569,7 +569,9 @@ module Extension = struct
 
     (** The extensions starting [bits], which follow a header announcing
      * [typ], the upper-layer protocol and its payload. The chain ends at
-     * the first header that is not an extension or that is truncated. *)
+     * the first header that is not an extension or that is truncated, and
+     * after the fragment header of a fragment but the first, what follows it
+     * being the middle of a packet. *)
     let rec unpack typ bits =
         let stop () = [], typ, bits in
         if not (is_extension typ) then stop () else
@@ -580,8 +582,12 @@ module Extension = struct
                 else if typ = 51 then 4 * (len + 2) (* AH *)
                 else 8 * (len + 1) in
             if 8 * len > bitstring_length bits then stop () else
-            let exts, proto, payload = unpack next (dropbytes len bits) in
-            decode typ (takebytes len bits) :: exts, proto, payload
+            (match decode typ (takebytes len bits) with
+            | Fragment { offset ; _ } as e when offset > 0 ->
+                [ e ], next, dropbytes len bits
+            | e ->
+                let exts, proto, payload = unpack next (dropbytes len bits) in
+                e :: exts, proto, payload)
         | {| _ |} ->
             stop ()
 
@@ -639,7 +645,12 @@ module Extension = struct
                 Other { typ = 51 ;
                         body = concat [ [%bitstring {| len : 8 |}] ;
                                         randbs (4 * (len + 2) - 2) ] } in
-        List.init (Random.int 4) (fun _ -> pad (one ()))
+        (* A later fragment's header ends the chain: *)
+        let rec cut = function
+            | [] -> []
+            | Fragment { offset ; _ } as e :: _ when offset > 0 -> [ e ]
+            | e :: rest -> e :: cut rest in
+        cut (List.init (Random.int 4) (fun _ -> pad (one ())))
 
     module Kinds =
     struct
@@ -824,6 +835,17 @@ module Pdu = struct
       (match unpack bits' with Ok ip -> ip.ttl = 8 | Error _ -> false)
      *)
 
+    (** The extensions all fragments repeat, and those that are fragmented
+     * with the upper-layer packet: what is past the last routing header, or
+     * past the hop-by-hop options if there is none (RFC 8200, 4.5). *)
+    let split_unfragmentable exts =
+        let n, _ =
+            List.fold_left (fun (n, i) -> function
+                | Extension.Routing _ -> i + 1, i + 1
+                | Extension.Hop_by_hop _ when i = 0 -> 1, 1
+                | _ -> n, i + 1) (0, 0) exts in
+        List.takedrop n exts
+
     (** Where the upper-layer packet goes (RFC 8200, 8.1). *)
     let final_dst t =
         List.find_map_opt (function
@@ -908,6 +930,31 @@ module Pdu = struct
       Bitstring.equals (chk [ Extension.Fragment { offset = 0 ; more = true ; id = 1l } ] b) \
                        (Bitstring.zeroes_bitstring 16)
      *)
+
+    (** [t], which is not a fragment, packed in packets of at most [mtu]
+     * bytes: itself if it fits, or else fragments of an id from [next_id].
+     * The checksum is patched before splitting.
+     * Raises Invalid_argument if [mtu] leaves no room for 8 bytes of
+     * fragment data. *)
+    let fragment ?(next_id=fun () -> Int32.of_int (Ip.Pdu.next_rand32 ())) mtu t =
+        let bits = pack t in
+        if bytelength bits <= mtu then [ bits ] else
+        let unfrag, frag = split_unfragmentable t.extensions in
+        let unfrag_len = 40 + bytelength (snd (Extension.pack unfrag 0)) in
+        let next, _ = Extension.pack frag (t.proto :> int) in
+        let data = dropbytes unfrag_len bits in
+        let max_len = (mtu - unfrag_len - 8) land (lnot 7) in
+        if max_len < 8 then invalid_arg "Ip6.Pdu.fragment: MTU too small" ;
+        let len = bytelength data and id = next_id () in
+        let rec loop pos acc =
+            let last = len - pos <= max_len in
+            let n = if last then len - pos else max_len in
+            let f = Extension.Fragment { offset = pos lsr 3 ; more = not last ; id } in
+            let bits =
+                pack { t with extensions = unfrag @ [ f ] ; proto = Ip.Proto.o next ;
+                              payload = Payload.o (takebytes n (dropbytes pos data)) } in
+            if last then List.rev (bits :: acc) else loop (pos + n) (bits :: acc) in
+        loop 0 []
 
     (* TODO: unpack with ports a la ip.ml? *)
 
@@ -1022,12 +1069,20 @@ end
 
 module TRX = struct
 
+    (* Fragments are told apart by their source, destination and id (RFC
+     * 8200, 4.5): *)
+    type reassemble_key = Ip.Addr.t * Ip.Addr.t * int32
+
+    (* What a reassembled packet takes from its first fragment: that packet
+     * with only the extensions before the fragment header, and the next
+     * header that one announces. *)
+    type reassembled = (reassemble_key, (Pdu.t * int) Ip.TRX.frag list ref) Hashtbl.t
+
     type t = { logger : Log.t ;
                power : Simulation.power ;
                src : Ip.Addr.t ; dst : Ip.Addr.t ;
                proto : Ip.Proto.t ;
-               (* Hosts do not fragment: a larger packet is dropped. See
-                * [set_mtu]. *)
+               (* A larger packet leaves in fragments. See [set_mtu]. *)
                mutable mtu : int ;
                (* The traffic class, as [Ip.TRX]'s type of service, and the
                 * hop limit of all emitted packets unless [tx] is told
@@ -1037,7 +1092,9 @@ module TRX = struct
                mutable emit : bitstring -> unit ;
                mutable emit_busy_for : unit -> Clock.Interval.t ;
                mutable recv : bitstring -> unit ;
-               mutable recv_busy_for : unit -> Clock.Interval.t }
+               mutable recv_busy_for : unit -> Clock.Interval.t ;
+               reassembled : reassembled ;
+               counters : Ip.TRX.counters }
 
     let check_mtu mtu =
         ensure (mtu >= 1280) "Ip6: MTU must be at least 1280 bytes"
@@ -1051,40 +1108,73 @@ module TRX = struct
         let tos = (tos |? t.tos :> int) and ttl = ttl |? t.ttl in
         let pdu = Pdu.make ~ttl ~diff_serv:(tos lsr 2) ~ecn:(tos land 3)
                            t.proto t.src t.dst bits in
-        let bits = Pdu.pack pdu in
-        if bytelength bits > t.mtu then
-            Log.(log t.logger Warning (lazy (Printf.sprintf
-                "Ip6: Dropping a packet of %d bytes to %s, larger than the MTU of %d"
-                (bytelength bits) (Ip.Addr.to_dotted_string t.dst) t.mtu)))
-        else (
+        let frags = Pdu.fragment t.mtu pdu in
+        (match List.length frags with
+        | 1 -> ()
+        | n ->
+            t.counters.fragmented <- t.counters.fragmented + 1 ;
+            t.counters.frags_out <- t.counters.frags_out + n) ;
+        List.iter (fun bits ->
             Log.(log t.logger Debug (lazy (Printf.sprintf
                 "Ip6: Emitting an IPv6 packet from %s to %s of length %d (content '%s')"
                 (Ip.Addr.to_dotted_string t.src) (Ip.Addr.to_dotted_string t.dst)
-                (Payload.length pdu.payload) (hexstring_of_bitstring bits)))) ;
-            Simulation.asap t.power t.emit bits)
+                (bytelength bits) (hexstring_of_bitstring bits)))) ;
+            Simulation.asap t.power t.emit bits) frags
 
-    (* Fragments are dropped, there being no reassembly: *)
+    (* As Linux's ip6frag_time, and RFC 8200, 4.5: *)
+    let reassembly_timeout = Clock.Interval.sec 60.
+
+    (** The packet [ip], a fragment, is of, as if it had not been
+     * fragmented, once [reassembled] has all of its fragments. Its header and
+     * the extensions before the fragment header are those of the first.
+     * Overlapping fragments are dropped, and so is one but the last whose
+     * length is not a multiple of 8. *)
+    let reassemble_into power counters (reassembled : reassembled) (ip : Pdu.t) =
+        match List.span (function Extension.Fragment _ -> false | _ -> true)
+                        ip.extensions with
+        | unfrag, Extension.Fragment f :: after ->
+            (* What follows the fragment header, as it was sent: *)
+            let next, after = Extension.pack after (ip.proto :> int) in
+            let data = concat [ after ; (ip.payload :> bitstring) ] in
+            if f.more && bytelength data land 7 <> 0 then None else
+            Ip.TRX.reassemble_frags power counters ~strict:true
+                ~timeout:reassembly_timeout reassembled (ip.src, ip.dst, f.id)
+                { Ip.TRX.offset = f.offset ; more = f.more ; data ;
+                  hdr = { ip with extensions = unfrag ;
+                                  payload = Payload.o empty_bitstring }, next } |>
+            Option.map (fun (((first : Pdu.t), next), data) ->
+                let after, proto, payload = Extension.unpack next data in
+                { first with extensions = first.extensions @ after ;
+                             proto = Ip.Proto.o proto ;
+                             payload = Payload.o payload })
+        | _ ->
+            Some ip
+
     let rx (t : t) bits =
         match Pdu.unpack bits with
         | Error s ->
             Log.(log t.logger Warning s)
-        | Ok ip when Pdu.is_fragment ip ->
-            Log.(log t.logger Debug (lazy (Printf.sprintf
-                "Ip6: Ignoring a fragment from %s to %s"
-                (Ip.Addr.to_dotted_string ip.src) (Ip.Addr.to_dotted_string ip.dst))))
         | Ok ip ->
-            if Payload.bitlength ip.payload > 0 then
-                Simulation.asap t.power t.recv (ip.payload :> bitstring)
+            let ip =
+                if Pdu.is_fragment ip then
+                    reassemble_into t.power t.counters t.reassembled ip
+                else Some ip in
+            Option.may (fun (ip : Pdu.t) ->
+                if Payload.bitlength ip.payload > 0 then
+                    Simulation.asap t.power t.recv (ip.payload :> bitstring)
+            ) ip
 
     (* Note: In Eth we do not require dst addr since the trx knows (using ARP) how to get dest addr itself.
      *       IP cannot do this since the application layer won't tell him the destination hostname. Or
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
-    let create power ?(mtu=1500) ?(tos=Ip.ToS.o 0) ?(ttl=64) src dst proto logger =
+    let create power ?(mtu=1500) ?(tos=Ip.ToS.o 0) ?(ttl=64)
+               ?(counters=Ip.TRX.make_counters ()) src dst proto logger =
         check_mtu mtu ;
         { logger ; power ; src ; dst ; proto ; mtu ; tos ; ttl ;
           emit = ignore_bits ~logger ; emit_busy_for = never_busy ;
-          recv = ignore_bits ~logger ; recv_busy_for = never_busy }
+          recv = ignore_bits ~logger ; recv_busy_for = never_busy ;
+          reassembled = Hashtbl.create 10 ; counters }
 
     let trx_of t =
         { ins = { write = tx t ;
@@ -1096,10 +1186,13 @@ module TRX = struct
                   set_read = fun f busy_for ->
                       t.emit <- f ; t.emit_busy_for <- busy_for } }
 
-    let make power ?mtu ?tos ?ttl src dst proto logger =
-        trx_of (create power ?mtu ?tos ?ttl src dst proto logger)
+    let make power ?mtu ?tos ?ttl ?counters src dst proto logger =
+        trx_of (create power ?mtu ?tos ?ttl ?counters src dst proto logger)
 
     (*$< TRX *)
+    (* [frags_of s] is what a TRX of [mtu] from [a] to [b] emits for [s], of a
+     * protocol whose checksum is not patched in; [frag s off len more] is a
+     * hand made fragment of [s] (offsets and lengths in bytes). *)
     (*$inject
       let sim = Simulation.make ~realtime:false "ip6-trx"
       let a = Ip.Addr.of_string "2001:db8::1" and b = Ip.Addr.of_string "2001:db8::2"
@@ -1112,20 +1205,41 @@ module TRX = struct
         Simulation.run sim false ;
         List.map (fun bits -> Result.get_ok (Pdu.unpack bits)) !out
 
-      let received pkts =
+      let received_bits bits =
         let trx = make sim.root.power b a Ip.Proto.udp sim.root.logger in
         let got = ref [] in
         trx.ins --> sink (fun bits -> got := Bitstring.string_of_bitstring bits :: !got) ;
-        List.iter (fun p -> trx.out.write (Pdu.pack p)) pkts ;
+        List.iter trx.out.write bits ;
         Simulation.run sim false ;
         List.rev !got
+
+      let received pkts = received_bits (List.map Pdu.pack pkts)
+
+      let frags_of ?(mtu=1280) s =
+        let t = create sim.root.power ~mtu a b (Ip.Proto.o 99) sim.root.logger in
+        let out = ref [] in
+        (trx_of t).out --> sink (fun bits -> out := bits :: !out) ;
+        tx t (Bitstring.bitstring_of_string s) ;
+        Simulation.run sim false ;
+        List.rev !out
+
+      let frag s off len more =
+        Pdu.make ~extensions:[ Extension.Fragment { offset = off / 8 ; more ; id = 7l } ]
+                 (Ip.Proto.o 99) a b (Bitstring.bitstring_of_string (String.sub s off len))
+
+      let big = String.init 3000 (fun i -> Char.chr (i land 0xff))
     *)
     (*$T emitted
       match emitted ~tos:(Ip.ToS.o 0xb9) ~ttl:7 10 with \
       | [ p ] -> p.ttl = 7 && p.diff_serv = 0x2e && p.ecn = 1 \
       | _ -> false
       emitted (1500 - 40) |> List.length = 1
-      emitted (1500 - 39) = []
+      emitted (1500 - 39) |> List.length = 2
+    *)
+    (* Fragments are as large as the MTU allows, but the last, all of the same
+     * id, and their data a multiple of 8 bytes but the last: *)
+    (*$T frags_of
+      let frags = List.map (Result.get_ok % Pdu.unpack) (frags_of big) in       List.map (fun bits -> Tools.bytelength bits) (frags_of big) = [ 1280 ; 1280 ; 584 ] &&       (match List.map (fun (p : Pdu.t) -> p.extensions) frags with        | [ [ Extension.Fragment f0 ] ; [ Extension.Fragment f1 ] ; [ Extension.Fragment f2 ] ] ->            f0.id = f1.id && f1.id = f2.id &&            f0.offset = 0 && f1.offset = 154 && f2.offset = 308 &&            f0.more && f1.more && not f2.more        | _ -> false)
     *)
     (*$T set_mtu
       let t = create sim.root.power a b Ip.Proto.udp sim.root.logger in \
@@ -1137,12 +1251,50 @@ module TRX = struct
         !out in \
       let before = count () in \
       set_mtu t 1280 ; \
-      before = 1 && count () = 0
+      before = 1 && count () = 2
     *)
     (*$T received
       received [ Pdu.make Ip.Proto.udp a b (Bitstring.bitstring_of_string "x") ; \
                  Pdu.make ~extensions:[ Extension.Fragment { offset = 0 ; more = true ; id = 1l } ] \
                           Ip.Proto.udp a b (Bitstring.bitstring_of_string "y") ] = [ "x" ]
+    *)
+    (*$= received_bits & ~printer:(IO.to_string (List.print String.print))
+      [ big ] (received_bits (frags_of big))
+      [ big ] (received_bits (List.rev (frags_of big)))
+      [ big ] (received_bits (frags_of ~mtu:1500 big))
+    *)
+    (* Duplicates are ignored, overlaps drop the packet, as does a fragment
+     * but the last that is not a multiple of 8 bytes; an atomic fragment is a
+     * whole packet: *)
+    (*$= received & ~printer:(IO.to_string (List.print String.print))
+      [ String.sub big 0 24 ] \
+        (received [ frag big 0 16 true ; frag big 0 16 true ; frag big 16 8 false ])
+      [] (received [ frag big 0 16 true ; frag big 8 16 false ])
+      [] (received [ frag big 0 16 true ; frag big 0 24 true ; frag big 24 8 false ])
+      [ String.sub big 0 8 ] (received [ frag big 0 8 false ])
+      [] (received [ frag big 0 12 true ; frag big 12 12 false ])
+    *)
+    (* Extensions past the last routing header travel in the fragments, and are
+     * read back as sent: *)
+    (*$T reassemble_into
+      let srh = Extension.(Routing (Routing.Srh { segments_left = 0 ; flags = 0 ; tag = 0 ; \
+                                                  segments = [ b ] ; tlvs = [] })) \
+      and dopts = Extension.pad (Extension.Dest_opts [ Extension.Options.PadN 4 ]) in \
+      let p = Pdu.make ~extensions:[ Extension.Hop_by_hop [ Extension.Options.PadN 4 ] ; srh ; dopts ] \
+                       Ip.Proto.udp a b (Udp.Pdu.(pack (make (Bitstring.bitstring_of_string big)))) in \
+      let frags = Pdu.fragment 1280 p in \
+      let r = Hashtbl.create 1 in \
+      let got = List.filter_map (fun bits -> \
+        reassemble_into sim.root.power (Ip.TRX.make_counters ()) r \
+                        (Result.get_ok (Pdu.unpack bits))) frags in \
+      List.length frags = 3 && \
+      List.for_all (fun bits -> \
+        match Pdu.unpack bits with \
+        | Ok q -> List.length q.extensions >= 3 \
+        | Error _ -> false) frags && \
+      (match got with \
+       | [ q ] -> Bitstring.equals (Pdu.pack q) (Pdu.pack p) \
+       | _ -> false)
     *)
     (*$>*)
 end

@@ -124,8 +124,10 @@ and t = {
     eth_trx     : trx ;
     sockets     : (sock_key, socket) Hashtbl.t ;
     (* Fragments received so far, for every socket: *)
-    reassembled : (Ip.TRX.reassemble_key, Ip.Pdu.t list ref) Hashtbl.t ;
+    reassembled : (Ip.TRX.reassemble_key, unit Ip.TRX.frag list ref) Hashtbl.t ;
     ip_counters : Ip.TRX.counters ;
+    reassembled6 : Ip6.TRX.reassembled ;
+    ip6_counters : Ip.TRX.counters ;
     (* the listening servers *)
     tcp_servers : (Tcp.Port.t, tcp_server) Hashtbl.t ;
     udp_servers : (Udp.Port.t, udp_server) Hashtbl.t ;
@@ -315,8 +317,7 @@ let sweep_tcps t =
         | { sock = Udp_sock _ ; _ } -> true) t.sockets
 
 (* A new IP TRX from [local] to [remote], of their family, emitting to the
- * adapter, and what resizes its packets. IPv6 ones drop what exceeds the MTU
- * rather than fragment it; IPv4 ones set DF with [pmtud]. *)
+ * adapter, and what resizes its packets. IPv4 ones set DF with [pmtud]. *)
 let ip_trx t proto local remote =
     let power = t.trx.widget.power and mtu = ip_mtu t local remote
     and logger = t.trx.widget.logger in
@@ -1144,7 +1145,7 @@ let ip4_recv t bits =
             else
                 deliver ip
 
-(* Fragments are dropped, there being no reassembly. *)
+(* Same, for IPv6: *)
 let ip6_recv t bits =
     match Ip6.Pdu.unpack bits with
     | Error s ->
@@ -1159,19 +1160,24 @@ let ip6_recv t bits =
             Log.(log t.trx.widget.logger Info (lazy (Printf.sprintf
                 "Received an IPv6 packet for %s, not for me"
                 (Ip.Addr.to_string ip.dst))))
-        | Some _ when Ip6.Pdu.is_fragment ip ->
-            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf
-                "Ignoring a fragment from %s" (Ip.Addr.to_string ip.src))))
         | Some local ->
-            let remote = ip.src and bits = (ip.payload :> bitstring) in
-            if ip.proto = Ip.Proto.tcp then
-                tcp_rx t ~local ~remote bits
-            else if ip.proto = Ip.Proto.udp then
-                udp_rx t ~local ~remote ~to_all bits ~unreachable:(fun () ->
-                    Icmp6.Pdu.make_port_unreachable ip |> Icmp6.Pdu.pack |>
-                    ip_reply t Ip.Proto.icmpv6 local remote)
-            else if ip.proto = Ip.Proto.icmpv6 then
-                icmp6_rx t ~local ~remote ~ttl:ip.ttl bits
+            let remote = ip.src in
+            let deliver (ip : Ip6.Pdu.t) =
+                let bits = (ip.payload :> bitstring) in
+                if ip.proto = Ip.Proto.tcp then
+                    tcp_rx t ~local ~remote bits
+                else if ip.proto = Ip.Proto.udp then
+                    udp_rx t ~local ~remote ~to_all bits ~unreachable:(fun () ->
+                        Icmp6.Pdu.make_port_unreachable ip |> Icmp6.Pdu.pack |>
+                        ip_reply t Ip.Proto.icmpv6 local remote)
+                else if ip.proto = Ip.Proto.icmpv6 then
+                    icmp6_rx t ~local ~remote ~ttl:ip.ttl bits in
+            if Ip6.Pdu.is_fragment ip then
+                Ip6.TRX.reassemble_into t.trx.widget.power t.ip6_counters
+                                        t.reassembled6 ip |>
+                Option.may deliver
+            else
+                deliver ip
 
 let ip_recv t bits =
     if t.trx.widget.power.on && bitstring_length bits >= 4 then
@@ -1180,13 +1186,15 @@ let ip_recv t bits =
         | {| _ |} -> ip4_recv t bits
 
 (* Datagrams larger than the MTU arrive whole, each to the socket of its
-   ports. *)
+   ports, over either family. *)
 (*$R make
     let sim = Simulation.make ~realtime:false "reassembly" in
-    let ip n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n) in
+    let ip n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n)
+    and ip6 n = Ip.Addr.of_string ("2001:db8::" ^ string_of_int n) in
     let host n =
         make ~parent:sim.root ~static_ip:(ip n)
              ~netmask:(Ip.Addr.of_string "255.255.255.0")
+             ~addresses:[ Ip.Cidr.of_string ("2001:db8::" ^ string_of_int n ^ "/64") ]
              ("h" ^ string_of_int n) in
     let a = host 1 and b = host 2 in
     let st = Eth.Cable.State.make ~parent:sim.root ~name:"c" () in
@@ -1197,8 +1205,8 @@ let ip_recv t bits =
         udp.trx.ins --> sink (fun bits ->
             received := ((snd (udp.get_ports ()) :> int), Bitstring.bitstring_length bits / 8)
                         :: !received)) ;
-    let send src_port len =
-        a.trx.udp_connect (Ip (ip 2)) ~src_port:(Udp.Port.o src_port)
+    let send ?(dst=ip 2) src_port len =
+        a.trx.udp_connect (Ip dst) ~src_port:(Udp.Port.o src_port)
             (Udp.Port.o 5000) (fun _ _ -> ()) (function
             | None -> assert_failure "cannot connect"
             | Some (u : Udp.TRX.udp_trx) ->
@@ -1206,9 +1214,13 @@ let ip_recv t bits =
         Simulation.run sim false in
     send 6000 4000 ;
     send 6001 3000 ;
+    send ~dst:(ip6 2) 6002 4000 ;
+    send ~dst:(ip6 2) 6003 3000 ;
     assert_equal ~printer:(IO.to_string (List.print (Tuple2.print Int.print Int.print)))
-        [ 6000, 4000 ; 6001, 3000 ] (List.sort Stdlib.compare !received) ;
-    assert_equal ~printer:string_of_int 2 (Hashtbl.length b.sockets)
+        [ 6000, 4000 ; 6001, 3000 ; 6002, 4000 ; 6003, 3000 ]
+        (List.sort Stdlib.compare !received) ;
+    assert_equal ~printer:string_of_int 4 (Hashtbl.length b.sockets) ;
+    assert_equal ~printer:string_of_int 2 b.ip6_counters.Ip.TRX.reassembled
  *)
 
 (* Dual-stack hosts talk each family from their address of that family. *)
@@ -1394,6 +1406,7 @@ let reset t =
     t.leased_mtu_plateaus <- None ;
     Hashtbl.clear t.sockets ;
     Hashtbl.clear t.reassembled ;
+    Hashtbl.clear t.reassembled6 ;
     (* What it was serving stays: a machine switched off and on again comes
        back running what it runs, and the conversations it was having are what
        it loses. Clearing these left a gateway that had been switched off
@@ -1639,6 +1652,8 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
         sockets       = Hashtbl.create 11 ;
         reassembled   = Hashtbl.create 11 ;
         ip_counters   = Ip.TRX.make_counters () ;
+        reassembled6  = Hashtbl.create 11 ;
+        ip6_counters  = Ip.TRX.make_counters () ;
         tcp_servers   = Hashtbl.create 11 ;
         udp_servers   = Hashtbl.create 11 ;
         own_ip_config ;

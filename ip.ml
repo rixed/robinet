@@ -1133,18 +1133,20 @@ module Pdu = struct
         (*$>*)
     end
 
-    (* IP ids are the top 16 bits of a xorshift32 generator: not sequential,
-     * and of period 2^32-1. Faster than what's doable with Random and
-     * independent of the simulation random generator. *)
+    (* IP ids are the top 16 bits of a xorshift32 generator (IPv6 ones all
+     * of it): not sequential, and of period 2^32-1. Faster than what's doable
+     * with Random and independent of the simulation random generator. *)
     let id_seq = ref 0
-    let next_id () =
+    let next_rand32 () =
         let x = !id_seq in
         let x = if x = 0 then 1 + Random.full_int 0xffff_ffff else x in
         let x = x lxor ((x lsl 13) land 0xffff_ffff) in
         let x = x lxor (x lsr 17) in
         let x = x lxor ((x lsl 5) land 0xffff_ffff) in
         id_seq := x ;
-        x lsr 16
+        x
+
+    let next_id () = next_rand32 () lsr 16
 
     type t = { tos : ToS.t ; tot_len : int ;
                id : int ; dont_frag : bool ; more_frags : bool ; frag_offset : int ;
@@ -1577,15 +1579,18 @@ module TRX = struct
         mutable emit_busy_for : unit -> Clock.Interval.t ;
         mutable recv : bitstring -> unit ;
         mutable recv_busy_for : unit -> Clock.Interval.t ;
-        (* Fragments, sorted by frag_offset. The ref is to compare with `==`.
-         * See [reassemble_into]. *)
-        reassembled : (reassemble_key, Pdu.t list ref) Hashtbl.t ;
+        (* See [reassemble_into]. *)
+        reassembled : (reassemble_key, unit frag list ref) Hashtbl.t ;
         counters : counters
     }
 
     (* We might want to reassemble packets that are not destined to [t.src] (broadcast, ICMP
      * error, wtv) so let's use the IPs in additon to the ID to identify reassembled packets: *)
     and reassemble_key = Addr.t * Addr.t * Proto.t * int (* src, dst, proto, id *)
+
+    (* A fragment: [offset] in 8 bytes units, whether [more] follow, its
+     * [data] and [hdr], what the reassembled packet takes from its first: *)
+    and 'a frag = { offset : int ; more : bool ; data : bitstring ; hdr : 'a }
 
     let options_len options = bytelength (Pdu.Opt.pack options)
 
@@ -1627,76 +1632,95 @@ module TRX = struct
     (* As Linux's ipfrag_time: *)
     let reassembly_timeout = Clock.Interval.sec 30.
 
-    (** The payload of the packet [ip] is a fragment of, once [reassembled]
-     * (the fragments received so far) has all of them, unless it took more
-     * than [reassembly_timeout] since the first one. *)
-    let reassemble_into power counters reassembled (ip : Pdu.t) =
-        let key = ip.src, ip.dst, ip.proto, ip.id in
+    (** The [hdr] of the first fragment and the whole data of the packet
+     * [frag] is of, once [reassembled] (the fragments received so far, under
+     * [key], sorted by offset; the ref is to compare with [==]) has all of
+     * them, unless it took more than [timeout] since the first one. With
+     * [strict], fragments that overlap but for exact duplicates drop the
+     * whole packet (RFC 5722); otherwise the longest at an offset is kept and
+     * overlaps are read from the first that covers them. *)
+    let reassemble_frags power counters ?(strict=false) ~timeout reassembled
+                         key frag =
         counters.frags_in <- counters.frags_in + 1 ;
+        (* Offsets and lengths in bits: *)
+        let start f = f.offset lsl 6
+        and stop f = (f.offset lsl 6) + bitstring_length f.data in
         match Hashtbl.find reassembled key with
         | exception Not_found ->
-            let line = ref [ ip ] in
+            let line = ref [ frag ] in
             Hashtbl.add reassembled key line ;
             (* A later packet may have reused the key by then.
              * TODO: an ICMP Time Exceeded (code 1) if the first fragment
              * was received (RFC 792). *)
-            Simulation.delay power reassembly_timeout (fun () ->
+            Simulation.delay power timeout (fun () ->
                 match Hashtbl.find_option reassembled key with
                 | Some l when l == line ->
                     counters.reasm_timeouts <- counters.reasm_timeouts + 1 ;
                     Hashtbl.remove reassembled key
                 | _ -> ()) () ;
             None
+        | line when strict &&
+                    List.exists (fun f ->
+                        start f < stop frag && start frag < stop f &&
+                        (start f <> start frag || stop f <> stop frag)) !line ->
+            Hashtbl.remove reassembled key ;
+            None
         | line ->
             let frags = !line in
             (* Insert the fragment: *)
             let rec loop prevs = function
                 | [] ->
-                    List.rev (ip :: prevs)
-                | ((f : Pdu.t) :: rest) ->
-                    (* if [ip] starts before [f] then insert [ip] here.
+                    List.rev (frag :: prevs)
+                | f :: rest ->
+                    (* if [frag] starts before [f] then insert [frag] here.
                      * if they start at the same place, keep the longest.
-                     * if [ip] starts after [f] then keep going. *)
-                    if ip.frag_offset < f.frag_offset then
-                        List.rev_append (ip :: prevs) (f :: rest)
-                    else if ip.frag_offset = f.frag_offset then
-                        if Payload.bitlength ip.payload > Payload.bitlength f.payload then
-                            List.rev_append (ip :: prevs) rest
+                     * if [frag] starts after [f] then keep going. *)
+                    if frag.offset < f.offset then
+                        List.rev_append (frag :: prevs) (f :: rest)
+                    else if frag.offset = f.offset then
+                        if stop frag > stop f then
+                            List.rev_append (frag :: prevs) rest
                         else
                             frags (* the original list *)
                     else
                         loop (f :: prevs) rest in
             let frags = loop [] frags in
-            (* Offsets and lengths in bits: *)
-            let start (f : Pdu.t) = f.frag_offset lsl 6
-            and stop (f : Pdu.t) = (f.frag_offset lsl 6) + Payload.bitlength f.payload in
             (* Complete when the fragments cover from 0 without a gap, up to
-             * the end of one without more_frags: *)
-            let rec is_complete covered more_frags = function
+             * the end of one without more: *)
+            let rec is_complete covered more = function
                 | [] ->
-                    not more_frags
+                    not more
                 | f :: rest ->
                     if start f > covered then false
-                    else if stop f <= covered then is_complete covered more_frags rest
-                    else is_complete (stop f) f.Pdu.more_frags rest in
+                    else if stop f <= covered then is_complete covered more rest
+                    else is_complete (stop f) f.more rest in
             if is_complete 0 true frags then (
                 Hashtbl.remove reassembled key ;
                 counters.reassembled <- counters.reassembled + 1 ;
-                (* Rebuild the payload, skipping whatever is already covered: *)
-                let rec loop covered plds = function
+                (* Rebuild the data, skipping whatever is already covered: *)
+                let rec loop covered datas = function
                     | [] ->
-                        Bitstring.concat (List.rev plds)
-                    | (f : Pdu.t) :: rest ->
+                        Bitstring.concat (List.rev datas)
+                    | f :: rest ->
                         if stop f <= covered then
-                            loop covered plds rest
+                            loop covered datas rest
                         else
-                            let pld = dropbits (covered - start f) (f.payload :> bitstring) in
-                            loop (stop f) (pld :: plds) rest in
-                Some (loop 0 [] frags)
+                            let data = dropbits (covered - start f) f.data in
+                            loop (stop f) (data :: datas) rest in
+                Some ((List.hd frags).hdr, loop 0 [] frags)
             ) else (
                 line := frags ;
                 None
             )
+
+    (** The payload of the packet [ip] is a fragment of, once [reassembled]
+     * has all of them. *)
+    let reassemble_into power counters reassembled (ip : Pdu.t) =
+        reassemble_frags power counters ~timeout:reassembly_timeout reassembled
+            (ip.src, ip.dst, ip.proto, ip.id)
+            { offset = ip.frag_offset ; more = ip.more_frags ;
+              data = (ip.payload :> bitstring) ; hdr = () } |>
+        Option.map snd
 
     let reassemble t ip = reassemble_into t.power t.counters t.reassembled ip
 

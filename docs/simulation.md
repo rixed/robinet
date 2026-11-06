@@ -191,8 +191,8 @@ A host does path MTU discovery. A router's *packet too big*, or with
 `path MTU discovery` its *fragmentation needed*, about a packet the host sent,
 lowers the MTU of the path to that destination: the open connections send
 smaller segments at once, resending those that were dropped, and the later
-ones start with them. A UDP datagram that was dropped is lost; over IPv4 the
-next ones leave in fragments. The MTU reported is raised to 1280 for IPv6 and
+ones start with them. A UDP datagram that was dropped is lost; the next ones
+leave in fragments, which hosts reassemble. The MTU reported is raised to 1280 for IPv6 and
 `min path MTU` for IPv4, or guessed from `MTU plateaus` if it is 0; an error
 about a TCP segment not in flight, or that would not lower the MTU, is
 ignored. What it learnt is listed, read only, in `path MTUs`, until it expires.
