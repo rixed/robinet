@@ -60,6 +60,8 @@ struct
     let no_opt_hdr_len = 20
 
     type flags = {
+        cwr : bool ;
+        ece : bool ;
         urg : bool ;
         ack : bool ;
         psh : bool ;
@@ -67,7 +69,9 @@ struct
         syn : bool ;
         fin : bool }
     let string_of_flags f =
-        Printf.sprintf "%s%s%s%s%s%s"
+        Printf.sprintf "%s%s%s%s%s%s%s%s"
+            (if f.cwr then "Cwr" else "")
+            (if f.ece then "Ece" else "")
             (if f.urg then "Urg" else "")
             (if f.ack then "Ack" else "")
             (if f.psh then "Psh" else "")
@@ -75,6 +79,28 @@ struct
             (if f.syn then "Syn" else "")
             (if f.fin then "Fin" else "")
     let print_flags fmt f = Format.fprintf fmt "@{<flags>%s@}" (string_of_flags f)
+
+    (* The flags as a list, in the order of [flag_choices], and back: *)
+    let raised_of_flags f =
+        [ f.urg ; f.ack ; f.psh ; f.rst ; f.syn ; f.fin ; f.cwr ; f.ece ] |>
+        List.filteri_map (fun i up -> if up then Some i else None)
+
+    let flags_of_raised l =
+        let raised i = List.mem i l in
+        { urg = raised 0 ; ack = raised 1 ; psh = raised 2 ; rst = raised 3 ;
+          syn = raised 4 ; fin = raised 5 ; cwr = raised 6 ; ece = raised 7 }
+
+    (* Whether all the flags raised in [wanted] are raised in [f]: *)
+    let has_flags ~wanted f =
+        List.for_all (fun i -> List.mem i (raised_of_flags f))
+                     (raised_of_flags wanted)
+    (*$T has_flags
+      has_flags ~wanted:(flags_of_raised [ 4 ; 6 ; 7 ]) \
+                (flags_of_raised [ 1 ; 4 ; 6 ; 7 ])
+      not (has_flags ~wanted:(flags_of_raised [ 4 ; 6 ; 7 ]) \
+                     (flags_of_raised [ 4 ; 7 ]))
+      has_flags ~wanted:(flags_of_raised []) (flags_of_raised [])
+     *)
 
     (** TCP options. Decoding never fails, and packing what was decoded gives
      * back the same bytes: what is not understood is an [Other], and what
@@ -313,19 +339,19 @@ struct
 
     let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80)
              ?(seq_num = SeqNum.o 0l) ?(ack_num = SeqNum.o 0l)
-             ?(urg=false) ?(ack=false) ?(psh=false) ?(rst=false) ?(syn=false) ?(fin=false)
-             ?(win_size=1024) ?(urg_ptr=0) ?(options=[]) ?(checksum=0)
+             ?(cwr=false) ?(ece=false) ?(urg=false) ?(ack=false) ?(psh=false)
+             ?(rst=false) ?(syn=false) ?(fin=false) ?(win_size=1024) ?(urg_ptr=0) ?(options=[]) ?(checksum=0)
              bits =
         { src_port ; dst_port ;
           seq_num  ; ack_num ;
-          flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
+          flags = { cwr ; ece ; urg ; ack ; psh ; rst ; syn ; fin } ;
           win_size ; urg_ptr  ; options ; checksum ;
           payload = Payload.o bits }
 
     let random () =
         make ~src_port:(Port.o (randi 16)) ~dst_port:(Port.o (randi 16))
              ~seq_num:(SeqNum.o (rand32 ())) ~ack_num:(SeqNum.o (rand32 ()))
-             ~urg:(randb ()) ~ack:(randb ()) ~psh:(randb ()) ~rst:(randb ()) ~syn:(randb ()) ~fin:(randb ())
+             ~cwr:(randb ()) ~ece:(randb ()) ~urg:(randb ()) ~ack:(randb ()) ~psh:(randb ()) ~rst:(randb ()) ~syn:(randb ()) ~fin:(randb ())
              ~win_size:(randi 16) ~urg_ptr:(if randb () then randi 16 else 0)
              ~options:(Opt.random ())
              (randbs 64)
@@ -343,8 +369,8 @@ struct
         let%bitstring hdr = {|
             (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
             (t.seq_num :> int32)  : 32 ; (t.ack_num :> int32)  : 32 ;
-            hdr_len lsr 2 : 4 ; 0 : 6 ;
-            t.flags.urg : 1 ; t.flags.ack : 1 ; t.flags.psh : 1 ;
+            hdr_len lsr 2 : 4 ; 0 : 4 ;
+            t.flags.cwr : 1 ; t.flags.ece : 1 ; t.flags.urg : 1 ; t.flags.ack : 1 ; t.flags.psh : 1 ;
             t.flags.rst : 1 ; t.flags.syn : 1 ; t.flags.fin : 1 ;
             t.win_size : 16 ; t.checksum : 16 ;
             t.urg_ptr  : 16 ; options : -1 : bitstring |} in
@@ -353,14 +379,14 @@ struct
     let unpack bits = match%bitstring bits with
         | {| src_port : 16 ; dst_port : 16 ;
              seq_num  : 32 ; ack_num  : 32 ;
-             hdr_len  : 4  ; 0 : 6 ;
+             hdr_len  : 4  ; 0 : 4 ; cwr : 1 ; ece : 1 ;
              urg : 1 ; ack : 1 ; psh : 1 ; rst : 1 ; syn : 1 ; fin : 1 ;
              win_size : 16 ; checksum : 16 ; urg_ptr  : 16 ;
              options : ((hdr_len lsl 2) - no_opt_hdr_len) * 8 : bitstring ;
              payload  : -1 : bitstring |} ->
             Ok { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
                  seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;
-                 flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
+                 flags = { cwr ; ece ; urg ; ack ; psh ; rst ; syn ; fin } ;
                  win_size ; urg_ptr  ; options = Opt.unpack options ;
                  checksum ; payload = Payload.o payload }
         | {| _ |} -> Error (lazy "Not TCP")
@@ -372,12 +398,14 @@ struct
     let has_payload t =
         Payload.length t.payload = 0
 
-    (** The six flags, as the choices of a set: which of them are raised is
+    (** The eight flags, as the choices of a set: which of them are raised is
      * what a segment says, and any of them may be. Numbered by their places,
      * having no numbers of their own -- each is a bit of the header, and a bit
-     * is not a value. *)
+     * is not a value. Cwr and Ece come last, to keep the numbers of the
+     * others. *)
     let flag_choices =
-        Widget.choices [| "Urg" ; "Ack" ; "Psh" ; "Rst" ; "Syn" ; "Fin" |]
+        Widget.choices [| "Urg" ; "Ack" ; "Psh" ; "Rst" ; "Syn" ; "Fin" ;
+                          "Cwr" ; "Ece" |]
 
     (** What a segment holds, for the interface to show and, later, to edit.
      *
@@ -409,10 +437,7 @@ struct
                "payload", Kinds.payload |]
 
     let to_json (t : t) =
-        let raised =
-            [ t.flags.urg ; t.flags.ack ; t.flags.psh ;
-              t.flags.rst ; t.flags.syn ; t.flags.fin ] |>
-            List.filteri_map (fun i up -> if up then Some (`Int i) else None) in
+        let raised = List.map (fun i -> `Int i) (raised_of_flags t.flags) in
         `Assoc [ "source port", `Int (t.src_port :> int) ;
                  "destination port", `Int (t.dst_port :> int) ;
                  "sequence number", `Int (uint32 (t.seq_num :> int32)) ;
@@ -447,13 +472,12 @@ struct
             int_of_nth r i gen_values ?auto:(mostly_same prev_port Port.random)
                        Kinds.port Port.o in
         (* An automatic value is what a segment would plausibly carry: the
-         * flags of a segment carrying data, rather than any of the 64
-         * combinations of them -- half of which no stack would ever send. The
-         * places are those [flag_choices] names, which [raised] reads back. *)
+         * flags of a segment carrying data, rather than any of the 256
+         * combinations of them -- most of which no stack would ever send. The
+         * places are those [flag_choices] names. *)
         let flags =
             of_nth r Field.flags gen_values ~auto:(fun () -> [ 1 (* Ack *) ])
                    Kinds.flags (Widget.to_choices flag_choices) in
-        let raised i = List.mem i flags in
         let seq32 (n : SeqNum.t) = uint32 (n :> int32) in
         (* Given the previous segment: the sequence number that follows it, and
          * an acknowledgment number that moves on now and then, what goes the
@@ -482,8 +506,7 @@ struct
           seq_num = SeqNum.o (Int32.of_int seq_num) ;
           ack_num = SeqNum.o (Int32.of_int ack_num) ;
           win_size = int Field.win_size Kinds.win_size ;
-          flags = { urg = raised 0 ; ack = raised 1 ; psh = raised 2 ;
-                    rst = raised 3 ; syn = raised 4 ; fin = raised 5 } ;
+          flags = flags_of_raised flags ;
           (* Where the urgent data ends, which is nowhere unless Urg says so: *)
           urg_ptr = int Field.urg_ptr ~auto:(fun () -> 0) Kinds.urg_ptr ;
           options ; checksum = 0 ;

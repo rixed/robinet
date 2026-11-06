@@ -23,13 +23,16 @@
 
    The inside rules judge the addresses on the inside: the source of what
    goes out, the destination of what comes in; the outside rules those on
-   the outside. A rule is a verdict and a CIDR; the first rule that matches
-   an address decides, and an address no rule matches is denied.
+   the outside. A rule is a verdict and either a CIDR, which matches the
+   addresses in it, or TCP flags, which match the segments that have them
+   all raised; the first rule that matches decides, and an address no rule
+   matches is denied.
 
    A quoted IP header, in an ICMP error, travelled the other way, so its
    source is judged by the rules of the other side. An ICMP error that comes
    in is judged by its quoted header only, so that the routers that send
-   them need not be accepted.
+   them need not be accepted. The TCP flags of a quoted header are not
+   read.
 
    ARP passes, and so does neighbor discovery. What cannot be inspected
    (neither IP nor ARP, IP carrying IP, an ICMP error quoting no IP header)
@@ -50,10 +53,22 @@ let verdict_of_int = function 0 -> Accept | _ -> Deny
 
 let string_of_verdict v = verdict_names.(int_of_verdict v)
 
-type rule = verdict * Ip.Cidr.t
+(** What a rule matches: *)
+type filter = Ip of Ip.Cidr.t | HasTcpFlags of Tcp.Pdu.flags
 
-let string_of_rule (v, cidr) =
-    string_of_verdict v ^" "^ Ip.Cidr.to_string cidr
+type rule = verdict * filter
+
+(** A rule on addresses alone: *)
+type address_rule = verdict * Ip.Cidr.t
+
+let of_address_rules = List.map (fun (v, cidr) -> v, Ip cidr)
+
+let string_of_filter = function
+    | Ip cidr -> Ip.Cidr.to_string cidr
+    | HasTcpFlags f -> "TCP flags "^ Tcp.Pdu.string_of_flags f
+
+let string_of_rule (v, f) =
+    string_of_verdict v ^" "^ string_of_filter f
 
 (** A CIDR, with no bit set beyond its mask, or an address standing for the
  * network of that address alone: *)
@@ -99,18 +114,21 @@ type cause =
     | Inside of Ip.Addr.t
     | Outside of Ip.Addr.t
     | Mac of Eth.Addr.t
+    | Tcp_flags of Tcp.Pdu.flags
     | Uninspectable
 
 let string_of_cause = function
     | Inside ip -> "inside address "^ Ip.Addr.to_dotted_string ip ^" denied"
     | Outside ip -> "outside address "^ Ip.Addr.to_dotted_string ip ^" denied"
     | Mac mac -> "Ethernet source "^ Eth.Addr.to_hexstring mac ^" denied"
+    | Tcp_flags f -> "TCP flags "^ Tcp.Pdu.string_of_flags f ^" denied"
     | Uninspectable -> "uninspectable"
 
 let cause_name = function
     | Inside _ -> "inside"
     | Outside _ -> "outside"
     | Mac _ -> "MAC"
+    | Tcp_flags _ -> "TCP flags"
     | Uninspectable -> "uninspectable"
 
 type t =
@@ -136,21 +154,42 @@ let of_widget (w : Widget.t) =
     | Some (T t) -> Some t
     | _ -> None
 
-let verdict rules ip =
-    match List.find_opt (fun (_, cidr) -> Ip.Cidr.mem cidr ip) rules with
+(* The rule that decides about address [ip] of a packet, which is a TCP
+ * segment with [flags] if they are given: *)
+let decide ?flags rules ip =
+    List.find_opt (fun (_, filter) ->
+        match filter, flags with
+        | Ip cidr, _ -> Ip.Cidr.mem cidr ip
+        | HasTcpFlags wanted, Some f -> Tcp.Pdu.has_flags ~wanted f
+        | HasTcpFlags _, None -> false
+    ) rules
+
+let verdict ?flags rules ip =
+    match decide ?flags rules ip with
     | Some (v, _) -> v
     | None -> Deny
 
 (*$= verdict
-  Accept (verdict [ Deny, cidr_of_string "10.0.0.1" ; \
-                    Accept, cidr_of_string "10.0.0.0/8" ] \
+  Accept (verdict [ Deny, Ip (cidr_of_string "10.0.0.1") ; \
+                    Accept, Ip (cidr_of_string "10.0.0.0/8") ] \
                   (Ip.Addr.of_string "10.0.0.2"))
-  Deny (verdict [ Deny, cidr_of_string "10.0.0.1" ; \
-                  Accept, cidr_of_string "10.0.0.0/8" ] \
+  Deny (verdict [ Deny, Ip (cidr_of_string "10.0.0.1") ; \
+                  Accept, Ip (cidr_of_string "10.0.0.0/8") ] \
                 (Ip.Addr.of_string "10.0.0.1"))
-  Deny (verdict [ Accept, cidr_of_string "10.0.0.0/8" ] \
+  Deny (verdict [ Accept, Ip (cidr_of_string "10.0.0.0/8") ] \
                 (Ip.Addr.of_string "192.168.0.1"))
   Deny (verdict [] (Ip.Addr.of_string "10.0.0.1"))
+  Deny (verdict ~flags:(Tcp.Pdu.flags_of_raised [ 4 ; 6 ; 7 ]) \
+                [ Deny, HasTcpFlags (Tcp.Pdu.flags_of_raised [ 4 ; 6 ; 7 ]) ; \
+                  Accept, Ip (cidr_of_string "10.0.0.0/8") ] \
+                (Ip.Addr.of_string "10.0.0.1"))
+  Accept (verdict ~flags:(Tcp.Pdu.flags_of_raised [ 4 ; 7 ]) \
+                  [ Deny, HasTcpFlags (Tcp.Pdu.flags_of_raised [ 4 ; 6 ; 7 ]) ; \
+                    Accept, Ip (cidr_of_string "10.0.0.0/8") ] \
+                  (Ip.Addr.of_string "10.0.0.1"))
+  Accept (verdict [ Deny, HasTcpFlags (Tcp.Pdu.flags_of_raised [ 4 ]) ; \
+                    Accept, Ip (cidr_of_string "10.0.0.0/8") ] \
+                  (Ip.Addr.of_string "10.0.0.1"))
 *)
 
 (* What is read of an IP header, of either version, which may be truncated
@@ -230,6 +269,15 @@ let quote ip =
             | None -> `Unreadable)
         | {| _ |} -> `None
 
+(* The flags of the TCP segment [ip] starts, if it starts one: *)
+let tcp_flags ip =
+    if ip.proto <> (Ip.Proto.tcp :> int) || not ip.first_frag then None
+    else match%bitstring ip.payload with
+        | {| _ : 96 : bitstring ; _ : 8 ; cwr : 1 ; ece : 1 ; urg : 1 ; ack : 1 ;
+             psh : 1 ; rst : 1 ; syn : 1 ; fin : 1 ; _ |} ->
+            Some Tcp.Pdu.{ cwr ; ece ; urg ; ack ; psh ; rst ; syn ; fin }
+        | {| _ |} -> None
+
 (* Neighbor discovery (RFC 4861), which, as ARP, stays on its link: *)
 let is_ndp ip =
     ip.proto = (Ip.Proto.icmpv6 :> int) && ip.ttl = 255 && ip.first_frag &&
@@ -238,11 +286,15 @@ let is_ndp ip =
     | {| _ |} -> false
 
 (* Why addresses [src] and [dst] are denied, if they are, [src_inside]
- * telling which side the source is on: *)
-let judge t ~src_inside src dst =
+ * telling which side the source is on, of a TCP segment with [flags] if
+ * they are given: *)
+let judge t ~src_inside ?flags src dst =
     let check inside ip =
-        if verdict (if inside then t.inside else t.outside) ip = Accept then None
-        else Some (if inside then Inside ip else Outside ip) in
+        match decide ?flags (if inside then t.inside else t.outside) ip with
+        | Some (Accept, _) -> None
+        | Some (Deny, HasTcpFlags f) -> Some (Tcp_flags f)
+        | Some (Deny, Ip _) | None ->
+            Some (if inside then Inside ip else Outside ip) in
     match check src_inside src with
     | None -> check (not src_inside) dst
     | c -> c
@@ -267,7 +319,8 @@ let inspect t dir bits =
             | Some ip when List.mem ip.proto encapsulations -> uninspectable ()
             | Some ip ->
                 let src_inside = dir = Out in
-                let outer () = judge t ~src_inside ip.src ip.dst in
+                let outer () =
+                    judge t ~src_inside ?flags:(tcp_flags ip) ip.src ip.dst in
                 match quote ip with
                 | `None -> outer ()
                 | `Unreadable -> uninspectable ()
@@ -301,28 +354,62 @@ let filter t dir bits =
 let rule_kind =
     Widget.row [|
         "verdict", Widget.one_of (Widget.choices verdict_names) ;
-        "CIDR", Widget.hint "10.0.0.0/8" String |]
+        "CIDR", Widget.optional (Widget.hint "10.0.0.0/8" String) ;
+        "TCP flags", Tcp.Pdu.Kinds.flags |]
 
 let rules_kind = Widget.list rule_kind
 
 let rules_to_json rules =
-    `List (List.map (fun (v, cidr) ->
+    `List (List.map (fun (v, filter) ->
         `Assoc [ "verdict", `Int (int_of_verdict v) ;
-                 "CIDR", `String (Ip.Cidr.to_string cidr) ]) rules)
+                 "CIDR", (match filter with
+                          | Ip cidr -> `String (Ip.Cidr.to_string cidr)
+                          | HasTcpFlags _ -> `Null) ;
+                 "TCP flags", `List (match filter with
+                          | Ip _ -> []
+                          | HasTcpFlags f ->
+                              List.map (fun i -> `Int i)
+                                       (Tcp.Pdu.raised_of_flags f)) ]) rules)
 
 let rules_of_json =
     Widget.(to_list (fun row ->
-        verdict_of_int
-            (to_field "verdict" (to_choice (choices verdict_names)) row),
-        to_field "CIDR" (cidr_of_string % to_string) row))
+        let v =
+            verdict_of_int
+                (to_field "verdict" (to_choice (choices verdict_names)) row)
+        and cidr =
+            to_field "CIDR" (to_option (cidr_of_string % to_string)) row
+        (* Absent from rules written before it existed: *)
+        and flags =
+            match row with
+            | `Assoc l when not (List.mem_assoc "TCP flags" l) -> []
+            | _ -> to_field "TCP flags" (to_choices Tcp.Pdu.flag_choices) row in
+        match cidr, flags with
+        | Some cidr, [] -> v, Ip cidr
+        | None, _ :: _ -> v, HasTcpFlags (Tcp.Pdu.flags_of_raised flags)
+        | Some _, _ :: _ -> bad_value "either a CIDR or TCP flags, not both"
+        | None, [] -> bad_value "a CIDR or TCP flags"))
 
 (*$T rules_of_json
-  rules_of_json (rules_to_json [ Deny, cidr_of_string "10.0.0.1" ; \
-                                 Accept, cidr_of_string "0.0.0.0/0" ]) = \
-    [ Deny, cidr_of_string "10.0.0.1/32" ; Accept, cidr_of_string "0.0.0.0/0" ]
+  let syn_ecn = HasTcpFlags (Tcp.Pdu.flags_of_raised [ 4 ; 6 ; 7 ]) in \
+  rules_of_json (rules_to_json [ Deny, syn_ecn ; \
+                                 Deny, Ip (cidr_of_string "10.0.0.1") ; \
+                                 Accept, Ip (cidr_of_string "0.0.0.0/0") ]) = \
+    [ Deny, syn_ecn ; Deny, Ip (cidr_of_string "10.0.0.1/32") ; \
+      Accept, Ip (cidr_of_string "0.0.0.0/0") ]
+  rules_of_json (`List [ `Assoc [ "verdict", `Int 0 ; \
+                                  "CIDR", `String "10.0.0.0/8" ] ]) = \
+    [ Accept, Ip (cidr_of_string "10.0.0.0/8") ]
   (try ignore (rules_of_json (`List [ `Assoc [ "verdict", `Int 0 ; \
                                                "CIDR", `String "nope" ] ])) ; false \
    with Widget.Bad_value m -> m = "row 1: CIDR: not a CIDR: \"nope\"")
+  (try ignore (rules_of_json (`List [ `Assoc [ "verdict", `Int 0 ; \
+                                               "CIDR", `String "10.0.0.0/8" ; \
+                                               "TCP flags", `List [ `Int 4 ] ] ])) ; false \
+   with Widget.Bad_value m -> m = "row 1: either a CIDR or TCP flags, not both")
+  (try ignore (rules_of_json (`List [ `Assoc [ "verdict", `Int 0 ; \
+                                               "CIDR", `Null ; \
+                                               "TCP flags", `List [] ] ])) ; false \
+   with Widget.Bad_value m -> m = "row 1: a CIDR or TCP flags")
 *)
 
 let mac_kind = Widget.hint "aa:bb:cc:dd:ee:ff" String
@@ -331,9 +418,11 @@ let mac_of_string s =
     try Eth.Addr.of_string (String.trim s)
     with _ -> Widget.bad_value "not a MAC address: %S" s
 
-(** Accept everything: *)
-let accept_all = [ Accept, Ip.Cidr.of_string "0.0.0.0/0" ;
-                   Accept, Ip.Cidr.of_string "::/0" ]
+(** Accept every address: *)
+let accept_all_addresses = [ Accept, Ip.Cidr.of_string "0.0.0.0/0" ;
+                             Accept, Ip.Cidr.of_string "::/0" ]
+
+let accept_all = of_address_rules accept_all_addresses
 
 let num_ports = 2
 
@@ -370,12 +459,14 @@ let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
     Widget.add_properties widget Widget.[
         property "inside rules" ~kind:rules_kind
             ~descr:"The rules for the addresses on the inside (port 0), \
-                    tried in order; an address none matches is denied."
+                    each on a CIDR or on TCP flags all raised, tried in \
+                    order; an address none matches is denied."
             ~getter:(fun () -> rules_to_json t.inside)
             ~setter:(fun v -> t.inside <- rules_of_json v) ;
         property "outside rules" ~kind:rules_kind
             ~descr:"The rules for the addresses on the outside (port 1), \
-                    tried in order; an address none matches is denied."
+                    each on a CIDR or on TCP flags all raised, tried in \
+                    order; an address none matches is denied."
             ~getter:(fun () -> rules_to_json t.outside)
             ~setter:(fun v -> t.outside <- rules_of_json v) ;
         property "uninspectable" ~kind:(one_of (choices verdict_names))
@@ -403,7 +494,8 @@ let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
 
 (* [through ?rules dir frame] is what the firewall makes of [frame] sent
  * [dir]: "passed", or the cause of its drop. Inside is 10.0.0.0/8 and
- * 2001:db8:1::/48, outside is anything but 192.0.2.66 and 2001:db8:66::1. *)
+ * 2001:db8:1::/48, outside is anything but 192.0.2.66 and 2001:db8:66::1,
+ * and TCP segments with Syn, Ece and Cwr all raised are denied. *)
 (*$inject
   let addr = Ip.Addr.of_string
   let mine = Eth.Addr.of_string "02:00:00:00:00:01"
@@ -413,6 +505,9 @@ let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
       Ip.Pdu.make proto (addr src) (addr dst) payload
   let packet ?proto ?payload src dst =
       frame (Ip.Pdu.pack (ip ?proto ?payload src dst))
+  let segment ?(ece=false) ?(cwr=false) src dst =
+      packet ~proto:Ip.Proto.tcp src dst
+          ~payload:Tcp.Pdu.(pack (make ~syn:true ~ece ~cwr Bitstring.empty_bitstring))
   let error_about ~src ~dst quoted =
       packet ~proto:Ip.Proto.icmp src dst
           ~payload:Icmp.Pdu.(pack (make_ttl_expired_in_transit quoted))
@@ -432,12 +527,16 @@ let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
       let sim = Simulation.make ~realtime:false "firewall" in
       let cause = ref "passed" in
       let t = make ~parent:sim.root ~mac
-                ~inside:[ Accept, cidr_of_string "10.0.0.0/8" ;
-                          Accept, cidr_of_string "2001:db8:1::/48" ]
-                ~outside:[ Deny, cidr_of_string "192.0.2.66" ;
-                           Accept, cidr_of_string "0.0.0.0/0" ;
-                           Deny, cidr_of_string "2001:db8:66::1" ;
-                           Accept, cidr_of_string "::/0" ]
+                ~inside:(of_address_rules [
+                    Accept, cidr_of_string "10.0.0.0/8" ;
+                    Accept, cidr_of_string "2001:db8:1::/48" ])
+                ~outside:(
+                    (Deny, HasTcpFlags (Tcp.Pdu.flags_of_raised [ 4 ; 6 ; 7 ])) ::
+                    of_address_rules [
+                        Deny, cidr_of_string "192.0.2.66" ;
+                        Accept, cidr_of_string "0.0.0.0/0" ;
+                        Deny, cidr_of_string "2001:db8:66::1" ;
+                        Accept, cidr_of_string "::/0" ])
                 ~on_drop:(fun _ c _ -> cause := string_of_cause c) "fw" in
       Simulation.power_up t.widget.power ;
       (t.widget.ports.dev (if dir = Out then 0 else 1)).write bits ;
@@ -500,4 +599,12 @@ let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
   "passed" \
     (through In (frame ~src_mac:(Eth.Addr.of_string "02:00:00:00:00:02") \
                    (Ip.Pdu.pack (ip "192.0.2.1" "10.0.0.1"))))
+  "passed" (through Out (segment "10.0.0.1" "192.0.2.1"))
+  "passed" (through Out (segment ~ece:true "10.0.0.1" "192.0.2.1"))
+  "TCP flags CwrEceSyn denied" \
+    (through Out (segment ~ece:true ~cwr:true "10.0.0.1" "192.0.2.1"))
+  "TCP flags CwrEceSyn denied" \
+    (through In (segment ~ece:true ~cwr:true "192.0.2.1" "10.0.0.1"))
+  "inside address 192.168.0.1 denied" \
+    (through Out (segment ~ece:true ~cwr:true "192.168.0.1" "192.0.2.1"))
 *)

@@ -624,8 +624,8 @@ and ports = { tcp : (int * int) list ; udp : (int * int) list }
 
 (* The fields of [PERMISSIONS], if set: *)
 and permissions =
-    { local_ips : Firewall.rule list option ;
-      remote_ips : Firewall.rule list option ;
+    { local_ips : Firewall.address_rule list option ;
+      remote_ips : Firewall.address_rule list option ;
       mac_spoofing : bool option ;
       exfiltration : bool option }
 
@@ -694,7 +694,7 @@ let port_ranges name _typ (e : A.expr) =
         merge_ranges
     | _ -> error e.loc "PORTS.%s is an array of ports and ranges [first, last]" name
 
-type permission = Rules of Firewall.rule list | Flag of bool
+type permission = Rules of Firewall.address_rule list | Flag of bool
 
 let permission_literal name typ (e : A.expr) =
     match typ, e.desc with
@@ -818,7 +818,8 @@ let resolve_permissions ~program ~cli ~local =
     { local_ips =
         rules cli.local_ips program.local_ips
               (List.map (fun ip -> Firewall.Accept, Ip.Cidr.single ip) local) ;
-      remote_ips = rules cli.remote_ips program.remote_ips Firewall.accept_all ;
+      remote_ips = rules cli.remote_ips program.remote_ips
+                         Firewall.accept_all_addresses ;
       mac_spoofing = flag cli.mac_spoofing program.mac_spoofing ;
       exfiltration = flag cli.exfiltration program.exfiltration }
 
@@ -834,7 +835,7 @@ let resolve_permissions ~program ~cli ~local =
       remote_ips = Some [ Firewall.Deny, cidr "10.0.0.1" ; Firewall.Accept, cidr "10.0.0.0/8" ] ; \
       mac_spoofing = Some true ; exfiltration = Some false }
   resolve_permissions ~local:[] ~program:no_permissions ~cli:no_permissions = \
-    { local_ips = Some [] ; remote_ips = Some Firewall.accept_all ; \
+    { local_ips = Some [] ; remote_ips = Some Firewall.accept_all_addresses ; \
       mac_spoofing = Some false ; exfiltration = Some false }
 *)
 
@@ -2609,7 +2610,7 @@ let denied_literals ~local ~remote ~mac (b : block) =
         errors := (e.loc, Printf.sprintf "%s %s is not permitted" what addr) :: !errors in
     let ip e what rules ip =
         Option.may (fun rules ->
-            if Firewall.verdict rules ip = Firewall.Deny then
+            if Firewall.(verdict (of_address_rules rules) ip) = Firewall.Deny then
                 deny e what (Ip.Addr.to_dotted_string ip)) rules in
     let layer l =
         let quoted = l.layer.L.quoted in

@@ -568,7 +568,7 @@ Self-driven IP6 fragments to the MTU and reassembles, as `IP`.
 - `seq_num`: int; set M; read M.
 - `ack_num`: int; set M; read M.
 - `flags`: int; set M; read M. Constants `FIN`, `SYN`, `RST`, `PSH`, `ACK`,
-  `URG`.
+  `URG`, `ECE`, `CWR`.
 - `win_size`: int; set M; read M.
 - `urg_ptr`: int; set M; read M.
 - `checksum`: int; set M; read M. Default: computed, as when 0.

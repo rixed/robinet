@@ -551,7 +551,7 @@ let unpack_tcp _ bits =
         let f = t.flags and bit b v = if b then v else 0 in
         let flags =
             bit f.fin 1 lor bit f.syn 2 lor bit f.rst 4 lor bit f.psh 8 lor
-            bit f.ack 16 lor bit f.urg 32 in
+            bit f.ack 16 lor bit f.urg 32 lor bit f.ece 64 lor bit f.cwr 128 in
         let payload = (t.payload :> bitstring) in
         unpacked ([ "src", V.Int (t.src_port :> int) ; "dst", V.Int (t.dst_port :> int) ;
                    "seq_num", V.Int (int_of_seq_num t.seq_num) ;
@@ -561,6 +561,13 @@ let unpack_tcp _ bits =
                  tcp_option_values t.options)
                  ~upper:(if bitstring_length payload > 0 then Any N.Raw else Nothing)
                  ~payload bits
+
+(*$T unpack_tcp
+  match unpack_tcp () Tcp.Pdu.(pack (make ~syn:true ~ece:true ~cwr:true \
+                                          Bitstring.empty_bitstring)) with \
+  | Some u -> List.assoc "flags" u.values = V.Int (2 lor 64 lor 128) \
+  | None -> false
+*)
 
 (* A connection: robinet's TRX, what was written before it was established,
  * whether it is to be closed, and what removes the node once it is: *)
@@ -676,7 +683,7 @@ let tcp_node ctx =
             | None, Some t -> Option.map int_of_seq_num (Tcp.TRX.next_ack_num t)
             | None, None -> None in
         let flags =
-            match opt_int fields "flags" 0 0x3f with
+            match opt_int fields "flags" 0 0xff with
             | Some f -> f
             | None ->
                 (if ack <> None then 16 else 0) lor
@@ -692,7 +699,7 @@ let tcp_node ctx =
             Tcp.Pdu.make ~src_port:(port "src") ~dst_port:(port "dst")
                 ~seq_num:(seq_num seq) ~ack_num:(seq_num (ack |? 0))
                 ~fin:(bit 1) ~syn:(bit 2) ~rst:(bit 4) ~psh:(bit 8) ~ack:(bit 16)
-                ~urg:(bit 32) ~win_size
+                ~urg:(bit 32) ~ece:(bit 64) ~cwr:(bit 128) ~win_size
                 ~urg_ptr:(int_of ~def:0 fields "TCP!" "urg_ptr" 0 0xffff)
                 ~options:(tcp_options fields)
                 ?checksum:(opt_int fields "checksum" 0 0xffff) payload in
@@ -952,7 +959,7 @@ let unpack_quoted_tcp _ bits =
     | {| src : 16 ; dst : 16 ; seq_num : 32 ; rest : -1 : bitstring |} ->
         let ack_num, flags, win_size, checksum, urg_ptr, options, payload =
             match%bitstring rest with
-            | {| ack_num : 32 ; hdr_len : 4 ; _ : 6 ; flags : 6 ; win_size : 16 ;
+            | {| ack_num : 32 ; hdr_len : 4 ; _ : 4 ; flags : 8 ; win_size : 16 ;
                  checksum : 16 ; urg_ptr : 16 ; rest : -1 : bitstring |} ->
                 let opt_len = max 0 (hdr_len * 32 - 160) in
                 u32 ack_num, flags, win_size, checksum, urg_ptr,
@@ -974,14 +981,15 @@ let quoted_tcp_node _ =
     manual (fun fields _ payload ->
         let int ?def name hi = int_of ?def fields "TCP" name 0 hi in
         let flags =
-            int ~def:(if bitstring_length payload > 0 then 8 else 0) "flags" 0x3f in
+            int ~def:(if bitstring_length payload > 0 then 8 else 0) "flags" 0xff in
         let bit b = flags land b <> 0
         and seq_num name = Tcp.SeqNum.o (Int32.of_int (int ~def:0 name 0xffff_ffff)) in
         Tcp.Pdu.make ~src_port:(Tcp.Port.o (int "src" 0xffff))
             ~dst_port:(Tcp.Port.o (int "dst" 0xffff))
             ~seq_num:(seq_num "seq_num") ~ack_num:(seq_num "ack_num")
             ~fin:(bit 1) ~syn:(bit 2) ~rst:(bit 4) ~psh:(bit 8) ~ack:(bit 16)
-            ~urg:(bit 32) ~win_size:(int ~def:0xffff "win_size" 0xffff)
+            ~urg:(bit 32) ~ece:(bit 64) ~cwr:(bit 128)
+            ~win_size:(int ~def:0xffff "win_size" 0xffff)
             ~urg_ptr:(int ~def:0 "urg_ptr" 0xffff) ~options:(tcp_options fields)
             ?checksum:(opt_int fields "checksum" 0 0xffff) payload |>
         Tcp.Pdu.pack, [ "proto", V.Int tcp_proto ])
@@ -1230,7 +1238,8 @@ let tcp =
             "ssthresh", Int ; "snd_wnd", Int ; "rcv_wnd", Int ;
             "snd_wscale", Int ; "rcv_wscale", Int ; "established", Bool ]
         ~constants:[ "FIN", Int 1 ; "SYN", Int 2 ; "RST", Int 4 ; "PSH", Int 8 ;
-                     "ACK", Int 16 ; "URG", Int 32 ] [
+                     "ACK", Int 16 ; "URG", Int 32 ; "ECE", Int 64 ;
+                     "CWR", Int 128 ] [
         field "src" Type.Int ~set_in:both ~read_in:both ~discriminant:true
               ~pick:Local_port ~peer:"dst" ;
         field "dst" Type.Int ~set_in:both ~read_in:both ~discriminant:true

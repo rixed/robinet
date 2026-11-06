@@ -281,30 +281,38 @@ it (`max-packets`, `max-volume`, `expired`, `max-packet-rate`,
 ### firewall
 
 Passes the IP packets, IPv4 or IPv6, between its inside, port 0, and its
-outside, port 1, whose addresses its rules accept. Like a tap, it is transparent to negotiation.
+outside, port 1, that its rules accept. Like a tap, it is transparent to negotiation.
 It has a power switch, and passes nothing while off.
 
 | param | kind | default | |
 | --- | --- | --- | --- |
-| `inside rules` | list of rules | `[{"verdict": 0, "CIDR": "0.0.0.0/0"}, {"verdict": 0, "CIDR": "::/0"}]` | For the addresses on the inside. |
-| `outside rules` | list of rules | `[{"verdict": 0, "CIDR": "0.0.0.0/0"}, {"verdict": 0, "CIDR": "::/0"}]` | For the addresses on the outside. |
+| `inside rules` | list of rules | `[{"verdict": 0, "CIDR": "0.0.0.0/0", "TCP flags": []}, {"verdict": 0, "CIDR": "::/0", "TCP flags": []}]` | For the addresses on the inside. |
+| `outside rules` | list of rules | `[{"verdict": 0, "CIDR": "0.0.0.0/0", "TCP flags": []}, {"verdict": 0, "CIDR": "::/0", "TCP flags": []}]` | For the addresses on the outside. |
 | `uninspectable` | `0` (accept) or `1` (deny) | `1` | For what is neither IP nor ARP, or carries IP in IP (protocols 4, 41 and 47, past IPv6 extension headers). |
 | `MAC` | optional string | `null` | The Ethernet source that what goes out must have. |
 
-A rule is `{"verdict": 0, "CIDR": "10.0.0.0/8"}`, `0` accepting and `1`
-denying, IPv4 or IPv6; an address stands for itself alone (/32 or /128). The rules are tried in order, the first
-that matches an address decides, and an address none matches is denied.
+A rule is `{"verdict": 0, "CIDR": "10.0.0.0/8", "TCP flags": []}`, `0`
+accepting and `1` denying, IPv4 or IPv6; an address stands for itself alone
+(/32 or /128). Or it is on TCP flags instead, with a `null` CIDR, and matches
+the segments that have all those flags raised, whatever their addresses:
+`{"verdict": 1, "CIDR": null, "TCP flags": [4, 6, 7]}` denies those with SYN,
+CWR and ECE. The flags are numbered `0`–`7`: URG, ACK, PSH, RST, SYN, FIN,
+CWR, ECE. `"TCP flags"` may be left out, for none. The rules are tried in
+order, the first that matches decides, and an address none matches is
+denied.
 
 The inside rules judge the source of what goes out and the destination of what
 comes in; the outside rules the other address. A quoted IP header, in an ICMP
 error, is judged the other way round, as it travelled the other way; and an
 ICMP error that comes in is judged by its quoted header only, so that the
-routers that send them need not be accepted; so is an ICMPv6 error. ARP
+routers that send them need not be accepted; so is an ICMPv6 error. The TCP
+flags of a quoted header are not read, and nor are those of a fragment but
+the first. ARP
 passes, and so does neighbor discovery (ICMPv6 with a hop limit of 255).
 
 The `passed` and `dropped` metrics count packets by `direction` (`out` from
 port 0, `in` from port 1), and dropped ones by `cause` too (`inside`,
-`outside`, `MAC`, `uninspectable`).
+`outside`, `TCP flags`, `MAC`, `uninspectable`).
 
 ### router
 

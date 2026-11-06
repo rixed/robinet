@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 2d88755fa0e8160d99645c71db4a96ce) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 81fb68d976e291ade8763b27d94a9122) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -534,7 +534,7 @@ Self-driven IP6 fragments to the MTU and reassembles, as `IP`.
 -   `seq_num`: int; set M; read M.
 -   `ack_num`: int; set M; read M.
 -   `flags`: int; set M; read M. Constants `FIN`, `SYN`, `RST`, `PSH`, `ACK`,
-    `URG`.
+    `URG`, `ECE`, `CWR`.
 -   `win_size`: int; set M; read M.
 -   `urg_ptr`: int; set M; read M.
 -   `checksum`: int; set M; read M. Default: computed, as when 0.

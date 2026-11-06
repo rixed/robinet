@@ -520,11 +520,12 @@ module Pdu = struct
             try Ip.Addr.to_dotted_string (Ip.Addr.of_bitstring bits)
             with _ -> "?"
 
-        (* As tcpdump has them, ACK last: *)
+        (* As tcpdump has them, ECN ones last: *)
         let tcp_flags (f : Tcp.Pdu.flags) =
             (if f.syn then "S" else "") ^ (if f.fin then "F" else "") ^
             (if f.rst then "R" else "") ^ (if f.psh then "P" else "") ^
-            (if f.urg then "U" else "") ^ (if f.ack then "." else "")
+            (if f.urg then "U" else "") ^ (if f.ack then "." else "") ^
+            (if f.ece then "E" else "") ^ (if f.cwr then "W" else "")
 
         (** A summary in the manner of tcpdump, addresses and ports first. *)
         let oneline t =

@@ -415,7 +415,8 @@ let () =
                 String.uppercase_ascii (Host_config.string_of_proto r.proto) ^" "^
                 Host_config.string_of_range r) ports)) ;
         let rules rs =
-            String.concat ", " (List.map Firewall.string_of_rule (rules rs)) in
+            String.concat ", " (List.map Firewall.string_of_rule
+                                    (Firewall.of_address_rules (rules rs))) in
         info "Permissions: local IPs %s; remote IPs %s; MAC spoofing %b; \
               exfiltration %b."
             (rules permissions.local_ips) (rules permissions.remote_ips)
@@ -590,8 +591,8 @@ let () =
     let denied = ref None and denied_out = ref 0 and denied_in = ref 0 in
     let firewall =
         Firewall.make ~parent:sim.root
-            ~inside:(rules permissions.local_ips)
-            ~outside:(rules permissions.remote_ips)
+            ~inside:(Firewall.of_address_rules (rules permissions.local_ips))
+            ~outside:(Firewall.of_address_rules (rules permissions.remote_ips))
             ?mac:(if flag permissions.mac_spoofing then None else Some iface.mac)
             ~on_drop:(fun dir cause bits ->
                 match dir with
