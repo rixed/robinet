@@ -197,6 +197,10 @@ next ones leave in fragments. The MTU reported is raised to 1280 for IPv6 and
 about a TCP segment not in flight, or that would not lower the MTU, is
 ignored. What it learnt is listed, read only, in `path MTUs`, until it expires.
 
+A DHCP lease may also bring an interface MTU, from 68 to the adapter's, which
+then sizes its IPv4 packets and TCP segments, and a `path MTU timeout` and
+`MTU plateaus` that replace its own while it holds the lease.
+
 ### switch
 
 Forwards frames to the port it last saw their destination on.
@@ -500,7 +504,7 @@ under:
 | gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
 | | `nat` | `min port`, `port forwards`, `NAT pings`, `send errors`, `answer pings` |
 | | `srv`, `srv/eth` | *the host it serves DHCP and DNS from* |
-| | `srv/dhcpd` | `authoritative`, `lease time`, `netmask`, `broadcast`, `gateway`, `DNS`, `NTP`, `domain name`, `MTU` |
+| | `srv/dhcpd` | `authoritative`, `lease time`, `netmask`, `broadcast`, `gateway`, `DNS`, `NTP`, `domain name`, `MTU`, `path MTU timeout`, `MTU plateaus` |
 | | `srv/named` | `default TTL` |
 | recorder | `""` | `file name`, `recording`, `flush` |
 | replayer | `""` | `file name`, `loop` |

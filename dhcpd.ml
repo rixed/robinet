@@ -51,6 +51,10 @@ struct
           mutable broadcast : Ip.Addr.t option ;
           mutable gw : Ip.Addr.t option ;
           mutable mtu : int option ;
+          (* Seconds, 0xffff_ffff for forever: *)
+          mutable pmtu_timeout : int option ;
+          (* Increasing; none when empty: *)
+          mutable mtu_plateaus : int list ;
           mutable dns : Ip.Addr.t option ;
           mutable domain_name : string option ;
           mutable ntp : Ip.Addr.t option ;
@@ -80,7 +84,9 @@ struct
           host : (int * bitstring) list }
 
     let make ?(authoritative=true) ?(lease_time_sec=3600) ?netmask ?broadcast
-             ?gw ?mtu ?dns ?domain_name ?ntp ~parent ip_range =
+             ?gw ?mtu ?pmtu_timeout ?(mtu_plateaus=[]) ?dns ?domain_name ?ntp
+             ~parent ip_range =
+        let mtu_plateaus = List.sort_unique Int.compare mtu_plateaus in
         let widget = Widget.make ~parent "dhcpd" in
         (* Offered IPs (and options), indexed by client-ids: *)
         let offers = Hashtbl.create 8 in
@@ -90,8 +96,8 @@ struct
         let num_leases = Metric.Gauge.make () in
         let t = {
             widget ; authoritative ; lease_time_sec ;
-            netmask ; broadcast ; gw ; mtu ; dns ; domain_name ; ntp ;
-            ip_range ; offers ; leases ; used_ips ;
+            netmask ; broadcast ; gw ; mtu ; pmtu_timeout ; mtu_plateaus ;
+            dns ; domain_name ; ntp ; ip_range ; offers ; leases ; used_ips ;
             parameters = None ; num_leases ; queries } in
         (* Those options may have no value, which is what [`Null] says; an
          * empty string would be a value, and a nonsensical one at that. *)
@@ -146,6 +152,24 @@ struct
                 ~setter:(fun v ->
                     t.mtu <- to_option (to_int_range ~min:68 ~max:65535) v ;
                     (* It is one of the options served: *)
+                    t.parameters <- None) ;
+            property "path MTU timeout" ~kind:(optional (IRange (1, 0xffff_ffff)))
+                ~units:"seconds"
+                ~descr:"How long clients are to keep a path MTU they learn, if \
+                        any to offer (4294967295 for forever)"
+                ~getter:(fun () -> json_of_optional (fun i -> `Int i) t.pmtu_timeout)
+                ~setter:(fun v ->
+                    t.pmtu_timeout <-
+                        to_option (to_int_range ~min:1 ~max:0xffff_ffff) v ;
+                    t.parameters <- None) ;
+            property "MTU plateaus" ~kind:(list (IRange (68, 65535)))
+                ~units:"bytes"
+                ~descr:"Path MTUs for clients to guess from, if any to offer"
+                ~getter:(fun () -> `List (List.map (fun i -> `Int i) t.mtu_plateaus))
+                ~setter:(fun v ->
+                    t.mtu_plateaus <-
+                        to_list (to_int_range ~min:68 ~max:65535) v |>
+                        List.sort_unique Int.compare ;
                     t.parameters <- None) ;
             (* Who holds what, which is the whole of what this server has
              * done. Read-only: a lease is not something to be written down
@@ -208,6 +232,11 @@ struct
                 add t.dns domain_name_servers Ip.Addr.to_bitstring |>
                 add t.domain_name domain_name bitstring_of_string |>
                 add t.mtu interface_mtu bitstring_of_int16 |>
+                add t.pmtu_timeout path_mtu_timeout bitstring_of_int32 |>
+                (* In increasing order (RFC 2132, 8.4): *)
+                add (if t.mtu_plateaus = [] then None else Some t.mtu_plateaus)
+                    mtu_plateaus
+                    (fun l -> Bitstring.concat (List.map bitstring_of_int16 l)) |>
                 add t.ntp ntp_servers Ip.Addr.to_bitstring in
             let p = { mandatory ; host } in
             t.parameters <- Some p ;
@@ -274,7 +303,22 @@ struct
         set_mtu (`Int 1400) ;
         assert_bool "and is served once it has one" (mtu_asked ()) ;
         set_mtu `Null ;
-        assert_bool "and stops being served when it loses it" (not (mtu_asked ()))
+        assert_bool "and stops being served when it loses it" (not (mtu_asked ())) ;
+        let set name v =
+            (List.find (fun (p : Widget.property) -> p.name = name)
+                       st.widget.properties).setter |> Option.get |> fun f -> f v in
+        let served code =
+            List.assoc_opt code
+                (get_options st (Some (String.of_char (Char.chr code)))) |>
+            Option.map Bitstring.string_of_bitstring in
+        assert_equal ~msg:"no timeout" None (served Dhcp.Option.path_mtu_timeout) ;
+        assert_equal ~msg:"no plateaus" None (served Dhcp.Option.mtu_plateaus) ;
+        set "path MTU timeout" (`Int 300) ;
+        set "MTU plateaus" (`List [ `Int 1492 ; `Int 576 ]) ;
+        assert_equal ~msg:"timeout" (Some "\000\000\001\044")
+            (served Dhcp.Option.path_mtu_timeout) ;
+        assert_equal ~msg:"plateaus, increasing" (Some "\002\064\005\212")
+            (served Dhcp.Option.mtu_plateaus)
      *)
     (*$>*)
 

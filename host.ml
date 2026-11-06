@@ -185,6 +185,11 @@ and t = {
     mutable leased_nameserver : Ip.Addr.t option ;
     mutable leased_search_sfx : string option ;
     mutable leased_host_name : string option ;
+    (* The IPv4 MTU, path MTU timeout (0xffff_ffff for forever) and MTU
+       plateaus (increasing) of the lease: *)
+    mutable leased_mtu : int option ;
+    mutable leased_pmtu_timeout : int option ;
+    mutable leased_mtu_plateaus : int list option ;
     mutable resolv_trx : trx option ;
     (* Whether resolved IPv6 addresses come before IPv4 ones: *)
     mutable prefer_v6 : bool ;
@@ -218,6 +223,12 @@ let cur_nameserver t = if t.leased_nameserver <> None then t.leased_nameserver
 let cur_search_sfx t = if t.leased_search_sfx <> None then t.leased_search_sfx
                        else t.search_sfx
 let cur_host_name t = t.leased_host_name |? t.host_name
+let cur_pmtu_timeout t =
+    match t.leased_pmtu_timeout with
+    | Some 0xffff_ffff -> None
+    | Some _ as s -> s
+    | None -> t.pmtu_timeout
+let cur_mtu_plateaus t = t.leased_mtu_plateaus |? t.mtu_plateaus
 
 let is_v6_cidr c = Ip.Addr.is_v6 (fst (c : Ip.Cidr.t :> Ip.Addr.t * int))
 
@@ -244,11 +255,11 @@ let path_mtu t remote =
     | None -> None
 
 (* IP packets from [local] are sized for the host's only interface, or for
- * the MTU a router advertised if [local] is IPv6: *)
+ * the MTU a router advertised if [local] is IPv6, or the lease if IPv4: *)
 let link_mtu t local =
     let mtu = t.eth_state.Eth.State.mtu in
-    if Ip.Addr.is_v6 local then Option.map_default (min mtu) mtu t.ra_mtu
-    else mtu
+    Option.map_default (min mtu) mtu
+        (if Ip.Addr.is_v6 local then t.ra_mtu else t.leased_mtu)
 
 (* ...and for the path to [remote], when it is known to be smaller: *)
 let ip_mtu t local remote =
@@ -425,7 +436,7 @@ let path_mtu_rx t ~local ~remote ~proto ~size ~mtu l4 =
             let mtu =
                 if mtu > 0 then mtu
                 else List.fold_left (fun guess p -> if p < size then p else guess)
-                                    0 t.mtu_plateaus in
+                                    0 (cur_mtu_plateaus t) in
             max t.min_pmtu mtu in
     let in_flight () =
         proto <> Ip.Proto.tcp ||
@@ -443,7 +454,7 @@ let path_mtu_rx t ~local ~remote ~proto ~size ~mtu l4 =
             Option.map (fun secs ->
                 Clock.Time.add (Simulation.Widget.now t.trx.widget)
                                (Clock.Interval.sec (float_of_int secs))
-            ) t.pmtu_timeout in
+            ) (cur_pmtu_timeout t) in
         Hashtbl.replace t.pmtus remote (mtu, until) ;
         Hashtbl.iter (fun key s ->
             if Ip.Addr.compare key.remote remote = 0 then (
@@ -1378,6 +1389,9 @@ let reset t =
     t.leased_nameserver <- None ;
     t.leased_search_sfx <- None ;
     t.leased_host_name <- None ;
+    t.leased_mtu <- None ;
+    t.leased_pmtu_timeout <- None ;
+    t.leased_mtu_plateaus <- None ;
     Hashtbl.clear t.sockets ;
     Hashtbl.clear t.reassembled ;
     (* What it was serving stays: a machine switched off and on again comes
@@ -1464,7 +1478,7 @@ let init_autoconf t =
 let dhcp_request_list =
     Dhcp.Option.(make_request_list
         [ subnet_mask ; routers ; domain_name_servers ; domain_name ;
-          host_name ])
+          host_name ; interface_mtu ; path_mtu_timeout ; mtu_plateaus ])
 
 (* Take the parameters an accepted lease came with. Only those it carries: a
    lease that says nothing about the name server leaves the one the reader
@@ -1491,6 +1505,27 @@ let apply_lease t (dhcp : Dhcp.Pdu.t) =
     (* A server that names the client is naming this very host: the name it
        goes by is the one it is given, and not the one it asked for. *)
     Option.may (fun name -> t.leased_host_name <- Some name) dhcp.host_name ;
+    (* Those with no typed field, each ignored if it holds no valid value: *)
+    let other code = List.assoc_opt code dhcp.other_options in
+    let rec uint16s bits =
+        match%bitstring bits with
+        | {| n : 16 ; rest : -1 : bitstring |} -> n :: uint16s rest
+        | {| _ |} -> [] in
+    Option.may (fun bits ->
+        match%bitstring bits with
+        | {| mtu : 16 |} when mtu >= 68 && mtu <= t.eth_state.Eth.State.mtu ->
+            t.leased_mtu <- Some mtu
+        | {| _ |} -> ()) (other Dhcp.Option.interface_mtu) ;
+    Option.may (fun bits ->
+        match%bitstring bits with
+        | {| secs : 32 |} when Int32.to_int secs land 0xffff_ffff > 0 ->
+            t.leased_pmtu_timeout <- Some (Int32.to_int secs land 0xffff_ffff)
+        | {| _ |} -> ()) (other Dhcp.Option.path_mtu_timeout) ;
+    Option.may (fun bits ->
+        match List.filter (fun p -> p >= 68) (uint16s bits) with
+        | [] -> ()
+        | l -> t.leased_mtu_plateaus <- Some (List.sort_unique Int.compare l)
+    ) (other Dhcp.Option.mtu_plateaus) ;
     (* A default route, added after the ones the reader configured, which are
        more specific and must keep the upper hand. [reset] takes it away
        again. *)
@@ -1629,6 +1664,9 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
         leased_nameserver = None ;
         leased_search_sfx = None ;
         leased_host_name = None ;
+        leased_mtu = None ;
+        leased_pmtu_timeout = None ;
+        leased_mtu_plateaus = None ;
         resolv_trx    = None ;
         prefer_v6     = true ;
         search_sfx    = search_sfx ;
@@ -2326,14 +2364,16 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
             ~setter:(fun v -> t.pmtud <- to_option to_bool v) ;
         property "path MTU timeout" ~kind:(optional (IRange (1, 0xffff_ffff)))
             ~units:"seconds"
-            ~descr:"How long a path MTU learnt holds; unset, forever."
-            ~getter:(fun () -> json_of_optional (fun i -> `Int i) t.pmtu_timeout)
+            ~descr:"How long a path MTU learnt holds; unset, forever (a \
+                    DHCP lease may override it)."
+            ~getter:(fun () -> json_of_optional (fun i -> `Int i) (cur_pmtu_timeout t))
             ~setter:(fun v ->
                 t.pmtu_timeout <- to_option (to_int_range ~min:1 ~max:0xffff_ffff) v) ;
         property "MTU plateaus" ~kind:(list (IRange (68, 65535))) ~units:"bytes"
             ~descr:"The path MTUs to guess from, below the size of a dropped \
-                    IPv4 packet, when the error does not tell it."
-            ~getter:(fun () -> `List (List.map (fun i -> `Int i) t.mtu_plateaus))
+                    IPv4 packet, when the error does not tell it (a DHCP \
+                    lease may override them)."
+            ~getter:(fun () -> `List (List.map (fun i -> `Int i) (cur_mtu_plateaus t)))
             ~setter:(fun v ->
                 t.mtu_plateaus <-
                     to_list (to_int_range ~min:68 ~max:65535) v |>

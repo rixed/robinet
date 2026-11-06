@@ -706,3 +706,37 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     assert_equal ~printer:string_of_int ~msg:"not fragmented" 0
         far.ip_counters.Ip.TRX.frags_in
  *)
+
+(* A DHCP client takes its IPv4 MTU and how it does path MTU discovery from
+   the lease, as long as it holds it. *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "gw-dhcp-mtu" in
+    let a = Ip.Addr.of_string in
+    let gw =
+        make ~parent:sim.root ~dhcp_mtu:1400 (a "80.82.17.127")
+             (Ip.Cidr.of_string "192.168.0.0/24") in
+    let client : Host.t = Host.make ~parent:sim.root "client" in
+    client.Host.trx.Host.dev --> gw.trx.ins ;
+    ignore (client.Host.trx.Host.dev <-= gw.trx) ;
+    Simulation.run sim false ;
+    let st = Option.get gw.dhcp_state in
+    st.pmtu_timeout <- Some 0xffff_ffff ;
+    st.mtu_plateaus <- [ 576 ; 1006 ] ;
+    st.parameters <- None ;
+    Simulation.power_down client.Host.trx.Host.widget.power ;
+    Simulation.power_up client.Host.trx.Host.widget.power ;
+    Simulation.run sim false ;
+    let ints = IO.to_string (List.print Int.print) in
+    assert_equal ~printer:string_of_int ~msg:"MSS for the leased MTU" 1360
+        (Host.tcp_mss client (a "0.0.0.0")) ;
+    assert_equal ~msg:"forever" None (Host.cur_pmtu_timeout client) ;
+    assert_equal ~printer:ints ~msg:"plateaus" [ 576 ; 1006 ]
+        (Host.cur_mtu_plateaus client) ;
+    Simulation.power_down client.Host.trx.Host.widget.power ;
+    assert_equal ~printer:string_of_int ~msg:"forgotten with the lease" 1460
+        (Host.tcp_mss client (a "0.0.0.0")) ;
+    assert_equal ~msg:"own timeout" (Some Host.default_pmtu_timeout)
+        (Host.cur_pmtu_timeout client) ;
+    assert_equal ~printer:ints ~msg:"own plateaus" Host.default_mtu_plateaus
+        (Host.cur_mtu_plateaus client)
+ *)
