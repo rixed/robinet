@@ -169,6 +169,17 @@ let to_string url =
         (if url.params <> "" then ";" else "") (encode url.params)
         (if url.query <> "" then "?" else "") (encode url.query)
 
+(** What an HTTP request names: path, parameters and query. *)
+let request_target url =
+    (if url.path = "" then "/" else url.path) ^
+    (if url.params <> "" then ";"^ url.params else "") ^
+    (if url.query <> "" then "?"^ url.query else "")
+
+(*$= request_target & ~printer:identity
+    "/" (request_target (of_string "http://a.com"))
+    "/p;x?q=1&r=2" (request_target (of_string "http://a.com/p;x?q=1&r=2"))
+*)
+
 let dotslash_re = Str.regexp "\\(^\\|/\\)\\./"
 let updir_re = Str.regexp "\\(^\\|/\\)\\([^/]+\\)/\\.\\.\\/"
 

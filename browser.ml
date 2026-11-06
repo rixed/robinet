@@ -264,7 +264,7 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
                 TRXtop.set_recv http ignore ; (* we only want to trigger once *)
                 cont (Some (msg, http, tcp))) ;
             (* now that the receive function is ready, send the query *)
-            let path = url.Url.path^url.Url.params^url.Url.query in
+            let path = Url.request_target url in
             let add_headers n v hs = if headers_find n headers = None then (n, v)::hs else hs in
             let headers = add_headers "User-Agent" t.user_agent headers in
             let headers = add_headers "Host" url.Url.net_loc headers in

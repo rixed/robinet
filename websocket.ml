@@ -342,12 +342,8 @@ struct
 
     let send_request t url =
         let key = base64 (string_of_bitstring (randbs 16)) in
-        let target =
-            (if url.Url.path = "" then "/" else url.Url.path) ^
-            (if url.Url.params <> "" then ";"^ url.Url.params else "") ^
-            (if url.Url.query <> "" then "?"^ url.Url.query else "") in
         let req =
-            Http.Pdu.make_request "GET" target
+            Http.Pdu.make_request "GET" (Url.request_target url)
                 ([ "Host", url.Url.net_loc ;
                    "Upgrade", "websocket" ;
                    "Connection", "Upgrade" ;

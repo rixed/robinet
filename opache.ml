@@ -276,8 +276,8 @@ let multiplexer res _host http msg (widget : Widget.t) =
                                          "Content-Type", "text/plain" ] ;
                          Pdu.body = body }
 
-(* A browser's websocket upgraded from an HTTP connection, echoing in upper
-   case; and one to a URL that has none. *)
+(* A browser's request, then its websocket upgraded from an HTTP connection,
+   echoing in upper case; and one to a URL that has none. *)
 (*$R
     let sim = Simulation.make ~realtime:false "opache-websocket" in
     let ip n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n) in
@@ -300,8 +300,16 @@ let multiplexer res _host http msg (widget : Widget.t) =
                         tx ws.trx (bitstring_of_string
                             (String.uppercase_ascii (string_of_bitstring bits)))) <-= ws.trx |> ignore)
         | _ -> None in
-    serve b.trx ~websocket (fun _ _ _ _ -> ()) ;
+    let targets = ref [] in
+    serve b.trx ~websocket (fun _ http (req : Http.Pdu.t) _ ->
+        (match req.cmd with
+        | Http.Request (_, target) -> targets := target :: !targets
+        | _ -> ()) ;
+        Http.TRXtop.tx http (Http.Pdu.make_response 200)) ;
     let browser = Browser.make ~user_agent:"Test" ~parent:sim.root a.trx in
+    Browser.get browser (Url.of_string "http://192.168.0.2/p;x?q=1") ignore ;
+    Simulation.run sim false ;
+    assert_equal ~printer:dump [ "/p;x?q=1" ] !targets ;
     Browser.store_cookies browser "192.168.0.2" "/" [ "Set-Cookie", "SID=42" ] ;
     let connect path =
         let got = ref [] and ws = ref None in
