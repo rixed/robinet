@@ -79,10 +79,15 @@ and sock_key = {
     remote : Ip.Addr.t ;
     remote_port : int }
 
-(* Each emits through an IP TRX of its own; what it receives is handed to it
-   by [ip_recv]. TCP sockets stay until they are over (see [sweep_tcps]); UDP
-   ones until their server stops, if they have one. *)
-and socket =
+(* Each emits through an IP TRX of its own, which [set_ip_mtu] resizes; what
+   it receives is handed to it by [ip_recv]. TCP sockets stay until they are
+   over (see [sweep_tcps]); UDP ones until their server stops, if they have
+   one. *)
+and socket = {
+    sock : sock ;
+    set_ip_mtu : int -> unit }
+
+and sock =
     | Tcp_sock of Tcp.TRX.tcp_trx
     | Udp_sock of Udp.TRX.udp_trx
 
@@ -158,6 +163,17 @@ and t = {
     mutable got_ra : bool ;
     (* The IPv6 MTU an advertisement gave, if any: *)
     mutable ra_mtu : int option ;
+    (* Path MTU discovery (see [path_mtu_rx]): whether IPv4 packets are sent
+       with DF set and IPv4 errors acted on, or, if [None], whether the host
+       has IPv6; how many seconds a learnt path MTU holds, if not forever; the
+       plateaus (increasing) to guess one from when an error tells none; and
+       the smallest IPv4 one taken. *)
+    mutable pmtud : bool option ;
+    mutable pmtu_timeout : int option ;
+    mutable mtu_plateaus : int list ;
+    mutable min_pmtu : int ;
+    (* The path MTUs learnt, by destination, and until when they hold: *)
+    pmtus : (Ip.Addr.t, int * Clock.Time.t option) Hashtbl.t ;
     (* Until when each address of SLAAC is valid, if not forever: *)
     slaac_deadlines : Clock.Time.t BitHash.t ;
     (* What the current lease granted, if anything. A lease is not a
@@ -203,16 +219,50 @@ let cur_search_sfx t = if t.leased_search_sfx <> None then t.leased_search_sfx
                        else t.search_sfx
 let cur_host_name t = t.leased_host_name |? t.host_name
 
+let is_v6_cidr c = Ip.Addr.is_v6 (fst (c : Ip.Cidr.t :> Ip.Addr.t * int))
+
+let has_v6 t = t.slaac || List.exists is_v6_cidr t.addresses
+
+let pmtud t = t.pmtud |? has_v6 t
+
+(* RFC 1191, 7: *)
+let default_mtu_plateaus =
+    [ 68 ; 296 ; 508 ; 1006 ; 1492 ; 2002 ; 4352 ; 8166 ; 17914 ; 32000 ]
+
+let default_pmtu_timeout = 600 (* as Linux's mtu_expires *)
+
+(* The path MTU learnt for [remote], unless it expired: *)
+let path_mtu t remote =
+    match Hashtbl.find_option t.pmtus remote with
+    | Some (mtu, None) -> Some mtu
+    | Some (mtu, Some until)
+      when Clock.Time.compare until (Simulation.Widget.now t.trx.widget) > 0 ->
+        Some mtu
+    | Some _ ->
+        Hashtbl.remove t.pmtus remote ;
+        None
+    | None -> None
+
 (* IP packets from [local] are sized for the host's only interface, or for
- * the MTU a router advertised if [local] is IPv6, and TCP segments for those
- * packets (IP and TCP headers without options): *)
-let ip_mtu t local =
+ * the MTU a router advertised if [local] is IPv6: *)
+let link_mtu t local =
     let mtu = t.eth_state.Eth.State.mtu in
     if Ip.Addr.is_v6 local then Option.map_default (min mtu) mtu t.ra_mtu
     else mtu
-let tcp_mss t local =
+
+(* ...and for the path to [remote], when it is known to be smaller: *)
+let ip_mtu t local remote =
+    let mtu = link_mtu t local in
+    Option.map_default (min mtu) mtu (path_mtu t remote)
+
+(* TCP segments for packets of [mtu] bytes, IP and TCP headers without
+ * options: *)
+let mss_of_mtu local mtu =
     let ip_hdr_len = if Ip.Addr.is_v6 local then 40 else Ip.Pdu.no_opt_hdr_len in
-    ip_mtu t local - ip_hdr_len - Tcp.Pdu.no_opt_hdr_len
+    mtu - ip_hdr_len - Tcp.Pdu.no_opt_hdr_len
+
+(* What TCP connections from [local] advertise: *)
+let tcp_mss t local = mss_of_mtu local (link_mtu t local)
 
 let my_addresses t =
     List.map (fun (a : Eth.State.my_address) -> Ip.Addr.of_bitstring a.addr, a)
@@ -239,34 +289,56 @@ let udp_key local local_port remote remote_port =
 
 let find_tcp t key =
     match Hashtbl.find_option t.sockets key with
-    | Some (Tcp_sock c) -> Some c
+    | Some { sock = Tcp_sock c ; _ } -> Some c
     | _ -> None
 
 let find_udp t key =
     match Hashtbl.find_option t.sockets key with
-    | Some (Udp_sock u) -> Some u
+    | Some { sock = Udp_sock u ; _ } -> Some u
     | _ -> None
 
 (* Forgets the connections that are over, whenever a new one is added: *)
 let sweep_tcps t =
     Hashtbl.filter_inplace (function
-        | Tcp_sock c -> not (c.is_over ())
-        | Udp_sock _ -> true) t.sockets
+        | { sock = Tcp_sock c ; _ } -> not (c.is_over ())
+        | { sock = Udp_sock _ ; _ } -> true) t.sockets
 
 (* A new IP TRX from [local] to [remote], of their family, emitting to the
- * adapter. IPv6 ones drop what exceeds the MTU rather than fragment it. *)
+ * adapter, and what resizes its packets. IPv6 ones drop what exceeds the MTU
+ * rather than fragment it; IPv4 ones set DF with [pmtud]. *)
 let ip_trx t proto local remote =
-    let power = t.trx.widget.power and mtu = ip_mtu t local
+    let power = t.trx.widget.power and mtu = ip_mtu t local remote
     and logger = t.trx.widget.logger in
-    let trx =
-        if Ip.Addr.is_v6 local then Ip6.TRX.make power ~mtu local remote proto logger
-        else Ip.TRX.make power ~mtu local remote proto logger in
+    let trx, set_mtu =
+        if Ip.Addr.is_v6 local then
+            let ip = Ip6.TRX.create power ~mtu local remote proto logger in
+            Ip6.TRX.trx_of ip, Ip6.TRX.set_mtu ip
+        else
+            let ip = Ip.TRX.create power ~mtu ~dont_frag:(pmtud t)
+                                   local remote proto logger in
+            Ip.TRX.trx_of ip, Ip.TRX.set_mtu ip in
     trx =-> t.eth_trx.ins ;
-    trx
+    trx, set_mtu
 
 (* What is sent from no socket (resets, ICMP errors and echo replies): *)
 let ip_reply t proto local remote bits =
-    tx (ip_trx t proto local remote) bits
+    tx (fst (ip_trx t proto local remote)) bits
+
+(* Registers [tcp] under [key], emitting from [local] to [remote], its
+ * segments sized for the path if it is known to be smaller than the link: *)
+let add_tcp t key local remote (tcp : Tcp.TRX.tcp_trx) =
+    let ip, set_ip_mtu = ip_trx t Ip.Proto.tcp local remote in
+    tcp.trx =-> ip.ins ;
+    Option.may (fun mtu -> tcp.lower_mss (mss_of_mtu local mtu))
+               (path_mtu t remote) ;
+    Hashtbl.add t.sockets key { sock = Tcp_sock tcp ; set_ip_mtu }
+
+(* Same for [udp], and what reads it, if already known: *)
+let add_udp t key local remote ?reader (udp : Udp.TRX.udp_trx) =
+    let ip, set_ip_mtu = ip_trx t Ip.Proto.udp local remote in
+    Option.may (fun r -> ignore (sink r <-= udp.trx)) reader ;
+    udp.trx =-> ip.ins ;
+    Hashtbl.add t.sockets key { sock = Udp_sock udp ; set_ip_mtu }
 
 (* Hand the segment to its connection, or to a server that opens one, or
  * answer with a reset. *)
@@ -304,8 +376,7 @@ let tcp_rx t ~local ~remote bits =
                         ?rcv_buf:server.tcp_rcv_buf
                         tcp.dst_port tcp.src_port
                         t.trx.widget.logger in
-                cnx.tcp_trx.trx =-> (ip_trx t Ip.Proto.tcp local remote).ins ;
-                Hashtbl.add t.sockets key (Tcp_sock cnx.tcp_trx) ;
+                add_tcp t key local remote cnx.tcp_trx ;
                 server.tcp_cnxs <-
                     (key, cnx.tcp_trx) ::
                     List.filter (fun (_, (c : Tcp.TRX.tcp_trx)) ->
@@ -333,14 +404,54 @@ let udp_rx t ~local ~remote ~to_all ~unreachable bits =
             match Hashtbl.find_option t.udp_servers udp.dst_port with
             | Some server ->
                 let u = Udp.TRX.make t.trx.widget.power udp.dst_port udp.src_port t.trx.widget.logger in
-                u.trx =-> (ip_trx t Ip.Proto.udp local remote).ins ;
-                Hashtbl.add t.sockets key (Udp_sock u) ;
+                add_udp t key local remote u ;
                 server.udp_peers <- key :: server.udp_peers ;
                 server.udp_accept u ; (* supposed to set the recver of this udp trx *)
                 rx u.trx bits
             | None ->
                 Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %s" (Udp.Port.to_string udp.dst_port)))) ;
                 if not to_all then unreachable ()
+
+(* An error told that a packet of [size] bytes from [local] to [remote] was
+ * dropped, the path taking no more than [mtu] bytes (0 if it did not say);
+ * [l4] is what was quoted of the packet past its IP headers. The path MTU is
+ * only ever lowered, and only by an error about a packet larger than what
+ * it lowers it to. A TCP segment has to be one in flight (RFC 5927, 5.1), so
+ * that no stray error shrinks a connection. *)
+let path_mtu_rx t ~local ~remote ~proto ~size ~mtu l4 =
+    let mtu =
+        if Ip.Addr.is_v6 remote then max 1280 mtu (* RFC 8201, 4 *)
+        else
+            let mtu =
+                if mtu > 0 then mtu
+                else List.fold_left (fun guess p -> if p < size then p else guess)
+                                    0 t.mtu_plateaus in
+            max t.min_pmtu mtu in
+    let in_flight () =
+        proto <> Ip.Proto.tcp ||
+        match%bitstring l4 with
+        | {| src_port : 16 ; dst_port : 16 ; seq_num : 32 ; _ |} ->
+            (match find_tcp t (tcp_key local (Tcp.Port.o src_port)
+                                       remote (Tcp.Port.o dst_port)) with
+            | Some c -> c.is_in_flight (Tcp.SeqNum.o seq_num)
+            | None -> false)
+        | {| _ |} -> false in
+    if mtu < size && mtu < ip_mtu t local remote && in_flight () then (
+        Log.(log t.trx.widget.logger Info (lazy (Printf.sprintf
+            "Path MTU to %s is %d" (Ip.Addr.to_string remote) mtu))) ;
+        let until =
+            Option.map (fun secs ->
+                Clock.Time.add (Simulation.Widget.now t.trx.widget)
+                               (Clock.Interval.sec (float_of_int secs))
+            ) t.pmtu_timeout in
+        Hashtbl.replace t.pmtus remote (mtu, until) ;
+        Hashtbl.iter (fun key s ->
+            if Ip.Addr.compare key.remote remote = 0 then (
+                s.set_ip_mtu mtu ;
+                match s.sock with
+                | Tcp_sock c -> c.lower_mss (mss_of_mtu remote mtu)
+                | Udp_sock _ -> ())
+        ) t.sockets)
 
 let echo_reply_rx t id seq =
     Option.may (fun waiter -> waiter seq) (Hashtbl.find_option t.echo_waiters id)
@@ -359,6 +470,14 @@ let icmp_rx t ~local ~remote bits =
         | Ok Icmp.Pdu.{ msg_type ; payload = Ids (id, seq, _) ; _ }
             when Icmp.MsgType.is_echo_reply msg_type ->
                 echo_reply_rx t id seq
+        | Ok Icmp.Pdu.{ msg_type ; payload = Header { mtu ; pld ; _ } }
+            when (msg_type :> int * int) = (3, Icmp.Unreachable.fragmentation_needed) &&
+                 pmtud t ->
+                (match Ip.Pdu.unpack (pld :> bitstring) with
+                | Ok q when is_mine t q.src ->
+                    path_mtu_rx t ~local:q.src ~remote:q.dst ~proto:q.proto
+                                ~size:q.tot_len ~mtu (q.payload :> bitstring)
+                | _ -> ())
         | _ -> ()
 
 (* Take [my_addr] if no other node has it, then call [ok]: *)
@@ -499,6 +618,18 @@ let icmp6_rx t ~local ~remote ~ttl bits =
             | 129, 0 ->
                 echo_reply_rx t id seq
             | _ -> ())
+        | Ok Icmp6.Pdu.{ msg_type ; payload = Err { param ; pld } }
+          when Icmp6.MsgType.type_of msg_type = 2 ->
+            let pld = (pld :> bitstring) in
+            (match%bitstring pld with
+            | {| _ : 32 ; payload_len : 16 ; _ |} ->
+                (match Ip6.Pdu.unpack ~truncated:true pld with
+                | Ok q when is_mine t q.src ->
+                    path_mtu_rx t ~local:q.src ~remote:q.dst ~proto:q.proto
+                                ~size:(40 + payload_len) ~mtu:param
+                                (q.payload :> bitstring)
+                | _ -> ())
+            | {| _ |} -> ())
         | Ok Icmp6.Pdu.{ payload = Router_advert { lifetime ; options ; _ } ; _ }
           when t.slaac && ttl = 255 && Ip.Addr.is_link_local remote ->
             slaac_rx t ~router:remote lifetime options
@@ -701,8 +832,7 @@ and tcp_connect t dst ?src_port ?snd_buf ?rcv_buf (dst_port : Tcp.Port.t) cont =
                 cont None
             | Some src_port ->
                 let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t my_ip) ?snd_buf ?rcv_buf src_port dst_port t.trx.widget.logger in
-                tcp.tcp_trx.trx =-> (ip_trx t Ip.Proto.tcp my_ip dst_ip).ins ;
-                Hashtbl.add t.sockets (key src_port) (Tcp_sock tcp.tcp_trx) ;
+                add_tcp t (key src_port) my_ip dst_ip tcp.tcp_trx ;
                 Tcp.TRX.connect tcp (function
                 | Some trx ->
                     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf2 "Connection established with %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
@@ -742,8 +872,7 @@ and udp_connect t dst ?src_port dst_port client_f cont =
         ) else (
             let trx = Udp.TRX.make t.trx.widget.power src_port dst_port t.trx.widget.logger in
             (* connect this udp to the underlaying ip *)
-            sink (client_f trx) <-= trx.trx =-> (ip_trx t Ip.Proto.udp my_ip dst_ip).ins ;
-            Hashtbl.add t.sockets key (Udp_sock trx) ;
+            add_udp t key my_ip dst_ip ~reader:(client_f trx) trx ;
             (* Metric.Atomic.fire udp_cnxs_ok ; *)
             cont (Some trx)
         )
@@ -1244,6 +1373,7 @@ let reset t =
     BitHash.clear t.slaac_deadlines ;
     t.got_ra <- false ;
     t.ra_mtu <- None ;
+    Hashtbl.clear t.pmtus ;
     t.leased_netmask <- None ;
     t.leased_nameserver <- None ;
     t.leased_search_sfx <- None ;
@@ -1268,8 +1398,6 @@ let power_off t =
 let my_address_of_cidr c =
     let ip, prefix_len = (c : Ip.Cidr.t :> Ip.Addr.t * int) in
     Eth.State.make_my_ip_address ~prefix_len ip
-
-let is_v6_cidr c = Ip.Addr.is_v6 (fst (c : Ip.Cidr.t :> Ip.Addr.t * int))
 
 (* Give the adapter [ip4], an address and netmask, if any, the other
    [addresses] (the IPv6 ones only once checked, with [dad]) and those
@@ -1325,7 +1453,7 @@ let init_static t =
 (* A link-local address for a host with IPv6, and then, with SLAAC, the
    routers' advertisements: *)
 let init_autoconf t =
-    if t.slaac || List.exists is_v6_cidr t.addresses then
+    if has_v6 t then
         Eth.State.make_my_ip_address ~prefix_len:64
             (Eth.Ndp.link_local t.eth_state.mac) |>
         autoconf_add t ~ok:(fun () -> if t.slaac then solicit_routers t)
@@ -1457,7 +1585,10 @@ let init_dhcp t =
 (* Build the host from its ethernet adapter.
  * you probably want [eth_state] to share its power source with [widget]. *)
 let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
-                  ?(slaac=false) ?(dad=false) ?(own_ip_config=true) ~widget
+                  ?(slaac=false) ?(dad=false) ?pmtud
+                  ?(pmtu_timeout=Some default_pmtu_timeout)
+                  ?(mtu_plateaus=default_mtu_plateaus) ?(min_pmtu=68)
+                  ?(own_ip_config=true) ~widget
                   (eth_state : Eth.State.t) eth_trx name =
     (* For the API a cable reaches a host but in reality it reaches its
        adapter. *)
@@ -1489,6 +1620,9 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
         ra_deadline   = Clock.Time.zero ;
         got_ra        = false ;
         ra_mtu        = None ;
+        pmtud ; pmtu_timeout ; min_pmtu ;
+        mtu_plateaus  = List.sort_unique Int.compare mtu_plateaus ;
+        pmtus         = Hashtbl.create 3 ;
         slaac_deadlines = BitHash.create 3 ;
         leased_netmask = None ;
         leased_gateway = None ;
@@ -2136,7 +2270,7 @@ let addresses_of_json name =
             Ip.Cidr.o (ip, Ip.Addr.length ip))
 
 let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
-         ?addresses ?slaac ?dad
+         ?addresses ?slaac ?dad ?pmtud ?pmtu_timeout ?mtu_plateaus ?min_pmtu
          ~parent ?(own_power=true) ?location name =
     (* A host can take its power source from some larger equipment, and
        mints one of its own when it is a machine in its own right. *)
@@ -2147,7 +2281,8 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
         Eth.State.make ?mac ?gateways ~parent:widget () in
     let eth_trx = Eth.TRX.make eth_state in
     let t = make_from_eth ?search_sfx ?nameserver ~widget ?static_ip
-                          ?netmask ?addresses ?slaac ?dad eth_state eth_trx name in
+                          ?netmask ?addresses ?slaac ?dad ?pmtud ?pmtu_timeout
+                          ?mtu_plateaus ?min_pmtu eth_state eth_trx name in
     (* This host minted the supply above, so the switch for it goes here, and
        so does stopping it for good. And it is a whole machine, unlike a host
        built on somebody else's adapter. *)
@@ -2182,6 +2317,40 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
                     boot."
             ~getter:(fun () -> `Bool t.dad)
             ~setter:(fun v -> t.dad <- to_bool v) ;
+        property "path MTU discovery" ~kind:(optional Bool)
+            ~descr:"Send IPv4 with don't-fragment set, and take the path MTUs \
+                    routers report for it, from the next connection; if \
+                    unset, only on a host with IPv6. Those reported for IPv6 \
+                    are always taken."
+            ~getter:(fun () -> json_of_optional (fun b -> `Bool b) t.pmtud)
+            ~setter:(fun v -> t.pmtud <- to_option to_bool v) ;
+        property "path MTU timeout" ~kind:(optional (IRange (1, 0xffff_ffff)))
+            ~units:"seconds"
+            ~descr:"How long a path MTU learnt holds; unset, forever."
+            ~getter:(fun () -> json_of_optional (fun i -> `Int i) t.pmtu_timeout)
+            ~setter:(fun v ->
+                t.pmtu_timeout <- to_option (to_int_range ~min:1 ~max:0xffff_ffff) v) ;
+        property "MTU plateaus" ~kind:(list (IRange (68, 65535))) ~units:"bytes"
+            ~descr:"The path MTUs to guess from, below the size of a dropped \
+                    IPv4 packet, when the error does not tell it."
+            ~getter:(fun () -> `List (List.map (fun i -> `Int i) t.mtu_plateaus))
+            ~setter:(fun v ->
+                t.mtu_plateaus <-
+                    to_list (to_int_range ~min:68 ~max:65535) v |>
+                    List.sort_unique Int.compare) ;
+        property "min path MTU" ~kind:(IRange (68, 65535)) ~units:"bytes"
+            ~descr:"The smallest IPv4 path MTU taken from an error."
+            ~getter:(fun () -> `Int t.min_pmtu)
+            ~setter:(fun v -> t.min_pmtu <- to_int_range ~min:68 ~max:65535 v) ;
+        property "path MTUs" ~kind:(list String)
+            ~descr:"Those learnt and still holding, by destination."
+            ~getter:(fun () ->
+                `List (Hashtbl.keys t.pmtus |> List.of_enum |>
+                       List.filter_map (fun remote ->
+                           Option.map (fun mtu ->
+                               `String (Printf.sprintf "%s %d"
+                                            (Ip.Addr.to_string remote) mtu)
+                           ) (path_mtu t remote)))) ;
         property "autoconfigured addresses" ~kind:(list String)
             ~descr:"The link-local address of a host with IPv6, and those \
                     SLAAC configured."

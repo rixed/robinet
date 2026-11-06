@@ -82,6 +82,8 @@ type model =
                    full_duplex : bool ; macs : int }
     | THost of { static_ip : Ip.Addr.t option ; netmask : Ip.Addr.t option ;
                  addresses : Ip.Cidr.t list ; slaac : bool ; dad : bool ;
+                 pmtud : bool option ; pmtu_timeout : int option ;
+                 mtu_plateaus : int list ; min_pmtu : int ;
                  gateway : Ip.Addr.t option ; nameserver : Ip.Addr.t option ;
                  search_sfx : string option ; mac : Eth.Addr.t option }
     (* The two ends are widget ids, which is what the interface has to name
@@ -392,6 +394,22 @@ let host =
           param "DAD" ~kind:Bool ~default:(`Bool false)
               ~descr:"Use its static IPv6 addresses only once no other node \
                       is found to have them." ;
+          param "path MTU discovery" ~kind:(Widget.optional Bool)
+              ~placeholder:"if it has IPv6"
+              ~descr:"Send IPv4 with don't-fragment set, and take the path \
+                      MTUs routers report for it." ;
+          param "path MTU timeout" ~kind:(Widget.optional (IRange (1, 0xffff_ffff)))
+              ~units:"seconds" ~default:(`Int Host.default_pmtu_timeout)
+              ~placeholder:"forever"
+              ~descr:"How long a path MTU learnt holds." ;
+          param "MTU plateaus" ~kind:Widget.(list (IRange (68, 65535)))
+              ~units:"bytes"
+              ~default:(`List (List.map (fun i -> `Int i) Host.default_mtu_plateaus))
+              ~descr:"The path MTUs to guess from when an error does not tell \
+                      it." ;
+          param "min path MTU" ~kind:(IRange (68, 65535)) ~units:"bytes"
+              ~default:(`Int 68)
+              ~descr:"The smallest IPv4 path MTU taken from an error." ;
           param "gateway" ~kind:(Widget.optional String)
               ~placeholder:"192.168.0.1"
               ~descr:"Where to send what the netmask does not cover, of the \
@@ -417,6 +435,10 @@ let host =
               addresses = Host.addresses_of_json "addresses" (Widget.arg args "addresses") ;
               slaac = bool args "SLAAC" ;
               dad = bool args "DAD" ;
+              pmtud = opt args "path MTU discovery" Widget.to_bool ;
+              pmtu_timeout = opt args "path MTU timeout" Widget.to_int ;
+              mtu_plateaus = list args "MTU plateaus" Widget.to_int ;
+              min_pmtu = int args "min path MTU" ;
               gateway = opt args "gateway" (Ip.Addr.of_json "gateway") ;
               nameserver = opt args "nameserver" (Ip.Addr.of_json "nameserver") ;
               search_sfx = opt args "search suffix" Widget.to_string ;
@@ -765,7 +787,8 @@ let to_params =
                                     speeds) ;
           "full duplex", `Bool full_duplex ;
           "MACs", `Int macs ]
-    | THost { static_ip ; netmask ; addresses ; slaac ; dad ; gateway ;
+    | THost { static_ip ; netmask ; addresses ; slaac ; dad ; pmtud ;
+              pmtu_timeout ; mtu_plateaus ; min_pmtu ; gateway ;
               nameserver ; search_sfx ; mac } ->
         [ "static-ip", ip_opt static_ip ;
           "netmask", ip_opt netmask ;
@@ -773,6 +796,11 @@ let to_params =
                                        addresses) ;
           "SLAAC", `Bool slaac ;
           "DAD", `Bool dad ;
+          "path MTU discovery",
+              Option.map_default (fun b -> `Bool b) `Null pmtud ;
+          "path MTU timeout", int_opt pmtu_timeout ;
+          "MTU plateaus", `List (List.map (fun i -> `Int i) mtu_plateaus) ;
+          "min path MTU", `Int min_pmtu ;
           "gateway", ip_opt gateway ;
           "nameserver", ip_opt nameserver ;
           "search suffix", str_opt search_sfx ;
@@ -858,7 +886,8 @@ let build ~parent name = function
     | TSwitch { ports ; speeds ; full_duplex ; macs } as m ->
         let t = Hub.Switch.make ~parent ~speeds ~full_duplex ports macs name in
         t.Hub.Switch.widget, m
-    | THost ({ static_ip ; netmask ; addresses ; slaac ; dad ; gateway ;
+    | THost ({ static_ip ; netmask ; addresses ; slaac ; dad ; pmtud ;
+               pmtu_timeout ; mtu_plateaus ; min_pmtu ; gateway ;
                nameserver ; search_sfx ; mac } as h) ->
         let gateways =
             match gateway with
@@ -868,7 +897,8 @@ let build ~parent name = function
                   Some (Eth.Gateway.Ip gw) ] in
         let t =
             Host.make ~parent ~gateways ?search_sfx ?nameserver ?static_ip
-                      ?netmask ~addresses ~slaac ~dad ?mac name in
+                      ?netmask ~addresses ~slaac ~dad ?pmtud ~pmtu_timeout
+                      ~mtu_plateaus ~min_pmtu ?mac name in
         (* The address it ended up with, drawn at random when it was not given
            one. Its "MAC" property is read-only, so nothing else would bring it
            back. *)
@@ -1199,8 +1229,9 @@ let make_from_params ?start type_ ~parent name given =
   (* Handed no address, a host comes back with the one it drew: *) \
   (let w = make ~parent:(root ()) "h" (THost { static_ip = None ; \
                netmask = Some (Ip.Addr.of_string "255.255.255.0") ; \
-               addresses = [] ; slaac = false ; dad = false ; gateway = None ; \
-               nameserver = None ; search_sfx = None ; mac = None }) in \
+               addresses = [] ; slaac = false ; dad = false ; pmtud = None ; \
+               pmtu_timeout = None ; mtu_plateaus = [] ; min_pmtu = 68 ; \
+               gateway = None ; nameserver = None ; search_sfx = None ; mac = None }) in \
    match w.made_with with \
    | Some args -> List.assoc "MAC" args <> `Null \
    | None -> false)

@@ -858,11 +858,15 @@ module Pdu = struct
             else t.payload in
         concat [ header ; extensions ; (payload :> bitstring) ]
 
-    let unpack bits = match%bitstring bits with
+    (* With [truncated], a packet may lack the end of its payload, as one an
+     * ICMPv6 error quotes: *)
+    let unpack ?(truncated=false) bits = match%bitstring bits with
         | {| 6 : 4 ; diff_serv : 6 ; ecn : 2 ; flow_label : 20 ;
              payload_len : 16 ; next : 8 ; ttl : 8 ;
              src : 128 : bitstring ; dst : 128 : bitstring ;
-             payload : payload_len*8 : bitstring |} ->
+             rest : -1 : bitstring |}
+          when truncated || bitstring_length rest >= payload_len * 8 ->
+            let payload = takebits (min (payload_len * 8) (bitstring_length rest)) rest in
             let extensions, proto, payload = Extension.unpack next payload in
             Ok { diff_serv ; ecn ; flow_label ;
                  proto = Ip.Proto.o proto ; ttl ;
@@ -877,6 +881,15 @@ module Pdu = struct
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
+    (*$T unpack
+      let p = make Ip.Proto.udp (Ip.Addr.of_string "2001:db8::1") \
+                   (Ip.Addr.of_string "2001:db8::2") (randbs 100) in \
+      let cut = takebytes 60 (pack p) in \
+      Result.is_error (unpack cut) && \
+      (match unpack ~truncated:true cut with \
+       | Ok q -> q.src = p.src && Payload.length q.payload = 20 \
+       | Error _ -> false)
+    *)
     (* The checksum is patched for the final destination, and not in
      * fragments: *)
     (*$T pack

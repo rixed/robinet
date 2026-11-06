@@ -1920,3 +1920,120 @@ let make_from_addrs
       r.widget.ports.owner n == (ports r.ifaces.(n)).owner 0 && \
       (r.widget.ports.owner n).name = "#"^ string_of_int n) [ 0 ; 1 ; 2 ; 3 ]
  *)
+
+(* A host told by the router that its packets are too big for the next hop
+ * resizes them, for the connections already open as for later ones; with
+ * path MTU discovery off, IPv4 is fragmented on the way instead. *)
+(*$R make
+    let a = Ip.Addr.of_string and c = Ip.Cidr.of_string in
+    let sim = Simulation.make ~realtime:false "router-pmtud" in
+    let r =
+        make_from_addrs ~parent:sim.root
+            [| [ c "10.0.1.254/24", None ; c "2001:db8:1::fe/64", None ],
+               Eth.Addr.random () ;
+               [ c "10.0.2.254/24", None ; c "2001:db8:2::fe/64", None ],
+               Eth.Addr.random () |] "r" in
+    r.ifaces.(1).eth.mtu <- 1400 ;
+    let host n =
+        let gateways =
+            [ Eth.State.gw_selector (),
+              Some (Eth.Gateway.Ip (a (Printf.sprintf "10.0.%d.254" n))) ;
+              Eth.State.gw_selector ~v6:true (),
+              Some (Eth.Gateway.Ip (a (Printf.sprintf "2001:db8:%d::fe" n))) ] in
+        let h =
+            Host.make ~parent:sim.root ~gateways
+                ~static_ip:(a (Printf.sprintf "10.0.%d.1" n))
+                ~netmask:(a "255.255.255.0")
+                ~addresses:[ c (Printf.sprintf "2001:db8:%d::1/64" n) ]
+                ("h" ^ string_of_int n) in
+        let st = Eth.Cable.State.make ~parent:sim.root
+                                      ~name:("c" ^ string_of_int n) () in
+        Eth.Cable.plug st (h.trx.widget, 0) (r.widget, n - 1) ;
+        h in
+    let h1 = host 1 and h2 = host 2 in
+    Simulation.run_startup sim ;
+    let pmtus (h : Host.t) =
+        match (List.find (fun (p : Widget.property) -> p.name = "path MTUs")
+                         h.trx.widget.properties).getter () with
+        | `List l -> List.map (function `String s -> s | _ -> "?") l |>
+                     List.sort String.compare |> String.concat ", "
+        | _ -> "?" in
+    let received = ref 0 in
+    h2.trx.tcp_server_start (Tcp.Port.o 9) (fun (cnx : Tcp.TRX.tcp_trx) ->
+        cnx.trx.ins --> sink (fun bits ->
+            received := !received + Bitstring.bitstring_length bits / 8)) ;
+    let send dst size =
+        received := 0 ;
+        h1.trx.tcp_connect (Host.Ip (a dst)) (Tcp.Port.o 9) (function
+            | None -> ()
+            | Some (cnx : Tcp.TRX.tcp_trx) ->
+                tx cnx.trx (Bitstring.zeroes_bitstring (size * 8))) ;
+        Simulation.run sim false ;
+        !received in
+    let frags_in () = h2.ip_counters.Ip.TRX.frags_in in
+    (* IPv4-only hosts do not do it unless told to: *)
+    assert_bool "on with IPv6" (Host.pmtud h1) ;
+    assert_bool "off without"
+        (not (Host.pmtud (Host.make ~parent:sim.root ~static_ip:(a "10.0.9.1") "h9"))) ;
+    assert_equal ~printer:string_of_int ~msg:"IPv4" 100_000 (send "10.0.2.1" 100_000) ;
+    assert_equal ~printer:identity "10.0.2.1 1400" (pmtus h1) ;
+    assert_equal ~printer:string_of_int ~msg:"not fragmented" 0 (frags_in ()) ;
+    assert_equal ~printer:string_of_int ~msg:"IPv6" 100_000 (send "2001:db8:2::1" 100_000) ;
+    assert_equal ~printer:identity "10.0.2.1 1400, 2001:db8:2::1 1400" (pmtus h1) ;
+    (* Known from the start, for a new connection: *)
+    assert_equal ~printer:string_of_int ~msg:"again" 100_000 (send "10.0.2.1" 100_000) ;
+    assert_equal ~printer:string_of_int ~msg:"still not fragmented" 0 (frags_in ()) ;
+    (* Forgotten after the timeout, unless there is none: *)
+    let wait secs =
+        Simulation.delay h1.trx.widget.power (Clock.Interval.sec secs) ignore () ;
+        Simulation.run sim false in
+    h1.pmtu_timeout <- None ;
+    Hashtbl.clear h1.pmtus ;
+    ignore (send "10.0.2.1" 100_000) ;
+    wait 1000. ;
+    assert_equal ~printer:identity ~msg:"forever" "10.0.2.1 1400" (pmtus h1) ;
+    Hashtbl.clear h1.pmtus ;
+    h1.pmtu_timeout <- Some 600 ;
+    ignore (send "10.0.2.1" 100_000) ;
+    wait 601. ;
+    assert_equal ~printer:identity ~msg:"expired" "" (pmtus h1) ;
+    (* With path MTU discovery off, IPv4 goes in fragments: *)
+    h1.pmtud <- Some false ;
+    assert_equal ~printer:string_of_int ~msg:"off" 100_000 (send "10.0.2.1" 100_000) ;
+    assert_equal ~printer:identity ~msg:"nothing learnt" "" (pmtus h1) ;
+    assert_bool "fragmented" (frags_in () > 0) ;
+    h1.pmtud <- None ;
+    (* UDP: the first datagram is lost, the next one fragmented: *)
+    let datagrams = ref 0 in
+    h2.trx.udp_server_start (Udp.Port.o 9) (fun (u : Udp.TRX.udp_trx) ->
+        u.trx.ins --> sink (fun _ -> incr datagrams)) ;
+    let frags = frags_in () in
+    let send_udp () =
+        Host.udp_send h1 (Host.Ip (a "10.0.2.1")) (Udp.Port.o 9)
+                      (Bitstring.zeroes_bitstring (1450 * 8)) ;
+        Simulation.run sim false in
+    send_udp () ;
+    assert_equal ~printer:string_of_int ~msg:"lost" 0 !datagrams ;
+    send_udp () ;
+    assert_equal ~printer:string_of_int ~msg:"then received" 1 !datagrams ;
+    assert_equal ~printer:string_of_int ~msg:"in two fragments" (frags + 2) (frags_in ()) ;
+    (* What an error is checked for: *)
+    Hashtbl.clear h1.pmtus ;
+    let error ?(proto=Ip.Proto.udp) ?(size=1500) ?(l4=Bitstring.empty_bitstring) mtu =
+        Host.path_mtu_rx h1 ~local:(a "10.0.1.1") ~remote:(a "10.0.2.1")
+                         ~proto ~size ~mtu l4 ;
+        let s = pmtus h1 in
+        Hashtbl.clear h1.pmtus ;
+        s in
+    assert_equal ~printer:identity ~msg:"plateau" "10.0.2.1 1492" (error 0) ;
+    assert_equal ~printer:identity ~msg:"minimum" "10.0.2.1 68" (error 50) ;
+    assert_equal ~printer:identity ~msg:"not below the packet" "" (error ~size:1000 1000) ;
+    assert_equal ~printer:identity ~msg:"not above the link" "" (error 1500) ;
+    let%bitstring l4 = {| 1234 : 16 ; 9 : 16 ; 0l : 32 |} in
+    assert_equal ~printer:identity ~msg:"about no connection" ""
+        (error ~proto:Ip.Proto.tcp ~l4 1400) ;
+    (* A router that reports nothing is a black hole: *)
+    r.notify_errs.probability <- 0. ;
+    assert_bool "black hole" (send "10.0.2.1" 100_000 < 100_000) ;
+    assert_equal ~printer:identity ~msg:"nothing learnt" "" (pmtus h1)
+ *)

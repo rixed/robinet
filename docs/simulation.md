@@ -162,6 +162,10 @@ which gives IPv4 only — and with `SLAAC` too, it is dual-stack.
 | `addresses` | list of strings | `[]` | Its other addresses, of either family, each with its prefix length: `["2001:db8::1/64"]`. One without is alone on its subnet. |
 | `SLAAC` | bool | `false` | Takes IPv6 addresses and the default IPv6 route from router advertisements. |
 | `DAD` | bool | `false` | Uses its static IPv6 addresses only once duplicate address detection has found no other node with them. |
+| `path MTU discovery` | optional bool | `null` | Sends IPv4 with don't-fragment set and takes the path MTUs routers report for it. Unset, only on a host with IPv6. |
+| `path MTU timeout` | optional 1…4294967295 | `600` | Seconds a learnt path MTU holds; `null`, forever. |
+| `MTU plateaus` | list of 68…65535 | `[68,296,508,1006,1492,2002,4352,8166,17914,32000]` | The path MTUs to guess from when an error does not tell one (RFC 1191). |
+| `min path MTU` | 68…65535 | `68` | The smallest IPv4 path MTU taken from an error. |
 | `gateway` | optional string | `null` | Where to send what is not on its subnets, for the family of that gateway. Both families need the adapter's `gateways`. |
 | `nameserver` | optional string | `null` | Which DNS server to ask, of either family. It is asked for the addresses of the families the host has one of. |
 | `search suffix` | optional string | `null` | Appended to the names it resolves. |
@@ -182,6 +186,16 @@ later advertisement renews them; a router lifetime of 0 withdraws the route at
 once. Those addresses are listed, read only, in its `autoconfigured
 addresses`. An advertised MTU from 1280 to the adapter's sizes the IPv6
 packets and TCP segments of the connections opened after it.
+
+A host does path MTU discovery. A router's *packet too big*, or with
+`path MTU discovery` its *fragmentation needed*, about a packet the host sent,
+lowers the MTU of the path to that destination: the open connections send
+smaller segments at once, resending those that were dropped, and the later
+ones start with them. A UDP datagram that was dropped is lost; over IPv4 the
+next ones leave in fragments. The MTU reported is raised to 1280 for IPv6 and
+`min path MTU` for IPv4, or guessed from `MTU plateaus` if it is 0; an error
+about a TCP segment not in flight, or that would not lower the MTU, is
+ignored. What it learnt is listed, read only, in `path MTUs`, until it expires.
 
 ### switch
 
@@ -527,6 +541,7 @@ not to fragment it. One that is not fragmented, either way, is dropped and
 reported with an ICMP *fragmentation needed* giving that MTU — as the router's
 `errors probability` allows, which at 0 makes it a silent black hole. An IPv6
 packet is never fragmented, and is reported with an ICMPv6 *packet too big*.
+Hosts act on both (see *host*).
 A packet whose next hop does not answer three ARP requests or neighbor
 solicitations, a second apart, is dropped and reported with an ICMP *host
 unreachable*, or an ICMPv6 *address unreachable*.
