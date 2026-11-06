@@ -130,7 +130,10 @@ let tcp_trx_of_socket ctx sock =
       (* A socket is handed out only once connected: *)
       Tcp.TRX.is_established = (fun () -> true) ;
       Tcp.TRX.is_over = (fun () -> t.is_closed) ;
-      Tcp.TRX.may_reopen = (fun _ -> t.is_closed) }
+      Tcp.TRX.may_reopen = (fun _ -> t.is_closed) ;
+      (* The kernel's own business: *)
+      Tcp.TRX.lower_mss = ignore ;
+      Tcp.TRX.is_in_flight = (fun _ -> false) }
 
 (* The addresses of [name], of both families, in the order the system
  * prefers them. TODO: from another thread, not to block. *)

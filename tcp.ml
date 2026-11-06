@@ -573,7 +573,8 @@ struct
         mutable ooo_in : int ;
         mutable dup_in : int ; (* segments with data all already received in order *)
         mutable rtt_samples : int ;
-        mutable min_rtt : Clock.Interval.t option }
+        mutable min_rtt : Clock.Interval.t option ;
+        mutable pmtu_lowered : int } (* times [lower_mss] made segments smaller *)
 
     type tcp_trx = {
         trx : trx ;
@@ -582,7 +583,10 @@ struct
         is_established : unit -> bool ;
         is_over : unit -> bool ; (* gone for good: its ports are free *)
         (* Whether a SYN with that sequence number may take its ports: *)
-        may_reopen : SeqNum.t -> bool }
+        may_reopen : SeqNum.t -> bool ;
+        (* See [lower_mss] and [is_in_flight]: *)
+        lower_mss : int -> unit ;
+        is_in_flight : SeqNum.t -> bool }
     type t = {
         logger : Log.t ;
         power : Simulation.power ;
@@ -594,7 +598,8 @@ struct
         mutable recv : bitstring -> unit ;
         mutable recv_busy_for : unit -> Clock.Interval.t ;
         rcv_mss : int ; (* the max segment size we advertise, ie. we can receive *)
-        mutable snd_mss : int ; (* the max segment size we send: ours, capped by the peer's *)
+        mutable snd_mss : int ; (* the max segment size we send: ours, capped by the peer's and path_mss *)
+        mutable path_mss : int ; (* the max segment size the path allows, as far as we were told *)
         isn : SeqNum.t ; (* initial seq num *)
         mutable rcvd_isn : SeqNum.t option ;
         mutable closed : bool ;  (* set whenever the user want to close or we received a FIN *)
@@ -729,22 +734,74 @@ struct
     let default_snd_mss = 536
     let min_snd_mss = 88
 
-    (* Re-emit the oldest unacked segment, with an up to date ack *)
+    (* Re-emit an unacked segment, with an up to date ack *)
+    let retransmit t (offset, (tcp : Pdu.t)) =
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Retransmitting from %d" offset))) ;
+        t.rtt_probe <- None ; (* Karn's algorithm: the ack would be ambiguous *)
+        let tcp = match next_ack_num t with
+            | Some ack_num ->
+                t.rcvd_acked <- t.rcvd_pld ;
+                { tcp with ack_num ; win_size = adv_wnd ~syn:tcp.flags.syn t ;
+                           flags = { tcp.flags with ack = true } }
+            | None ->
+                tcp in
+        t.counters.retrans <- t.counters.retrans + 1 ;
+        emit_segment t tcp
+
     let retransmit_first t =
-        match Streambuf.min_elt_opt t.unacked_tx with
-        | None -> ()
-        | Some (offset, tcp) ->
-            Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Retransmitting from %d" offset))) ;
-            t.rtt_probe <- None ; (* Karn's algorithm: the ack would be ambiguous *)
-            let tcp = match next_ack_num t with
-                | Some ack_num ->
-                    t.rcvd_acked <- t.rcvd_pld ;
-                    { tcp with ack_num ; win_size = adv_wnd ~syn:tcp.flags.syn t ;
-                               flags = { tcp.flags with ack = true } }
-                | None ->
-                    tcp in
-            t.counters.retrans <- t.counters.retrans + 1 ;
-            emit_segment t tcp
+        Option.may (retransmit t) (Streambuf.min_elt_opt t.unacked_tx)
+
+    (* The unacked segment [tcp] sent at [offset], as segments of at most
+     * [mss] bytes of payload, FIN and PSH on the last one only: *)
+    let split_segment mss ((offset, (tcp : Pdu.t)) as seg) =
+        let bits = (tcp.payload :> bitstring) in
+        let len = bytelength bits in
+        if len <= mss || tcp.flags.syn then [ seg ] else
+        let rec loop k segs =
+            if k >= len then List.rev segs else
+            let n = min mss (len - k) in
+            let last = k + n >= len in
+            let piece =
+                { tcp with
+                    seq_num = SeqNum.o ((tcp.seq_num :> int32) +/ Int32.of_int k) ;
+                    flags = { tcp.flags with fin = tcp.flags.fin && last ;
+                                             psh = tcp.flags.psh && last } ;
+                    payload = Payload.o (takebytes n (dropbytes k bits)) } in
+            loop (k + n) ((offset + k, piece) :: segs) in
+        loop 0 []
+
+    (* Caps the payload of the segments sent from now on to [mss] bytes (but
+     * not below [min_snd_mss]), the path being known to drop larger ones.
+     * The unacked segments that are larger are split and sent again at once:
+     * they were dropped for their size, which tells nothing of congestion,
+     * so neither cwnd nor ssthresh change (as Linux's tcp_simple_retransmit). *)
+    let lower_mss t mss =
+        let mss = max min_snd_mss mss in
+        if mss < t.path_mss then (
+            t.path_mss <- mss ;
+            if mss < t.snd_mss then (
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: path allows segments up to %d" mss))) ;
+                t.snd_mss <- mss ;
+                t.counters.pmtu_lowered <- t.counters.pmtu_lowered + 1 ;
+                let split =
+                    Streambuf.fold (fun seg split ->
+                        match split_segment mss seg with
+                        | [ _ ] -> split
+                        | pieces -> List.rev_append pieces split
+                    ) t.unacked_tx [] |> List.rev in
+                t.unacked_tx <-
+                    List.fold_left (fun buf seg -> Streambuf.add seg buf)
+                        (Streambuf.filter (fun (_, tcp) ->
+                            Payload.length tcp.Pdu.payload <= mss || tcp.Pdu.flags.Pdu.syn
+                         ) t.unacked_tx) split ;
+                List.iter (retransmit t) split
+            )
+        )
+
+    (* Whether [seq_num] is that of a byte sent and not acked yet: *)
+    let is_in_flight t (seq_num : SeqNum.t) =
+        let offset = Int32.to_int ((seq_num :> int32) -/ (t.isn :> int32)) in
+        offset >= t.sent_acked && offset < t.sent_pld
 
     (* Retransmission timer (RFC 6298), with a lower bound on the variation term
      * (as Linux does) so that delayed acks do not cause spurious timeouts: *)
@@ -1096,7 +1153,7 @@ struct
                         List.fold_left (fun found -> function
                             | Pdu.Opt.Mss mss -> mss
                             | _ -> found) default_snd_mss tcp.Pdu.options in
-                    t.snd_mss <- min t.rcv_mss (max min_snd_mss peer_mss) ;
+                    t.snd_mss <- min t.path_mss (min t.rcv_mss (max min_snd_mss peer_mss)) ;
                     t.cwnd <- t.initial_window * t.snd_mss ; (* no data was sent yet *)
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: peer's MSS %d, sending segments up to %d" peer_mss t.snd_mss))) ;
                     inqueue_pkt t tcp
@@ -1267,7 +1324,7 @@ struct
                   emit_busy_for = never_busy ;
                   recv = ignore_bits ~logger ;
                   recv_busy_for = never_busy ;
-                  rcv_mss = mss ; snd_mss = mss ; cwnd = initial_window * mss ; initial_window ; ssthresh ; ca_acked = 0 ; dup_acks = 0 ; recovery = Open ;
+                  rcv_mss = mss ; snd_mss = mss ; path_mss = max_int ; cwnd = initial_window * mss ; initial_window ; ssthresh ; ca_acked = 0 ; dup_acks = 0 ; recovery = Open ;
                   rtt = None ; rtt_probe = None ; rto = initial_rto ; rto_gen = 0 ;
                   min_rto_var ; max_rto ; max_timeouts ; max_syn_timeouts ;
                   rto_armed = false ; timeouts = 0 ;
@@ -1291,13 +1348,16 @@ struct
                   counters = { segs_out = 0 ; bytes_out = 0 ; segs_in = 0 ; bytes_in = 0 ;
                                bytes_acked = 0 ; bytes_received = 0 ;
                                retrans = 0 ; dupacks = 0 ; rto_expired = 0 ; holes_in = 0 ;
-                               ooo_in = 0 ; dup_in = 0 ; rtt_samples = 0 ; min_rtt = None } ;
+                               ooo_in = 0 ; dup_in = 0 ; rtt_samples = 0 ; min_rtt = None ;
+                               pmtu_lowered = 0 } ;
                   tcp_trx = { trx = null_trx ~logger ;
                               close = ignore ;
                               is_closed = (fun _ -> true) ;
                               is_established = (fun _ -> false) ;
                               is_over = (fun _ -> true) ;
-                              may_reopen = (fun _ -> true) } } in
+                              may_reopen = (fun _ -> true) ;
+                              lower_mss = ignore ;
+                              is_in_flight = (fun _ -> false) } } in
         t.tcp_trx <- { trx =  { ins = { write = tx t ;
                                         busy_for = busy_for t ;
                                         set_read = fun f busy_for ->
@@ -1312,7 +1372,9 @@ struct
                        is_closed = is_closed t ;
                        is_established = (fun () -> is_established t) ;
                        is_over = is_over t ;
-                       may_reopen = may_reopen t } ;
+                       may_reopen = may_reopen t ;
+                       lower_mss = lower_mss t ;
+                       is_in_flight = is_in_flight t } ;
         t
 
     let may_timeout t =
@@ -1352,15 +1414,16 @@ end
      * other way, over 10ms of latency each way (without which the RTO would
      * be no longer than a delayed ack). Returns [a], the most that was
      * in flight, the bytes received, the window probes sent and how far beyond
-     * what it received [b] ever held data; [b] is left in [last_b]. *)
-    let last_b = ref None in
+     * what it received [b] ever held data; [a] and [b] are left in [last_a]
+     * and [last_b], [a] as soon as it is made. *)
+    let last_a = ref None and last_b = ref None in
     let transfer ?rcv_buf ?(mss=100) ?b_mss ?b_wscale ?max_timeouts ?(a_to_b=fun p -> Some p)
                  ?(b_to_a=fun _ p -> Some p) size =
         let sim = Simulation.make ~realtime:false "peer-window" in
         let power = sim.root.power and logger = Log.make () in
         let a = make power ~mss ?max_timeouts (Port.o 1) (Port.o 2) logger
         and b = make power ~mss:(b_mss |? mss) ?wscale:b_wscale ?rcv_buf (Port.o 2) (Port.o 1) logger in
-        last_b := Some b ;
+        last_a := Some a ; last_b := Some b ;
         let max_in_flight = ref 0 and rcvd = ref 0 and probes = ref 0 and ahead = ref 0 in
         let later f = Simulation.delay power (Clock.Interval.msec 10.) f () in
         a.tcp_trx.trx.out --> sink (fun bits ->
@@ -1421,6 +1484,32 @@ end
     let _, _, rcvd, _, _ = transfer ~mss:1000 ~a_to_b ~b_to_a 5000 in
     assert_equal ~printer:string_of_int ~msg:"all received" 5000 rcvd ;
     assert_equal ~printer:string_of_int ~msg:"default MSS" 536 !largest ;
+    (* A path that drops payloads above 500 bytes, which [a] is told of when
+     * the first is dropped: *)
+    let in_flight_when_told = ref false in
+    let a_to_b p =
+        let a = Option.get !last_a in
+        if Payload.length p.Pdu.payload <= 500 then Some p else (
+            if a.path_mss = max_int then (
+                in_flight_when_told := is_in_flight a p.Pdu.seq_num &&
+                                       not (is_in_flight a (next_seq_num a)) ;
+                lower_mss a 500) ;
+            None) in
+    let a, _, rcvd, _, _ = transfer ~mss:1000 ~a_to_b 20_000 in
+    assert_equal ~printer:string_of_int ~msg:"all received" 20_000 rcvd ;
+    assert_bool "the dropped segment was in flight" !in_flight_when_told ;
+    assert_equal ~printer:string_of_int ~msg:"sending segments up to" 500 a.snd_mss ;
+    assert_equal ~printer:string_of_int ~msg:"lowered once" 1 a.counters.pmtu_lowered ;
+    assert_equal ~printer:string_of_int ~msg:"no timeout" 0 a.counters.rto_expired ;
+    assert_equal ~printer:string_of_int ~msg:"no congestion" max_int a.ssthresh ;
+    (* Told before the handshake, which must not raise it again: *)
+    largest := 0 ;
+    let a_to_b p =
+        if p.Pdu.flags.Pdu.syn then lower_mss (Option.get !last_a) 300 ;
+        largest := max !largest (Payload.length p.Pdu.payload) ; Some p in
+    let _, _, rcvd, _, _ = transfer ~mss:1000 ~a_to_b 5000 in
+    assert_equal ~printer:string_of_int ~msg:"all received" 5000 rcvd ;
+    assert_equal ~printer:string_of_int ~msg:"path's MSS" 300 !largest ;
     let _, m, rcvd, _, _ = transfer ~rcv_buf:250 2000 in
     assert_equal ~printer:string_of_int ~msg:"all received" 2000 rcvd ;
     assert_bool "whole segments within the window" (m = 200) ;
