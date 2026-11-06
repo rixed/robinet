@@ -377,9 +377,11 @@ mutable can_forward_after : int option ;
              (** Count the frames dropped for out of RAM *)
              tail_dropped : Metric.Counter.t ;
   (** Drop, rather than forward unchanged, the IPv6 packets with a
-   * hop-by-hop options header, or a segment routing header: *)
+   * hop-by-hop options header, a segment routing header, or a fragment
+   * header: *)
   mutable drop_hop_by_hop : bool ;
          mutable drop_srh : bool ;
+         mutable drop_ipv6_fragments : bool ;
         extension_dropped : Metric.Counter.t }
 
 type Widget.device += T of t
@@ -524,6 +526,7 @@ let unwelcome t (ip : Ip6.Pdu.t) =
     List.exists (function
         | Ip6.Extension.Hop_by_hop _ -> t.drop_hop_by_hop
         | Routing (Srh _) -> t.drop_srh
+        | Fragment _ -> t.drop_ipv6_fragments
         | _ -> false) ip.extensions
 
 (* The errors a router reports: *)
@@ -1038,6 +1041,7 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
               can_forward_after ; load_balancing ; lb_cursor = 0 ;
               buffer_capacity ; buffered ; refresh_pending = false ;
               tail_dropped ; drop_hop_by_hop = false ; drop_srh = false ;
+              drop_ipv6_fragments = true ;
               extension_dropped = Metric.Counter.make () } in
     (* The reserves are taken from the start: *)
     Metric.Gauge.set buffered ~now:(Simulation.Widget.now widget)
@@ -1219,6 +1223,11 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                     routing header, rather than forward them unchanged."
             ~getter:(fun () -> `Bool t.drop_srh)
             ~setter:(fun v -> t.drop_srh <- to_bool v) ;
+        property "drop IPv6 fragments" ~kind:Bool
+            ~descr:"Drop the IPv6 packets to forward that have a fragment \
+                    header, rather than forward them unchanged."
+            ~getter:(fun () -> `Bool t.drop_ipv6_fragments)
+            ~setter:(fun v -> t.drop_ipv6_fragments <- to_bool v) ;
         metric_property "extension-dropped"
             ~descr:"Number of IPv6 packets dropped for their extension headers."
             (Metric.Counter.T t.extension_dropped) ;
@@ -1523,7 +1532,13 @@ let make_from_addrs
     let hbh = [ Ip6.Extension.(pad (Hop_by_hop [])) ]
     and srh = [ Ip6.Extension.(pad (Routing (Routing.Srh {
                     segments_left = 1 ; flags = 0 ; tag = 0 ;
-                    segments = [ a "2001:db8:2::2" ; dst ] ; tlvs = [] }))) ] in
+                    segments = [ a "2001:db8:2::2" ; dst ] ; tlvs = [] }))) ]
+    and frag = [ Ip6.Extension.Fragment { offset = 0 ; more = true ; id = 1l } ] in
+    send ~extensions:frag dst ;
+    "fragment dropped" @? nothing () ;
+    r.drop_ipv6_fragments <- false ;
+    send ~extensions:frag dst ;
+    assert_equal (Some 8) (forwarded ()) ;
     send ~extensions:hbh dst ;
     assert_equal (Some 8) (forwarded ()) ;
     send ~extensions:srh dst ;
@@ -1536,7 +1551,7 @@ let make_from_addrs
     r.drop_srh <- true ;
     send ~extensions:srh dst ;
     "segment routing dropped" @? nothing () ;
-    assert_equal ~printer:string_of_int 2 (Metric.Counter.get r.extension_dropped)
+    assert_equal ~printer:string_of_int 3 (Metric.Counter.get r.extension_dropped)
  *)
 
 (* Dual-stack hosts on two subnets talk through a dual-stack router, which

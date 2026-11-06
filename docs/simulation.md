@@ -498,7 +498,7 @@ under:
 | tap | | *none* |
 | policer | `""` | `max packets`, `max volume`, `max duration`, `max packet rate`, `max throughput`, `max syns`, `max syn rate`; the flags `max packets reached`, `max volume reached`, `max syns reached`, `expired` (which are only reset); and, read only, `start`, `packets`, `volume`, `syns`, `elapsed` |
 | firewall | `""` | `inside rules`, `outside rules`, `uninspectable`, `MAC` |
-| router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin`, `buffer capacity`, `drop hop-by-hop`, `drop segment routing` |
+| router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin`, `buffer capacity`, `drop hop-by-hop`, `drop segment routing`, `drop IPv6 fragments` |
 | | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay`, `router advertisements`, `router lifetime` |
 | | `#0/admin@0`… | `hostname`, `search suffix`, `prefer IPv6` — the stack answering for the address that interface holds |
 | gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
@@ -553,10 +553,11 @@ unreachable*, or an ICMPv6 *address unreachable*.
 IPv6 is routed as IPv4 is, its hop limit standing for the TTL and its errors
 reported with ICMPv6, except for link-local addresses and link-scoped
 multicast, which are never forwarded. A router's `drop hop-by-hop` and `drop
-segment routing`, off unless set, drop silently the IPv6 packets to forward
-that carry a hop-by-hop options header or a segment routing header, as many
-networks do; counted under `extension-dropped`. Otherwise they are forwarded
-unchanged, their options left unread.
+segment routing`, off unless set, and `drop IPv6 fragments`, on unless set,
+drop silently the IPv6 packets to forward that carry a hop-by-hop options
+header, a segment routing header or a fragment header, as many networks do;
+counted under `extension-dropped`. Otherwise they are forwarded unchanged,
+their options left unread.
 
 A router's interface also has its own `errors probability` and `errors delay`,
 1 and 0 unless set otherwise. An error about a packet that came in through
