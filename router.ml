@@ -331,12 +331,6 @@ let notify_always ?(delay=0.) () = { probability = 1. ; delay }
 
 type iface = { mutable trx : trx ; (** Can come handy to splice another trx there. *)
                        eth : Eth.State.t ;
-        (** Any traffic arriving in this interface and directed to Admin is
-         * forwarded to this host. There is one per interface so they have
-         * totally independent IP stacks. If all the admin_hosts of a router
-         * were to be made to edit the router's global configuration then
-         * they would have to share that storage area of course. *)
-        mutable admin_host : Host.t option ;
 (** Fragment IPv4 packets larger than the MTU, unless they have DF set. *)
 mutable link_fragmentation : bool ;
                (** Longest a frame may wait in this interface's queue, which
@@ -375,9 +369,11 @@ type t = {         ifaces : iface array ;
             mutable table : Table.t ;
              (** How diligently to report errors with ICMP *)
               notify_errs : icmp_probability ;
-           (** Answers from admin should go through routing, as opposed
-            * to return via the same interface: *)
-    mutable admin_reroute : bool ;
+           (** The router's own IP stack, answering for all its addresses
+            * whichever port they arrive at, and emitting through routing: *)
+                    admin : Host.t ;
+           (** The addresses its [Admin] routes give each port: *)
+             mutable held : Eth.State.my_address list array ;
 mutable can_forward_after : int option ;
                    widget : Widget.t ;
    mutable load_balancing : load_balancing ;
@@ -709,6 +705,20 @@ let is_router_solicit (ip : Ip6.Pdu.t) =
     | Ok { payload = Router_solicit _ ; _ } -> true
     | _ -> false
 
+(* The port holding [dst] among the router's own addresses, [n] first: *)
+let holder t n dst =
+    let dst = Ip.Addr.to_bitstring dst in
+    let holds m =
+        List.exists (fun (a : Eth.State.my_address) ->
+            bits_equal a.addr dst) t.held.(m) in
+    if holds n then Some n
+    else
+        let rec loop m =
+            if m >= Array.length t.held then None
+            else if holds m then Some m
+            else loop (m + 1) in
+        loop 0
+
 (* Report [err] about [p], received at interface [n], from the address of
  * that interface [p]'s source is reached from. Sending performs routing
  * again. *)
@@ -777,9 +787,27 @@ and route in_iface_opt t bits =
         match p_opt with
         | Some (V6 ip) -> is_link_scoped ip.src || is_link_scoped ip.dst
         | _ -> false in
+    (* A packet for one of the router's own addresses is for its admin host
+     * if the [Admin] routes take it as if it had arrived at the port holding
+     * that address, whichever it arrived at -- but a link-scoped one only
+     * from that port: *)
+    let for_me =
+        match in_iface_opt, dst_opt with
+        | Some n, Some dst ->
+            (match holder t n dst with
+            | Some m when m = n || not link_scoped ->
+                target_routes ~in_iface:m ?src_ip:src_opt ~dst_ip:dst
+                              ?proto:proto_opt ?dscp:dscp_opt
+                              ?src_port:src_port_opt ?dst_port:dst_port_opt t |>
+                List.exists (function Route.Admin -> true | _ -> false)
+            | _ -> false)
+        | _ -> false in
     match in_iface_opt, p_opt with
     | Some n, Some (V6 ip) when is_router_solicit ip ->
         router_solicited t n
+    | _ when for_me ->
+        Log.(log t.widget.logger Debug (lazy "Delivering to the admin host")) ;
+        Host.ip_recv t.admin bits
     | _ ->
     match target_routes ?in_iface:in_iface_opt
                         ?src_ip:src_opt ?dst_ip:dst_opt ?proto:proto_opt
@@ -845,16 +873,8 @@ and route in_iface_opt t bits =
                 | Some _, _, None ->
                     do_forward bits)
             | Admin ->
-                (match in_iface_opt with
-                | None ->
-                    Log.(log t.widget.logger Error (lazy "Generated traffic to admin!?"))
-                | Some in_iface ->
-                    (match t.ifaces.(in_iface).admin_host with
-                    | None ->
-                        Log.(log t.widget.logger Warning (lazy (Printf.sprintf "There is no admin on interface %d, now what?" in_iface)))
-                    | Some host ->
-                        Log.(log t.widget.logger Debug (lazy "Delivering to the admin host")) ;
-                        Host.ip_recv host bits)) in
+                Log.(log t.widget.logger Debug (lazy "Delivering to the admin host")) ;
+                Host.ip_recv t.admin bits in
         let targets =
             List.filter (function
                 (* Actually, that's OK if out=in but then the router should
@@ -906,9 +926,8 @@ let my_addresses_of routes n =
         | _ -> None
     ) routes
 
-(* Give interface [n] the addresses its routing table names, and the host
- * that answers for them -- or take both away, when the table has stopped
- * naming any.
+(* Give interface [n] the addresses its routing table names, and the admin
+ * host all of those of every interface.
  *
  * Called whenever the table is set and not only when the router is built,
  * because a router the catalogue builds arrives with an empty table: every
@@ -916,45 +935,25 @@ let my_addresses_of routes n =
  * errors from is one a later [routes] gave it. *)
 let configure_iface t n =
     let iface = t.ifaces.(n) in
-    let my_addresses =
-        my_addresses_of t.routes n |> Eth.State.with_link_local iface.eth.mac in
-    let same_addresses =
-        List.equal Eth.State.my_address_equal
-            my_addresses iface.eth.my_addresses in
-    if not same_addresses then (
-        iface.eth.my_addresses <- my_addresses ;
-        (* The one it had was for the address it no longer has. *)
-        Option.may (fun (h : Host.t) ->
-            Simulation.remove_widget h.Host.trx.Host.widget
-        ) iface.admin_host ;
-        iface.admin_host <- None ;
-        if my_addresses <> [] then (
-            (* Make that interface a host with an IP stack on top of eth: *)
-            (* On output, the host will be able to write onto that TRX and that
-             * will be output from that iface, properly updating the counters.
-             * Unless we want to give a chance for the answer to go through
-             * another route (usually safer): *)
-            let trx =
-                if t.admin_reroute then
-                    { ins = sink (route None t) ;
-                      out = sink ignore_bits }
-                else
-                    iface.trx in
-            (* On the other way around it's a bit more convoluted: the host
-             * takes the reader callback only when set_ip is called, which
-             * we don't have to do here. The router is going call the host
-             * [ip_recv] function whenever that's the routing decision. *)
-            let name = "admin@"^ string_of_int n in
-            let widget = Widget.make ~parent:iface.eth.iface.widget name in
-            iface.admin_host <-
-                (* This host configures nothing at boot, neither
-                   statically nor over DHCP: the address it speaks from is
-                   the router's own. It has the router's supply, through
-                   the router's adapter: one box, one switch. *)
-                Some (Host.make_from_eth ~own_ip_config:false ~widget
-                                         iface.eth trx name)
-        )
-    )
+    t.held.(n) <- my_addresses_of t.routes n ;
+    iface.eth.my_addresses <-
+        Eth.State.with_link_local iface.eth.mac t.held.(n) ;
+    let stack = t.admin.Host.eth_state in
+    stack.my_addresses <-
+        Array.fold_left (@) [] t.held |>
+        List.unique ~eq:Eth.State.my_address_equal ;
+    (* Its packets may leave by any port: *)
+    stack.mtu <- Array.fold_left (fun m i -> min m i.eth.mtu) max_int t.ifaces
+
+(* The router's own IP stack: a host named [name], on a widget "admin" under
+ * [parent], that emits with [emit]. Its adapter is none of the ports but only
+ * holds the router's addresses, and is kept out of the widget tree. *)
+let make_admin ~parent name emit =
+    let widget = Widget.make ~parent "admin" in
+    let eth = Eth.State.make ~parent:widget () in
+    widget.children <- [] ;
+    let trx = { ins = sink emit ; out = sink ignore_bits } in
+    Host.make_from_eth ~own_ip_config:false ~widget eth trx name
 
 let is_connected iface =
     iface.eth.iface.is_connected
@@ -999,7 +998,7 @@ let iface_make ?speeds ?mtu ?delay ?loss ?inter_frame_gap
     eth.is_router <- true ;
     let trx = Eth.TRX.make eth in
     let iface =
-        { trx ; eth ; admin_host = None ; link_fragmentation ;
+        { trx ; eth ; link_fragmentation ;
           max_queue_delay ; notify_errs ; advertise = false ;
           router_lifetime = 1800 ; ra_gen = 0 ; ra_pending = false } in
     Widget.add_properties eth.iface.widget Widget.[
@@ -1030,7 +1029,7 @@ let iface_make ?speeds ?mtu ?delay ?loss ?inter_frame_gap
     iface
 
 let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
-         ?(admin_reroute=true) ?(load_balancing=First) ?buffer_capacity
+         ?(load_balancing=First) ?buffer_capacity
          ?can_forward_after ?delay ?loss ?speeds ?mtu ?(macs=[||])
          num_ifaces routes name =
     let widget = Widget.make ~parent ~own_power name in
@@ -1062,21 +1061,24 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
             iface_make ?speeds ?delay ?loss ?can_forward_after ?mtu ?mac
                        ~parent:widget n
         ) in
+    let to_route = ref ignore in
+    let admin = make_admin ~parent:widget name (fun bits -> !to_route bits) in
     let t = { ifaces ; routes ; table = Table.make routes ;
-              widget ; notify_errs ; admin_reroute ;
+              widget ; notify_errs ; admin ;
+              held = Array.make num_ifaces [] ;
               can_forward_after ; load_balancing ; lb_cursor = 0 ;
               buffer_capacity ; buffered ; refresh_pending = false ;
               tail_dropped ; drop_hop_by_hop = false ; drop_srh = false ;
               drop_ipv6_fragments = true ;
               extension_dropped = Metric.Counter.make () } in
+    to_route := route None t ;
     (* The reserves are taken from the start: *)
     Metric.Gauge.set buffered ~now:(Simulation.Widget.now widget)
                      (buffer_used t) ;
     (* One supply for the whole box, and this is what the router itself
-       does when it is cut: what its admin hosts do about it is their own,
-       and the supply asks each of them in turn. Every interface is reset,
-       including the ones no admin host was built on, which nothing else
-       would reach. *)
+       does when it is cut: what its admin host does about it is its own,
+       and the supply asks it in turn. The interfaces are none of the admin
+       host's, so they are reset here. *)
     widget.power_up <- (fun () ->
         Array.iteri (fun n _ -> start_router_adverts t n) t.ifaces) ;
     widget.power_down <- (fun () ->
@@ -1218,11 +1220,6 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                 | None -> bad_value "Invalid enum for load_balancing: %s"
                             (Yojson.Basic.to_string v)
                 | Some lb -> t.load_balancing <- lb) ;
-        property "reroute admin" ~kind:Bool
-            ~descr:"Answers from the admin interface go through routing \
-                    instead of returning via the same interface it came from."
-            ~getter:(fun () -> `Bool t.admin_reroute)
-            ~setter:(fun v -> t.admin_reroute <- to_bool v) ;
         property "buffer capacity" ~kind:(optional Int) ~units:"bytes"
             ~descr:"RAM to queue frames waiting to be emitted, a third of \
                     which is reserved to the ports in equal parts while the \
@@ -1334,12 +1331,12 @@ let routes_of_addrs addrs =
  * networks reachable via this iface, each with an optional gateway, and the
  * MAC address of the router on that iface. *)
 let make_from_addrs
-        ~parent ?notify_errs ?admin_reroute ?load_balancing ?delay ?loss
+        ~parent ?notify_errs ?load_balancing ?delay ?loss
         addrs name =
     let routes = routes_of_addrs addrs in
     let num_ifaces = Array.length addrs in
     let macs = Array.map snd addrs in
-    make ~parent ?notify_errs ?admin_reroute ?load_balancing ?delay ?loss ~macs
+    make ~parent ?notify_errs ?load_balancing ?delay ?loss ~macs
          num_ifaces routes name
 
 (*$R make_from_addrs
@@ -1399,39 +1396,20 @@ let make_from_addrs
     Simulation.run sim false ;
     "no revert" @? (counts = [| 0;0;0 |]) ;
 
-    (* One box, one supply, one switch. This router has three admin hosts,
-     * one per addressed interface, and all of them draw on the router's,
-     * which is what puts the switch on the router and nowhere else. *)
+    (* One box, one supply, one switch. The admin host draws on the
+     * router's, which is what puts the switch on the router and nowhere
+     * else. *)
     "the router owns the supply" @? router.widget.owns_power ;
-    "and its admin hosts draw on that one" @?
-        Array.for_all (fun iface ->
-            match iface.admin_host with
-            | None -> false
-            | Some h ->
-                let w = h.Host.trx.Host.widget in
-                not w.owns_power &&
-                w.power == router.widget.power
-        ) router.ifaces ;
+    "and its admin host draws on that one" @?
+        (let w = router.admin.Host.trx.Host.widget in
+         not w.owns_power && w.power == router.widget.power) ;
 
-    (* A packet for the router itself goes to that interface's admin host,
+    (* A packet for any of the router's addresses goes to its admin host,
      * which remembers the peer it came from -- state that must not survive
-     * the box being switched off.
-     *
-     * Every interface is given one, and every one of them is counted: they
-     * share the box's supply, so whatever switching the box off does to
-     * them it has to do to all of them, and a check on the first alone
-     * passes just as well when only the first is reached. *)
-    let admin_socks () =
-        Array.fold_left (fun n iface ->
-            match iface.admin_host with
-            | None -> n
-            | Some h -> n + Hashtbl.length h.Host.sockets
-        ) 0 router.ifaces in
+     * the box being switched off. *)
+    let admin_socks () = Hashtbl.length router.admin.Host.sockets in
     let port = Udp.Port.o 9 in
-    Array.iter (fun iface ->
-        Option.may (fun (h : Host.t) -> h.trx.udp_server_start port ignore)
-                   iface.admin_host
-    ) router.ifaces ;
+    router.admin.trx.udp_server_start port ignore ;
     let poke n =
         Udp.Pdu.make ~src_port:port ~dst_port:port (Bitstring.zeroes_bitstring 64) |>
         Udp.Pdu.pack |>
@@ -1443,7 +1421,7 @@ let make_from_addrs
         send n in
     poke 0 ; poke 1 ; poke 2 ;
     Simulation.run sim false ;
-    "every admin host answers for its interface's own address" @?
+    "the admin host answers for every interface's own address" @?
         (admin_socks () = 3) ;
 
     let flip on =
@@ -1457,7 +1435,7 @@ let make_from_addrs
     easy_send 0 "192.168.3.42" ;
     Simulation.run sim false ;
     "an off router routes nothing" @? (counts = [| 0;0;0 |]) ;
-    "and forgets what its admin hosts knew" @? (admin_socks () = 0) ;
+    "and forgets what its admin host knew" @? (admin_socks () = 0) ;
 
     flip true ;
     reset_count () ;
@@ -1652,7 +1630,14 @@ let make_from_addrs
     h1.trx.ping ~id:7 ~seq:2 (Host.Ip (a "2001:db8:2::1")) ;
     Simulation.run sim false ;
     assert_equal ~printer:(IO.to_string (List.print Int.print))
-        [ 1 ; 2 ] (List.sort Int.compare !replies)
+        [ 1 ; 2 ] (List.sort Int.compare !replies) ;
+    (* The router answers on the addresses of its other interface too: *)
+    replies := [] ;
+    h1.trx.ping ~id:7 ~seq:3 (Host.Ip (a "2001:db8:2::fe")) ;
+    h1.trx.ping ~id:7 ~seq:4 (Host.Ip (a "10.0.2.254")) ;
+    Simulation.run sim false ;
+    assert_equal ~printer:(IO.to_string (List.print Int.print))
+        [ 3 ; 4 ] (List.sort Int.compare !replies)
  *)
 
 (* Hosts with SLAAC take an address in the prefix of the interface they are
@@ -1734,14 +1719,12 @@ let make_from_addrs
     assert_bool "no default route" (h1.eth_state.gateways = [])
  *)
 
-(* An interface with no address of its own gets no admin host, so nothing
- * else would clear what its adapter learnt when the box is switched off. *)
+(* The interfaces are not the admin host's, so it is the router that clears
+ * what their adapters learnt when the box is switched off. *)
 (*$R make
     let sim = Simulation.make ~realtime:false "router-off" in
     let r = make ~parent:sim.root 2 [] "r" in
     let eth = r.ifaces.(0).eth in
-    "an interface with no address has no admin host" @?
-        (r.ifaces.(0).admin_host = None) ;
     "a router of its own mints the supply it draws on" @?
         r.widget.owns_power ;
     let flip on =
@@ -1910,17 +1893,12 @@ let make_from_addrs
     "on every interface the route does not single out" @?
         (Eth.State.find_ip4 r.ifaces.(1).eth =
          Ip.Addr.of_dotted_string "1.2.3.4") ;
-    "and something answers for it" @?
-        (r.ifaces.(0).admin_host <> None) ;
-    (* Set again, to the same table: what is there is left alone. *)
-    let host = r.ifaces.(0).admin_host in
-    set_routes admin ;
-    "a table that says the same thing changes nothing" @?
-        (r.ifaces.(0).admin_host == host) ;
+    let mine () =
+        Host.is_mine r.admin (Ip.Addr.of_dotted_string "1.2.3.4") in
+    "and the admin host answers for it" @? mine () ;
     set_routes [] ;
     "and a table that stops naming one takes it away" @?
-        (r.ifaces.(0).eth.Eth.State.my_addresses = [] &&
-         r.ifaces.(0).admin_host = None)
+        (r.ifaces.(0).eth.Eth.State.my_addresses = [] && not (mine ()))
  *)
 
 (* A route's DSCP is read from and written to the routes property. *)

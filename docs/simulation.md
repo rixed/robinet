@@ -498,9 +498,9 @@ under:
 | tap | | *none* |
 | policer | `""` | `max packets`, `max volume`, `max duration`, `max packet rate`, `max throughput`, `max syns`, `max syn rate`; the flags `max packets reached`, `max volume reached`, `max syns reached`, `expired` (which are only reset); and, read only, `start`, `packets`, `volume`, `syns`, `elapsed` |
 | firewall | `""` | `inside rules`, `outside rules`, `uninspectable`, `MAC` |
-| router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin`, `buffer capacity`, `drop hop-by-hop`, `drop segment routing`, `drop IPv6 fragments` |
+| router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `buffer capacity`, `drop hop-by-hop`, `drop segment routing`, `drop IPv6 fragments` |
 | | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay`, `router advertisements`, `router lifetime` |
-| | `#0/admin@0`… | `hostname`, `search suffix`, `prefer IPv6` — the stack answering for the address that interface holds |
+| | `admin` | `hostname`, `search suffix`, `prefer IPv6` — the stack answering for all the router's addresses, whichever interface they arrive at |
 | gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
 | | `nat` | `min port`, `port forwards`, `NAT pings`, `send errors`, `answer pings` |
 | | `srv`, `srv/eth` | *the host it serves DHCP and DNS from* |

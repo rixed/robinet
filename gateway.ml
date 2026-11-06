@@ -188,7 +188,7 @@ let of_widget (w : Widget.t) =
  * will be distributed via DHCP. *)
 let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
          ?dhcp_range ?dhcp_mtu ?lease_time_sec ?mac
-         ?(name="gw") ?notify_errs ?admin_reroute
+         ?(name="gw") ?notify_errs
          ~parent ?location ?(own_power=true)
          ?public_netmask ?public_gw ?port_forwards
          ?lan6 ?public_ip6 ?public_gw6 public_ip local_cidr =
@@ -202,7 +202,7 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     (* Build the output router *)
     let router =
         Router.(make ~parent:widget ~own_power:false ?delay ?loss ?mtu ?notify_errs
-                     ?admin_reroute ?macs:(Option.map (Array.make 1) mac) 2
+                     ?macs:(Option.map (Array.make 1) mac) 2
             ([ (* route everything from anywhere to LAN if dest fits local_cidr *)
                Route.forward ~dst_mask:local_cidr 0 ;
                (* or zero IP address *)
