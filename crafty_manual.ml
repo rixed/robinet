@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 98af60cb49719966290dfa2ba885e2fa) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 841f8798df11b2cea1f59bf532f90e6d) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -456,6 +456,7 @@ what their engine computes (checksums).
 -   `resolve(name)`: the addresses of a name, IPv4 first, as an array, from the
     system's resolver; an address resolves to itself. `hostname(ip, default=s)`:
     the name of an address. Blocking, so better resolved before sending.
+    `is_ip4(ip)`, `is_ip6(ip)`: its version.
 -   `rand(max)`: an int or a float in `[0, max)` (default 1.0), or a bool if
     `max` is `true`. `randbytes(len)`: random bytes.
 -   `int(x)`, `float(x)`, `bool(x)`, `byte(x)` (the low 8 bits): `int` and

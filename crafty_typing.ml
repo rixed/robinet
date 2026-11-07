@@ -47,7 +47,8 @@ type var = { name : string ; id : int ; typ : Type.t }
 type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
-    | To_string | To_bytes | Checksum | To_ip | To_mac | To_cidr | Getenv | Arg | Nargs | Resolve | Hostname | Split
+    | To_string | To_bytes | Checksum | To_ip | To_mac | To_cidr | Getenv | Arg | Nargs | Resolve | Hostname
+    | Is_ip4 | Is_ip6 | Split
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
     | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
@@ -1283,6 +1284,10 @@ let builtins =
         [ param "ip" "an IP address" (only Type.[ Ip ]) ;
           param "default" "a string" (only Type.[ String ]) ~default:Omitted ],
         res Type.String ;
+      "is_ip4", Is_ip4, [ param "ip" "an IP address" (only Type.[ Ip ]) ],
+        res Type.Bool ;
+      "is_ip6", Is_ip6, [ param "ip" "an IP address" (only Type.[ Ip ]) ],
+        res Type.Bool ;
       "split", Split,
         [ param "s" "a string" (only Type.[ String ]) ;
           param "by" "a string" (only Type.[ String ]) ],

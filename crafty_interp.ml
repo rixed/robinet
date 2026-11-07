@@ -379,6 +379,8 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
         | Some n, _ -> String n
         | None, [ d ] -> d
         | None, _ -> error loc "%s has no name" (Ip.Addr.to_dotted_string ip))
+    | T.Is_ip4, [ Ip ip ] -> Bool (Ip.Addr.length ip = 32)
+    | T.Is_ip6, [ Ip ip ] -> Bool (Ip.Addr.length ip = 128)
     | T.Split, [ String s ; String by ] ->
         if by = "" then error loc "Cannot split by an empty string" ;
         Array (Array.of_list (List.map (fun p -> String p) (String.split_on_string ~by s)))
@@ -1742,6 +1744,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "x = arg(0)")
   "0s: [127.0.0.1] [::1] localhost\n0s: done" \
     (runs "print(\"${resolve(\"127.0.0.1\")} ${resolve(\"::1\")} ${hostname(resolve(\"localhost\")[0])}\")")
+  "0s: true false\n0s: false true\n0s: done" \
+    (runs "foreach [1.2.3.4, ::1] { print(\"${is_ip4(I)} ${is_ip6(I)}\") }")
   "0s: {ip: 10.0.0.2, ok: true, rtt: 1.5ms}\n0s: done" \
     (runs "print(format({ip: 10.0.0.2, rtt: 1.5ms, ok: true}))")
   "0s: {\"data\":\"#0102\",\"ip\":\"10.0.0.2\",\"rtt\":0.0015,\"tags\":[\"a\",\"b\"]}\n0s: done" \

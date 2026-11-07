@@ -488,7 +488,7 @@ what their engine computes (checksums).
   missing and no default. `nargs()`: how many there are.
 - `resolve(name)`: the addresses of a name, IPv4 first, as an array, from the system's
   resolver; an address resolves to itself. `hostname(ip, default=s)`: the name of an address. Blocking, so
-  better resolved before sending.
+  better resolved before sending. `is_ip4(ip)`, `is_ip6(ip)`: its version.
 - `rand(max)`: an int or a float in `[0, max)` (default 1.0), or a bool if
   `max` is `true`. `randbytes(len)`: random bytes.
 - `int(x)`, `float(x)`, `bool(x)`, `byte(x)` (the low 8 bits): `int` and
