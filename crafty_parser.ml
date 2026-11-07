@@ -732,7 +732,8 @@ let () =
 
 let params ?unnamed ?pattern form names = params_of expr ?unnamed ?pattern form names
 
-let stmt_sep = sp -- (item '\n' ||| item ';') -- nl_sp |? "end of statement"
+let end_of_stmt = "end of statement (';' or new line)"
+let stmt_sep = sp -- (item '\n' ||| item ';') -- nl_sp |? end_of_stmt
 
 (* What may follow a statement, which is not consumed: *)
 let stmt_end =
@@ -905,13 +906,15 @@ let () = set_stmt (
      (quiet (nay foreign_start) -+ known_stmt)) |? "statement")
 
 let () =
+    (* A brace not on the line of the last statement must follow its end: *)
+    let closing = (sp -- quiet (item '}')) ||| (stmt_sep -- item '}') in
     set_block (
-        in_ '{' (repeat ~sep:stmt_sep stmt +- optional ~def:() (sp -- item ';'))
-            '}' |? "block")
+        item '{' -- nl_sp -+ repeat ~sep:stmt_sep stmt +-
+        optional ~def:() (sp -- item ';') +- closing |? "block")
 
 let program =
     nl_sp -+ repeat ~sep:stmt_sep stmt +- optional ~def:() (sp -- item ';') +-
-    nl_sp +- (eof |? "end of statement")
+    nl_sp +- (eof |? end_of_stmt)
 
 (* Labels of what is too small to be worth telling: *)
 let low_level =
@@ -1154,15 +1157,16 @@ let parse_patterns text =
 (*$= reads & ~printer:identity
   "line 1, column 17: Expected expression in arguments" \
     (reads "/IP(dst=1.2.3.4/UDP")
-  "line 1, column 11: Expected end of statement" (reads "print(\"a\"))")
+  "line 1, column 11: Expected end of statement (';' or new line)" (reads "print(\"a\"))")
   "line 1, column 16: UDP is not a terminal layer, therefore /IP/UDP is not a complete message that could be sent: it needs a terminal layer on top (Raw), or a block in which to stack one." \
     (reads "/IP/UDP(dst=53)")
   "line 1, column 16: Raw is a terminal layer, therefore /IP/UDP/Raw is a complete message. No further layer can be stacked on top of it, therefore it cannot open a block.\n  Do you mean \"/IP/UDP/Raw()\", \"/IP/UDP { Raw() ... }\", or \"expect /IP/UDP/Raw { ... }\"?" \
     (reads "/IP/UDP/Raw() {}")
   "line 4, column 19: Raw is a terminal layer, therefore /IP/UDP/Raw is a complete message. No further layer can be stacked on top of it, therefore it cannot open a block.\n  Do you mean \"/IP/UDP/Raw(\"b\")\", \"/IP/UDP { Raw(\"b\") ... }\", or \"expect /IP/UDP/Raw(\"b\") { ... }\"?" \
     (reads "/IP/UDP/Raw(\"a\")\n{\n}\n/IP/UDP/Raw(\"b\") {\n  x = 1\n}")
-  "line 1, column 12: Expected end of statement" (reads "print(\"a\") print(\"b\")")
-  "line 1, column 7: Expected end of statement" (reads "x = 1 2")
+  "line 1, column 12: Expected end of statement (';' or new line)" (reads "print(\"a\") print(\"b\")")
+  "line 1, column 7: Expected end of statement (';' or new line)" (reads "x = 1 2")
+  "line 1, column 14: Expected end of statement (';' or new line) in block" (reads "if x { y = 1 2 }")
   "line 1, column 5: Expected expression in statement" (reads "x = ")
   "line 1, column 8: Expected expression in statement" (reads "x = 1 +")
   "line 1, column 11: Expected ')' in expression" (reads "x = (1 + 2")
@@ -1244,7 +1248,7 @@ let parse_patterns text =
   "line 1, column 5: Expected statement in a branch of if, which starts on the same line" \
     (reads "if x\n{}")
   "line 1, column 11: x would only be declared in this branch" (reads "if a x = 1")
-  "line 1, column 1: Expected end of statement" (reads "else {}")
+  "line 1, column 1: Expected end of statement (';' or new line)" (reads "else {}")
   "line 1, column 9: Expected '\\\"' in string" (reads "x = \"abc")
   "line 1, column 9: Unknown escape sequence \\q" (reads "x = \"a\\qb\"")
   "line 1, column 9: Odd number of hexadecimal digits in #123" (reads "x = #123")
