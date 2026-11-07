@@ -103,8 +103,13 @@ type header  = string * string
 let string_of_header (n, v) = Printf.sprintf "%s: %s" n v
 let print_header oc h = Printf.fprintf oc "%s" (string_of_header h)
 let print_headers oc headers = List.print print_header oc headers
+(* Each header line ends with a CRLF: *)
 let string_of_headers headers =
-    (String.join "\r\n" (List.map string_of_header headers)) ^ "\r\n"
+    String.concat "" (List.map (fun h -> string_of_header h ^ "\r\n") headers)
+(*$= string_of_headers & ~printer:identity
+  "" (string_of_headers [])
+  "A: 1\r\nB: 2\r\n" (string_of_headers [ "A", "1" ; "B", "2" ])
+*)
 
 let header_content_length_re = Str.regexp_case_fold "^Content-Length: +\\(.+\\)$"
 let chunked_transfert_encoding_re = Str.regexp_case_fold "^Transfer-Encoding: +chunked"
