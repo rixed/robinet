@@ -1560,6 +1560,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (*$= runs & ~printer:identity
   "0s: hello 3\nerr 0s: oops\n0s: done" \
     (runs "print(\"hello ${1 + 2}\")\nprint_err(\"oops\")")
+  "0s: n=12 #4142 1.2.3.4\n0s: AB 3\n0s: done" \
+    (runs "b = #4142\nprint(\"n=\" + 1 + 2 + \" \" + b + \" \" + 1.2.3.4)\nprint(string(b) + \" \" + string(3))")
   "0s: 0\n1s: 1\n2s: 2\n2s: after\n2s: done" \
     (runs "repeat count=3 every=1s { print(I) }\nprint(\"after\")")
   "0s: 0\n1s: 1\n2s: 2\n2s: done" \
@@ -2544,8 +2546,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   let pings = "/IP(dst=1.2.3.4)/UDP(src=1000, dst=7) { repeat count=500 every=1ms { Raw(\"ping\") } }"
 *)
 (*$= policed & ~printer:identity
-  "line 1, column 5: Cannot apply + to a string and an int\nline 2, column 1: Unknown variable y" \
-    (policed "x = \"a\" + 1\ny := 2")
+  "line 1, column 5: Cannot apply + to a string and an int[]\nline 2, column 1: Unknown variable y" \
+    (policed "x = \"a\" + [1]\ny := 2")
   "line 1, column 5: Expected expression in statement" \
     (policed "x = ")
   "0.000s: hello\n0.000s: done\n1 frames" \

@@ -263,7 +263,7 @@ Literals are whole words: `1.2.3.4` is an IP address, `5s` an interval.
 Strings interpolate any expression: `"ttl ${MATCH[IP].ttl - 1}"`. Escapes:
 `\n`, `\r`, `\t`, `\0`, `\\`, `\"`, `\$`, `\xHH`. Interpolated bytes are
 written in hexadecimal (`#68656c6c6f`); bytes passed where a string is
-expected, as to `print`, are text.
+expected, as to `print`, are text, as `string(b)` makes them.
 
 **Conversions** happen where needed: an int to a float, a byte to an int, a
 string, an IP address or a MAC address to bytes and back (4, 16 and 6 bytes), an
@@ -335,7 +335,10 @@ Operators, from the tightest binding to the loosest:
 3. `+`, `-`: on numbers; a time minus a time is an interval, a time plus an
    interval (or a number of seconds) is a time. `+` also concatenates arrays
    (`[1] + [2, 3]`) and appends or prepends an item
-   (`[1, 2] + 3`, `0 + [1, 2]`). Strings do not add up: interpolate them.
+   (`[1, 2] + 3`, `0 + [1, 2]`). With a string on one side, `+` makes a
+   string, as if both sides were interpolated: `"n=" + 1 + 2` is
+   `"n=${1}${2}"`, so `"n=12"`. Bytes come out in hexadecimal, unless given as
+   `string(b)`. Other arrays are not interpolated: `["a"] + "b"` appends.
 4. `<<`, `>>`: shift an int or a byte by an int; `>>` keeps the sign of an
    int, and a byte stays 8 bits.
 5. `&`, then `^`, then `|`: bitwise, on ints or bytes. They bind tighter than
@@ -457,6 +460,7 @@ what their engine computes (checksums).
 
 - `print(x)`, `print_err(x)`: to stdout, to stderr, as `"${x}"` (bytes as
   text).
+- `string(x)`: `x` as `"${x}"` (bytes as text).
 - `format(x)`: any value as a string, in the format of `--format`. CSV takes a
   scalar, or a record, array or map of scalars; record fields come in the
   order of their names: `print(format(stats()))`.

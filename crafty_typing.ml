@@ -47,7 +47,7 @@ type var = { name : string ; id : int ; typ : Type.t }
 type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
-    | To_bytes | Checksum | To_ip | To_mac | To_cidr | Getenv | Arg | Nargs | Resolve | Hostname | Split
+    | To_string | To_bytes | Checksum | To_ip | To_mac | To_cidr | Getenv | Arg | Nargs | Resolve | Hostname | Split
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
     | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
@@ -1256,6 +1256,8 @@ let builtins =
       "now", Now, [], res Type.Time ;
       (* Of a type that [expr] tells: *)
       "stats", Stats, [], res Type.Void ;
+      (* Made an interpolation by [expr]: *)
+      "string", To_string, [ param "x" "a value" printable ], res Type.String ;
       "bytes", To_bytes, [ bytes_like "x" ], res Type.bytes ;
       "checksum", Checksum, [ bytes_like "b" ], res Type.bytes ;
       "ip_addr", To_ip,
@@ -1543,6 +1545,9 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 | Prepend -> error loc "Cannot prepend %s to %s" x y
                 | _ -> error loc "Cannot concatenate %s and %s" x y))
         | (Has | Remove as b), [ m ; k ], t -> map_call b loc t m k
+        | To_string, [ x ], _ ->
+            if x.typ = Type.String then { x with loc }
+            else mk Type.String (String [ Interp x ])
         | Stats, [], _ ->
             (match env.stack with
             | [] -> error loc "stats() is only defined on a protocol stack"
@@ -1946,6 +1951,18 @@ and binop env loc op a b =
             mk Type.Time (Binop (op, a, expect "" b Type.Float))
         | (Type.Int | Type.Float), Type.Time when op = A.Add ->
             mk Type.Time (Binop (op, expect "" a Type.Float, b))
+        (* A string and anything but an array other than bytes, as their
+         * interpolations: *)
+        | _ when op = A.Add &&
+                 (let other x y =
+                      x.typ = Type.String && any_value y.typ <> None &&
+                      (match y.typ with Type.Array _ -> y.typ = Type.bytes | _ -> true) in
+                  other a b || other b a) ->
+            let parts x =
+                match x.desc with
+                | String ps -> ps
+                | _ -> [ Interp x ] in
+            mk Type.String (String (parts a @ parts b))
         (* A concatenation, else an append, else a prepend: *)
         | (Type.Array _, _ | _, Type.Array _) when op = A.Add ->
             (match List.filter_map (fun f -> array_join f loc a b)
@@ -3034,8 +3051,10 @@ let check_patterns (ps : A.patterns) =
     (types "x = Ok(1)\ncase x Nope {}")
 *)
 (*$= types & ~printer:identity
-  "line 1, column 5: Cannot apply + to a string and an int" \
-    (types "x = \"a\" + 1")
+  "x: string, y: string, z: string, w: string[], v: string" \
+    (types "x = \"a\" + 1\ny = #4243 + x + 10.0.0.1\nz = string(y)\nw = [\"a\"] + \"b\"\nv = string(#41) + string(1)")
+  "line 1, column 5: Cannot apply + to a string and an int[]" \
+    (types "x = \"a\" + [1]")
   "line 1, column 8: ACK is a reserved name" \
     (types "ACK = 1")
   "line 2, column 1: x is already declared in this block (:= changes it)" \
