@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 b2823d94c09c10a6d0629ca8694bfd93) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 fb2caaacf1b29badfeb36ec1eaa06e35) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -332,9 +332,9 @@ and `m[k] += 1` change an item, adding the key to a map if need be.
     ttl = case var=h MATCH[1] IP { h.ttl } else { 0 }
     rtt = { t0 = now() ; Request("ping") ; expect Reply {} ; now() - t0 }
 
-A block can wait, send, receive, loop or `break` only as the whole value of a
-declaration, an assignment or a statement: `n = 1 + { wait 1s ; 1 }` is an
-error.
+A block can wait, send, receive, loop, `break` or `continue` only as the whole
+value of a declaration, an assignment or a statement: `n = 1 + { wait 1s ; 1 }`
+is an error.
 
 ### Self-driven vs manual stacks
 
@@ -409,6 +409,8 @@ what their engine computes (checksums).
     constructor of `X`, where `v` (default `I`) is what that constructor holds.
 -   `break n`: leaves the `n` (default 1) innermost `repeat`, `foreach`, `on` or
     `spawn`.
+-   `continue n`: likewise, but goes on with the next iteration of the `n`th
+    (or, for an `on`, waits for its next match).
 -   `wait d` (or `sleep d`): pauses.
 -   `expect timeout=d PATTERN { ... } | PATTERN { ... }`: waits for the first
     packet that matches any pattern, then runs its block; a timeout (none by

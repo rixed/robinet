@@ -31,9 +31,9 @@
    TimeExceeded, when there are several).
 
    A block, an [if] or a [case] has the value of the branch it runs, and can
-   wait (or send, receive, loop, break) only as the value of a declaration,
-   an assignment or a statement, or as a branch of such a one: elsewhere in
-   an expression, it is computed at once. *)
+   wait (or send, receive, loop, break, continue) only as the value of a
+   declaration, an assignment or a statement, or as a branch of such a one:
+   elsewhere in an expression, it is computed at once. *)
 open Batteries
 module A = Crafty_ast
 module L = Crafty_layers
@@ -144,8 +144,9 @@ and stmt_desc =
                   every : expr option ; for_ : expr option ; body : block }
     | Retry of { max : expr option ; body : block }
     | Catch of block
-    (* How many enclosing [repeat], [on] and [spawn] to leave: *)
-    | Break of int
+    (* How many enclosing [repeat], [on] and [spawn] to leave, going on
+     * with the next iteration (or match) of the last with [continue]: *)
+    | Break of { depth : int ; continue : bool }
     | Wait of expr
     | Expect of { timeout : expr option ; cases : case list }
     (* Without [for_], it ends [linger] after the statements of its block: *)
@@ -359,7 +360,7 @@ let rec join_types a b =
         Option.map (fun t -> Type.Map (k, t)) (join_types a b)
     | _ -> None
 
-(* Whether that block ends only with a break: *)
+(* Whether that block ends only with a break or a continue: *)
 let rec diverges (b : block) =
     match List.rev b with
     | { stmt = Break _ ; _ } :: _ -> true
@@ -415,7 +416,7 @@ and coerce_tail b typ =
     | _ -> None
 
 (* The type of the values of those blocks (of those types), to which they
- * are converted; those that end only with a break have none: *)
+ * are converted; those that end only with a break or a continue have none: *)
 let join loc what branches =
     let typ =
         List.fold_left (fun acc (b, t) ->
@@ -487,12 +488,13 @@ type env =
       stack : (L.layer * L.mode) list ;
       (* Its layers as written, for messages: *)
       stack_text : string list ;
-      (* How many [repeat] and [on] enclose: *)
-      loops : int ;
+      (* The [repeat], [foreach], [on] and [spawn] that enclose, the
+       * innermost first: *)
+      loops : string list ;
       layer_ctx : layer_ctx option ;
       (* Whether the statements of the block can wait (or send, receive,
-       * loop, break), which they cannot in a block within an expression but
-       * for the value of a declaration, an assignment or a statement: *)
+       * loop, break, continue), which they cannot in a block within an
+       * expression but for the value of a declaration, an assignment or a statement: *)
       may_wait : bool ;
       errors : errors ;
       warnings : errors ;
@@ -2276,13 +2278,13 @@ and block errors env stmts = fst (block_value ~used:false errors env stmts)
 and stmt errors env (s : A.stmt) =
     let loc = s.stmt_loc in
     let mk stmt = { stmt_loc = loc ; stmt } in
-    let cases ?(loops=0) cs =
+    let cases ?(loops=[]) cs =
         List.map (fun (ps, body) ->
             let patterns = List.map (pattern env) ps in
             let match_ = new_var "MATCH" packet_type in
             let body =
                 block errors { env with vars = match_ :: env.vars ;
-                                        loops = env.loops + loops } body in
+                                        loops = loops @ env.loops } body in
             { patterns ; match_ ; body }) cs in
     let declare_typ env name typ =
         if List.mem name env.declared_here then
@@ -2299,7 +2301,9 @@ and stmt errors env (s : A.stmt) =
                 | A.Stack _ -> Some "A stack"
                 | A.Repeat _ -> Some "repeat" | A.Foreach _ -> Some "foreach"
                 | A.Retry _ -> Some "retry" | A.Catch _ -> Some "catch"
-                | A.Break _ -> Some "break" | A.Wait _ -> Some "wait"
+                | A.Break { continue = false ; _ } -> Some "break"
+                | A.Break { continue = true ; _ } -> Some "continue"
+                | A.Wait _ -> Some "wait"
                 | A.Expect _ -> Some "expect"
                 | A.On _ -> Some "on" | A.Spawn _ -> Some "spawn"
                 | A.Expr _ | A.Declare _ | A.Assign _ -> None in
@@ -2459,7 +2463,7 @@ and stmt errors env (s : A.stmt) =
             let v = new_var (var |? "I") Type.Int in
             let body =
                 block errors { env with vars = v :: env.vars ;
-                                        loops = env.loops + 1 } body in
+                                        loops = "repeat" :: env.loops } body in
             if hides_i env var then
                 warn_hidden_i env "the number of the iteration of this repeat" v ;
             env, Some (mk (Repeat { var = v ; count ; items = None ; every ;
@@ -2477,7 +2481,7 @@ and stmt errors env (s : A.stmt) =
             let v = new_var (var |? "I") t in
             let body =
                 block errors { env with vars = v :: env.vars ;
-                                        loops = env.loops + 1 } body in
+                                        loops = "foreach" :: env.loops } body in
             if hides_i env var then warn_hidden_i env "the item of this foreach" v ;
             env, Some (mk (Repeat { var = v ; count = None ; items = Some items ;
                                     every ; for_ ; body }))
@@ -2494,19 +2498,23 @@ and stmt errors env (s : A.stmt) =
                     (loc, "This catch has an empty block: it catches nothing") ::
                     !(env.warnings) ;
             env, Some (mk (Catch (block errors env body)))
-        | A.Break { depth } ->
+        | A.Break { depth ; continue } ->
+            let what = if continue then "continue" else "break" in
             let depth =
                 match depth with
                 | None -> 1
                 | Some { desc = A.Lit (A.Int n) ; _ } when n > 0 -> n
-                | Some e -> error e.loc "The depth of break must be a positive integer" in
-            if depth > env.loops then
-                error loc "Break out of %d repeat, foreach, on or spawn, but %s" depth
-                    (match env.loops with
+                | Some e -> error e.loc "The depth of %s must be a positive integer" what in
+            if depth > List.length env.loops then
+                error loc "%s out of %d repeat, foreach, on or spawn, but %s"
+                    (String.capitalize_ascii what) depth
+                    (match List.length env.loops with
                     | 0 -> "there is none"
                     | 1 -> "there is only one"
                     | n -> Printf.sprintf "there are only %d" n) ;
-            env, Some (mk (Break depth))
+            if continue && List.nth env.loops (depth - 1) = "spawn" then
+                error loc "A spawn has no next iteration to continue with" ;
+            env, Some (mk (Break { depth ; continue }))
         | A.Wait dur ->
             env, Some (mk (Wait (expect "The duration of wait" (expr env dur) Type.Interval)))
         | A.Expect { timeout ; cases = cs } ->
@@ -2522,10 +2530,10 @@ and stmt errors env (s : A.stmt) =
             and timeout = timeout_of env "on" timeout
             and max = opt_expr env "The maximum of on" Type.Int max in
             env, Some (mk (On { for_ ; linger ; timeout ; max ;
-                                cases = cases ~loops:1 cs }))
+                                cases = cases ~loops:[ "on" ] cs }))
         | A.Spawn { for_ ; body } ->
             let for_ = opt_expr env "The duration of spawn" Type.Interval for_ in
-            let body = block errors { env with loops = env.loops + 1 } body in
+            let body = block errors { env with loops = "spawn" :: env.loops } body in
             env, Some (mk (Spawn { for_ ; body }))
     with Error _ | Already_told as ex ->
         tell errors ex ;
@@ -2816,7 +2824,7 @@ let check ?(warnings=ref []) (program : A.program) =
         let env = { vars = [ budget_var ; ports_var ; permissions_var ; last_var ] ;
                     declared_here = [] ;
                     poisoned = [] ; stack = [] ;
-                    stack_text = [] ; loops = 0 ; layer_ctx = None ;
+                    stack_text = [] ; loops = [] ; layer_ctx = None ;
                     may_wait = true ; errors = ref [] ; warnings = ref [] ;
                     declared_at = Hashtbl.create 7 ; declared_as = Hashtbl.create 7 ;
                     reads = Hashtbl.create 7 ;
@@ -2855,7 +2863,7 @@ let limits (program : A.program) =
  * layers, or what is wrong with them. *)
 let check_patterns (ps : A.patterns) =
     let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
-                stack_text = [] ; loops = 0 ; layer_ctx = None ; may_wait = false ;
+                stack_text = [] ; loops = [] ; layer_ctx = None ; may_wait = false ;
                 errors = ref [] ; warnings = ref [] ; declared_at = Hashtbl.create 1 ;
                 declared_as = Hashtbl.create 1 ;
                 reads = Hashtbl.create 1 ; widened = Hashtbl.create 1 ;
@@ -3146,6 +3154,10 @@ let check_patterns (ps : A.patterns) =
     (types "repeat { break 2 }")
   "line 1, column 9: Break out of 2 repeat, foreach, on or spawn, but there is only one" \
     (types "spawn { break 2 }")
+  "line 1, column 9: A spawn has no next iteration to continue with" \
+    (types "spawn { continue }")
+  "line 1, column 1: Continue out of 1 repeat, foreach, on or spawn, but there is none" \
+    (types "continue")
   "line 1, column 11: The duration of spawn must be an interval, not an int" \
     (types "spawn for=1 {}")
   "line 1, column 11: spawn cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \

@@ -242,7 +242,9 @@ and stmt_desc =
     | Retry of { max : expr option ; body : block }
     (* Run [body], leaving it on its first error: *)
     | Catch of block
-    | Break of { depth : expr option }
+    (* Leaving [depth] enclosing loops, or with [continue] going on with
+     * the next iteration of the last: *)
+    | Break of { depth : expr option ; continue : bool }
     | Wait of expr
     (* The block of the first of those patterns to match, never empty: *)
     | Expect of { timeout : expr option ; cases : (patterns * block) list }
@@ -328,7 +330,7 @@ let predefined = [ "MATCH" ; "LAST" ] @ self_declared
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
     [ "true" ; "false" ; "repeat" ; "foreach" ; "retry" ; "catch" ; "if" ;
-      "elsif" ; "else" ; "case" ; "break" ; "expect" ; "on" ; "wait" ;
+      "elsif" ; "else" ; "case" ; "break" ; "continue" ; "expect" ; "on" ; "wait" ;
       "sleep" ; "in" ; "spawn" ]
 
 (** {2 Printing}
@@ -549,8 +551,9 @@ and print_stmt ~all indent oc s =
         Char.print oc ' ' ; print_block ~all indent oc body
     | Catch body ->
         String.print oc "catch " ; print_block ~all indent oc body
-    | Break { depth } ->
-        String.print oc "break" ; param "depth" depth
+    | Break { depth ; continue } ->
+        String.print oc (if continue then "continue" else "break") ;
+        param "depth" depth
     | Wait dur ->
         if all then (String.print oc "wait" ; param "dur" (Some dur))
         else Printf.fprintf oc "wait %a" expr dur

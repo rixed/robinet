@@ -696,8 +696,9 @@ type block =
       mutable cleanups : (unit -> unit) list ;
       (* Where its errors go, once it is cancelled: *)
       fail : error -> unit ;
-      (* Leaving that many enclosing loops: *)
-      break_ : int -> unit ;
+      (* Leaving that many enclosing loops, or with [continue] going on
+       * with the next iteration (or match) of the last: *)
+      break_ : continue:bool -> int -> unit ;
       (* How many of its [on]s are not over: *)
       mutable busy : int ;
       (* How many of its [on]s with a duration or a linger are armed: *)
@@ -939,7 +940,7 @@ and exec t b env (s : T.stmt) k =
                     (guard (fun () -> set_item s.stmt_loc !cell is x))))
             (guard (fun () -> bind_path t.output env path))
     | T.Expr e -> exec_value t b env e (fun _ -> k env)
-    | T.Break n -> b.break_ n
+    | T.Break { depth ; continue } -> b.break_ ~continue depth
     | T.Wait dur ->
         guard (fun () ->
             match eval dur with
@@ -1085,7 +1086,8 @@ and spawn t b env body for_ =
                 settle b)) in
     let th =
         run_block t b env body ~fail:b.fail
-            ~break_:(fun n -> if n <= 1 then end_ () else b.break_ (n - 1))
+            ~break_:(fun ~continue n ->
+                if n <= 1 then end_ () else b.break_ ~continue (n - 1))
             (fun _ -> end_ ()) in
     (* Unless it ended already: *)
     if !over then cancel th else thread := Some th ;
@@ -1132,16 +1134,24 @@ and on t b env loc cases ~for_ ~linger ~timeout max =
             if Option.map_default (fun m -> !matches >= m) false max then
                 disarm () ;
             let inner = bind_lazy env c.match_ (fun () -> match_value packet) in
-            let instance =
-                run_block t b inner c.body ~fail:b.fail
-                    ~break_:(fun n -> if n <= 1 then stop () else b.break_ (n - 1))
-                    (fun _ ->
-                        running := List.filter (fun i -> i.live) !running ;
-                        check_over ()) in
-            (* Unless it was left already, with a break: *)
-            if instance.live then
-                if !over then cancel instance
-                else running := instance :: !running ;
+            let instance = ref None and continued = ref false in
+            let done_ () =
+                running := List.filter (fun i -> i.live) !running ;
+                check_over () in
+            let break_ ~continue n =
+                if n > 1 then b.break_ ~continue (n - 1)
+                else if not continue then stop ()
+                else (
+                    continued := true ;
+                    Option.may cancel !instance ;
+                    done_ ()) in
+            let i = run_block t b inner c.body ~fail:b.fail ~break_ (fun _ -> done_ ()) in
+            instance := Some i ;
+            (* Unless it was left already, with a break or a continue: *)
+            if !continued then cancel i ;
+            if i.live then
+                if !over then cancel i
+                else running := i :: !running ;
             check_over ()) in
     unregister :=
         register t b env (List.map (fun (c : T.case) -> c.patterns, matched c) cases)
@@ -1218,23 +1228,31 @@ and repeat t b env var count items every for_ body body_loc k =
                 else (
                     let env =
                         bind env var (match items with Some a -> a.(!i) | None -> Int !i) in
-                    let break_ n =
-                        if n <= 1 then (Option.may cancel !current ; k ())
-                        else b.break_ (n - 1) in
-                    let running = ref true and ended = ref false in
+                    let running = ref true and ended = ref false
+                    and left = ref false in
                     let this = !i in
-                    current := Some (
-                        run_block t b env body ~fail:b.fail ~break_ (fun _ ->
-                            let next =
-                                Clock.Time.add start
-                                    (Interval.mul every (float_of_int (this + 1))) in
-                            if Option.map_default (fun c -> this + 1 >= c) false count ||
-                               too_late (Clock.Time.max next (now ())) then
-                                k ()
-                            else if Clock.Time.compare next (now ()) > 0 then
-                                Simulation.at t.power next iterations (this + 1)
-                            else if !running then ended := true
-                            else iterations (this + 1))) ;
+                    let next_iteration () =
+                        let next =
+                            Clock.Time.add start
+                                (Interval.mul every (float_of_int (this + 1))) in
+                        if Option.map_default (fun c -> this + 1 >= c) false count ||
+                           too_late (Clock.Time.max next (now ())) then
+                            k ()
+                        else if Clock.Time.compare next (now ()) > 0 then
+                            Simulation.at t.power next iterations (this + 1)
+                        else if !running then ended := true
+                        else iterations (this + 1) in
+                    (* [current] is that iteration once [run_block] returned: *)
+                    let break_ ~continue n =
+                        if n > 1 then b.break_ ~continue (n - 1) else (
+                            left := true ;
+                            if not !running then Option.may cancel !current ;
+                            if continue then next_iteration () else k ()) in
+                    let it =
+                        run_block t b env body ~fail:b.fail ~break_
+                                  (fun _ -> next_iteration ()) in
+                    current := Some it ;
+                    if !left then cancel it ;
                     running := false ;
                     if !ended then (
                         incr i ; incr at_once ;
@@ -1338,7 +1356,7 @@ let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
     let rec root =
         { parent = None ; live = true ; children = [] ; cleanups = [] ;
           fail = (fun e -> cancel root ; exit (Failed e)) ;
-          break_ = (fun _ -> assert false) ; busy = 0 ; holding = 0 ;
+          break_ = (fun ~continue:_ _ -> assert false) ; busy = 0 ; holding = 0 ;
           stmts_done = [] ; ending = [] ; finish = None } in
     let budget, ports, permissions = self_values limits in
     let vars =
@@ -1607,6 +1625,14 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "repeat count=5 every=1s { print(I)\n  break }\nprint(\"after\")")
   "0s: 0\n0s: after\n0s: done" \
     (runs "repeat var=i count=3 { repeat { print(i)\n    break 2 } }\nprint(\"after\")")
+  "0s: 1\n0s: 3\n0s: done" \
+    (runs "foreach [1, 2, 3] { if I == 2 { continue }\n  print(I) }")
+  "0s: 0\n2s: 2\n2s: done" \
+    (runs "repeat count=3 every=1s { if I == 1 { continue }\n  print(I) }")
+  "0s: 0.0\n1s: 1.0\n2s: 2.0\n3s: done" \
+    (runs "repeat var=i count=3 { repeat var=j count=3 { print(\"${i}.${j}\")\n    wait 1s\n    continue 2\n    print(\"never\") } }")
+  "1ps: 0\n3ps: 2\n5ps: 4\n5ps: done" \
+    (runs "repeat count=5 { wait 0s\n  if I % 2 == 1 { continue }\n  print(I) }")
   "0s: [0, 1, 2, 3, 4] [0, 1, 2, 5] [9, 0, 1, 2] [0, 1, 2, 0, 1, 2] [7]\n0s: done" \
     (runs "x = [1]\nx += 2\nx := 0 + x\ny = array(0, 0) + 7\nprint(\"${x + [3, 4]} ${append(x, 5)} ${prepend(9, x)} ${concat(x, x)} ${y}\")")
   "0s: [a, , b c] 2 1 [x]\n0s: done" \
@@ -2096,6 +2122,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "400ms: stop\n400ms: after\n400ms: done" \
     (runs ~inject:[ 0.4, reply "stop" ; 0.5, reply "stop" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on for=10s Raw(\"stop\") { print(\"stop\")\n    break } }\nprint(\"after\")")
+  "400ms: a\n500ms: a\n1s: after\n1s: done" \
+    (runs ~inject:[ 0.4, reply "x" ; 0.5, reply "x" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on for=1s Raw { print(\"a\")\n    continue\n    print(\"b\") } }\nprint(\"after\")")
   "400ms: 0\n400ms: after\n400ms: done" \
     (runs ~inject:[ 0.4, reply "pong" ] \
         "repeat count=3 { /IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on for=1s Raw(\"pong\") { print(I)\n    break 2 } } }\nprint(\"after\")")

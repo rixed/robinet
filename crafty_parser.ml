@@ -892,7 +892,9 @@ let () = set_stmt (
             fun (p, body) -> Retry { max = p "max" ; body }) |||
         (keyword "catch" -+ body >>: fun body -> Catch body) |||
         (keyword "break" -+ params "break" [ "depth" ] >>:
-            fun p -> Break { depth = p "depth" }) |||
+            fun p -> Break { depth = p "depth" ; continue = false }) |||
+        (keyword "continue" -+ params "continue" [ "depth" ] >>:
+            fun p -> Break { depth = p "depth" ; continue = true }) |||
         (let wait k =
             keyword k -+ params k [ "dur" ] >>:
                 fun p ->
@@ -1084,6 +1086,7 @@ let parse_patterns text =
   "wait dur=10ms\n" (reads "sleep 10ms")
   "while = 1\nloop := (while - 1)\nprint(loop)\n" (reads "while = 1\nloop := while - 1\nprint(loop)")
   "repeat var=j {\n  break depth=2\n}\n" (reads "repeat var=\"j\" { break 2 }")
+  "repeat {\n  continue\n  continue depth=2\n}\n" (reads "repeat { continue ; continue 2 }")
   "repeat var=i count=3 every=1ms for=1s {\n  print(i)\n}\n" \
     (reads "repeat var=i count=3 every=1ms for=1s { print(i) }")
   "repeat count=(n * 2) every=(1s / n) {\n}\n" \
