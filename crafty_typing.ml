@@ -1430,7 +1430,7 @@ let unify ?(describe=fun e -> a_type e.typ) what a b =
 
 (* Where the fields of a packet sent that only its capture tells are: *)
 let only_captured =
-    "only a packet captured as it leaves has it (p = MESSAGE, through manual layers)"
+    "only a packet captured as it leaves has it (p = MESSAGE)"
 
 (* [LAST[Eth]], whose [ts] is never known: *)
 let is_last_eth r =
@@ -2326,14 +2326,7 @@ and stmt errors env (s : A.stmt) =
         | A.Capture { var ; declare = decl ; anchor ; layers } ->
             let hint = stack_hint env anchor layers ~sends:true in
             let base, over = anchor_base ~hint env s.stmt_loc anchor in
-            let stack, tls, overlay = stack_layers ~hint env base over layers in
-            (* What a self-driven layer sends is no one frame that could be
-             * waited for, but for the interface's: *)
-            List.iter (fun ((l : L.layer), m) ->
-                if m = L.Driven && l != L.root then
-                    error s.stmt_loc "Only a packet sent through manual layers can \
-                                      be seen leaving, and %s is self-driven"
-                        (L.to_string l)) stack ;
+            let _, tls, overlay = stack_layers ~hint env base over layers in
             let env, capture =
                 if decl then
                     declare_typ env var packet_type
@@ -3381,16 +3374,15 @@ let check_patterns (ps : A.patterns) =
     (types (Tools.file_content "tests/crafty/icmp_error.crafty"))
 *)
 
-(* A packet sent into a variable must go through manual layers only, but the
- * interface: *)
+(* A packet sent into a variable, through any layers: *)
 (*$= types & ~printer:identity
   "" (types "/IP!(dst=1.2.3.4)/UDP(dst=53) { p = Raw(\"x\") }")
   "" (types "/IP(dst=1.2.3.4)/TCP(dst=80) { p = ../../IP!/TCP!/Raw(\"GET /\") }")
-  "line 1, column 32: Only a packet sent through manual layers can be seen leaving, and TCP is self-driven" \
-    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { p = Raw(\"GET /\") }")
-  "line 1, column 32: Only a packet sent through manual layers can be seen leaving, and IP is self-driven" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { p = Raw(\"x\") }")
-  "line 2, column 7: LAST[Eth].ts is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
+  "" (types "/IP(dst=1.2.3.4)/TCP(dst=80) { p = Raw(\"GET /\") }")
+  "" (types "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { p = HttpRequest(\"/\") }")
+  "" (types "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { p = WebSocket(WS_TEXT)/Raw(\"x\") }")
+  "" (types "/IP(dst=1.2.3.4)/UDP(dst=53) { p = Raw(\"x\") }")
+  "line 2, column 7: LAST[Eth].ts is not known: only a packet captured as it leaves has it (p = MESSAGE)" \
     (types "/IP!(dst=1.2.3.4)/UDP(dst=53) { Raw(\"x\")\n  t = LAST[Eth].ts }")
   "line 2, column 33: p is an int, not a packet" \
     (types "p = 1\n/IP!(dst=1.2.3.4)/UDP(dst=53) { p := Raw(\"x\") }")

@@ -57,14 +57,18 @@ struct
           mask : int32 option ;
           payload : Payload.t }
 
+    (* The masked payload stands for [pld], whose marks it takes: *)
     let apply_mask mask pld =
-        string_of_bitstring pld |>
-        String.mapi (fun i c ->
-            let d = Char.code c in
-            let m =
-                (Int32.shift_right mask (8 * (i mod 4)) |> Int32.to_int) land 255 in
-            Char.chr (d lxor m)) |>
-        bitstring_of_string
+        let masked =
+            string_of_bitstring pld |>
+            String.mapi (fun i c ->
+                let d = Char.code c in
+                let m =
+                    (Int32.shift_right mask (8 * (i mod 4)) |> Int32.to_int) land 255 in
+                Char.chr (d lxor m)) |>
+            bitstring_of_string in
+        Mark.carry ~src:pld ~dst:masked ~at:0 ;
+        masked
 
     let pack t =
         let len = Payload.length t.payload in

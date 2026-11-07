@@ -331,7 +331,9 @@ let assumed e hints =
 
 (** What the interface will emit of a packet sent: the whole frame, or what
  * a self-driven root frames. *)
-type emitted = Frame of Bitstring.bitstring | Payload of Bitstring.bitstring
+(** What the interface will emit of a packet sent: that very frame, or the
+ * first frame that carries bits with that mark. *)
+type emitted = Frame of Bitstring.bitstring | Marked of Mark.t
 
 (** Whether [frame] is what [e] tells, but for padding at its end. *)
 let is_emitted e frame =
@@ -341,19 +343,20 @@ let is_emitted e frame =
         Bitstring.equals bits (Bitstring.takebits len frame) in
     match e with
     | Frame bits -> starts_with bits frame
-    | Payload bits ->
-        (match Eth.Pdu.unpack frame with
-        | Ok f -> starts_with bits (f.payload :> Bitstring.bitstring)
-        | Error _ -> false)
+    | Marked m -> Mark.mem m frame
+
+(** Once it is no longer waited for: *)
+let forget = function
+    | Frame _ -> ()
+    | Marked m -> Mark.release m
 
 (** Sends a packet down that stack, from its top (a terminal layer): each
  * manual layer packs what is above it, until a self-driven one takes it, or
  * the root, which emits it as it is. Returns the packet: what was packed,
  * decoded, on top of the self-driven layers as their stack gives them (those
- * may send it later, or never, or in several packets); and what the
- * interface will emit of it, if all but the root are manual. Raises
- * [Failed]. *)
-let send stack =
+ * may send it later, or never, or in several packets); and, with [mark], what
+ * the interface will emit of it. Raises [Failed]. *)
+let send ?(mark=false) stack =
     (* What the first self-driven layer is given, with the hints of the layer
      * above it, and the layers from it down: *)
     let rec loop hints bits = function
@@ -364,16 +367,22 @@ let send stack =
             count_sent e.node bits ;
             (match e.mode with
             | L.Driven ->
-                e.node.ops.send (fields_of e) hints bits ;
-                bits, hints, driven,
-                if e.node.parent = None then Some (Payload bits) else None
+                let emitted =
+                    if mark then (
+                        let m = Mark.make () in
+                        Mark.add m bits ;
+                        Some (Marked m)
+                    ) else None in
+                (try e.node.ops.send (fields_of e) hints bits
+                with exn -> Option.may forget emitted ; raise exn) ;
+                bits, hints, driven, emitted
             | L.Manual ->
                 let bits, hints = e.node.ops.pack (fields_of e) hints bits in
                 (match rest with
                 | [] ->
                     let st = e.node.eth in
                     Simulation.asap st.iface.widget.power st.iface.emit bits ;
-                    bits, [], [], Some (Frame bits)
+                    bits, [], [], if mark then Some (Frame bits) else None
                 | rest ->
                     loop hints bits rest)) in
     let bits, hints, driven, emitted = loop [] Bitstring.empty_bitstring stack in
@@ -421,6 +430,11 @@ let busy_for stack =
  * the others may still be; possibly never, and possibly several times: *)
 let on_ready stack k =
     List.iter (fun e -> e.node.ops.on_ready k) (senders stack)
+
+(** Whether a node of that stack still holds some of what it was sent, that
+ * it may yet send: *)
+let holding stack =
+    List.exists (fun e -> e.mode = L.Driven && e.node.ops.holding ()) stack
 
 (** What [n] tells of its stream: {!L.stream_stats}, then the [stats] of its
  * layer, zero for those it does not tell yet. *)
@@ -871,7 +885,7 @@ let to_string n = IO.to_string print n
   let raw = child loc root Crafty_layers.raw [] in
   assert_equal ~printer:identity "Eth{Raw}" (to_string root) ;
   let sent, emitted =
-      send [ { node = raw ; mode = Crafty_layers.Manual ;
+      send ~mark:true [ { node = raw ; mode = Crafty_layers.Manual ;
                options = [ 0, Crafty_value.bytes_of_string "hi" ] } ;
              { node = root ; mode = Crafty_layers.Manual ;
                options = [ 1, Crafty_value.Mac Eth.Addr.broadcast ;

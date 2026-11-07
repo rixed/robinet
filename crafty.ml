@@ -633,12 +633,16 @@ let () =
     Tools.(firewall.widget.ports.dev 1 <--> policer.widget.ports.dev 0) ;
     Tools.(policer.widget.ports.dev 1 <--> after.ins) ;
     (* What was injected and not seen leaving yet, oldest first, of which
-     * those that are never seen are passed by the next that is: *)
+     * those that are never seen are passed by the next that is. A frame seen
+     * leaving takes the marks of the one injected: *)
     let injected = Queue.create () in
     let was_injected frame =
         let is_it bits = Crafty_tree.(is_emitted (Frame bits) frame) in
         if Queue.fold (fun found bits -> found || is_it bits) false injected then (
-            while not (is_it (Queue.pop injected)) do () done ;
+            let rec pop () =
+                let bits = Queue.pop injected in
+                if is_it bits then bits else pop () in
+            Mark.carry ~src:(pop ()) ~dst:frame ~at:0 ;
             true
         ) else false in
     let not_injected = ref 0 in

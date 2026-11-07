@@ -147,6 +147,9 @@ type ops =
        * is no longer busy, if it can tell sooner than [busy_for] did (TCP,
        * once connected or once its send buffer drained); or never: *)
       on_ready : (unit -> unit) -> unit ;
+      (* Self-driven, whether it still has some of what it was given that it
+       * may yet send (TCP: not sent yet, or not acked): *)
+      holding : unit -> bool ;
       (* Whether what it passes up are messages of their own, which a
        * pattern can match each of (HTTP's, out of a TCP stream): *)
       messages : bool ;
@@ -217,7 +220,8 @@ let manual pack =
     { pack ; send = not_driven ; receive = (fun _ u -> pass u) ;
       listen = ignore ; drive = ignore ; close = (fun k -> k ()) ;
       busy_for = Tools.never_busy ;
-      buffered = false ; on_ready = ignore ; messages = false ;
+      buffered = false ; on_ready = ignore ; holding = (fun () -> false) ;
+      messages = false ;
       stats = (fun () -> []) }
 
 let bytes_value bits = V.bytes_of_string (string_of_bitstring bits)
@@ -831,6 +835,12 @@ let tcp_node ctx =
                     Option.may (fun k -> s.on_closed <- None ; k ()) s.on_closed)) ()) ;
       busy_for ; buffered = true ; messages = false ;
       on_ready = (fun k -> waiters := k :: !waiters) ;
+      holding = (fun () ->
+        match !state with
+        | Idle | Listening -> false
+        | Stream s ->
+            s.pending <> [] || s.trx.to_send <> [] ||
+            not (Tcp.TRX.Streambuf.is_empty s.trx.unacked_tx)) ;
       stats = (fun () ->
         match !state with
         | Idle | Listening -> []

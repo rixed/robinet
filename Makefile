@@ -9,6 +9,7 @@ LIB_SOURCES  = \
 	clock.ml \
 	metric.ml \
 	log.ml \
+	mark.ml \
 	tools.ml \
 	simTypes.ml \
 	capabilities.ml \

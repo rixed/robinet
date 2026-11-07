@@ -750,24 +750,31 @@ type t =
        * sending, and who waits for it: *)
       awaited : (Crafty_tree.emitted * (Bitstring.bitstring -> unit)) list ref }
 
-(* How long a packet sent may take to be seen leaving: *)
+(* How long a packet sent may take to be seen leaving, once no node of its
+ * stack holds it: *)
 let capture_timeout = Interval.sec 1.
 
 (* Calls [k] with the packet that the interface emits as [e], once it is
  * captured on its way out, decoded [along] the layers it was sent through,
- * or else fails [b] at [loc]: *)
-let await t b loc e along k =
+ * or else fails [b] at [loc] once [capture_timeout] passed without
+ * [holding] it: *)
+let await t b loc e along holding k =
     let rec w = e, (fun frame ->
         if b.live then (disarm () ; k (Crafty_tree.captured ~along t.tree frame)))
-    and disarm () = t.awaited := List.filter ((!=) w) !(t.awaited) in
+    and disarm () =
+        t.awaited := List.filter ((!=) w) !(t.awaited) ;
+        Crafty_tree.forget e in
     t.awaited := !(t.awaited) @ [ w ] ;
     b.cleanups <- disarm :: b.cleanups ;
-    Simulation.delay t.power capture_timeout (fun () ->
+    let rec timer () =
         if List.memq w !(t.awaited) && b.live then (
-            disarm () ;
-            ignore (guard b (fun () ->
-                error loc "The packet sent was not seen leaving within %s"
-                    (Interval.to_short_string capture_timeout))))) ()
+            if holding () then Simulation.delay t.power capture_timeout timer ()
+            else (
+                disarm () ;
+                ignore (guard b (fun () ->
+                    error loc "The packet sent was not seen leaving within %s"
+                        (Interval.to_short_string capture_timeout))))) in
+    Simulation.delay t.power capture_timeout timer ()
 
 (* Tells the first that waits for [frame], captured on its way out: *)
 let emitted t frame =
@@ -979,7 +986,7 @@ and exec t b env (s : T.stmt) k =
         guard (fun () ->
             try
                 let stack = push t b env depth overlay layers in
-                stack, Crafty_tree.send stack
+                stack, Crafty_tree.send ~mark:(capture <> None) stack
             with Failed msg -> error s.stmt_loc "%s" msg) |>
         Option.may (fun (stack, (packet, emitted)) ->
             lookup env T.last_var := packet_value packet ;
@@ -991,6 +998,7 @@ and exec t b env (s : T.stmt) k =
             match capture, emitted with
             | Some v, Some e ->
                 await t b s.stmt_loc e (Crafty_tree.along stack)
+                      (fun () -> Crafty_tree.holding stack)
                       (fun p -> k (set env v (packet_value p)))
             | Some _, None -> assert false (* the typer said so *)
             | None, _ ->
@@ -1949,6 +1957,25 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
            q = Query(\"example.com\", type=TYPE_AAAA)\n\
            print(\"${q[UDP].dst} ${q[Query].type} ${q[Query].name}\") }")
 *)
+(* Through self-driven layers too, by the first frame that carries some of it: *)
+(*$= runs & ~printer:identity
+  "4µs640ns3ps: true true 1 4.639999e-06 #70696e67\n4µs640ns3ps: done" \
+    (runs ~sent:true \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n\
+           a = Raw(\"ping\")\n\
+           b = Raw(\"ping\")\n\
+           print(\"${a[IP].id != b[IP].id} ${a[Eth].ts < b[Eth].ts} ${b[IP].id - a[IP].id} ${float(b[Eth].ts - a[Eth].ts)} ${b[Raw].data}\") }")
+  "8ps: true 0 1500 53\n8ps: done" \
+    (runs ~sent:true \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n\
+           p = Raw(randbytes(3000))\n\
+           print(\"${p[IP].more_frags} ${p[IP].frag_offset} ${p[IP].tot_len} ${p[UDP].dst}\") }")
+  "4ps: 53 28 example.com\n4ps: done" \
+    (runs ~sent:true \
+        "/IP(dst=10.0.0.2)/UDP(dst=53)/DNS {\n\
+           q = Query(\"example.com\", type=TYPE_AAAA)\n\
+           print(\"${q[UDP].dst} ${q[Query].type} ${q[Query].name}\") }")
+*)
 (* A frame's [ts] is when it came in, which conditions can read: *)
 (*$= runs & ~printer:identity
   "500ms: 500ms\n700ms: 700ms\n1s: done" \
@@ -2007,13 +2034,13 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "repeat count=2 { /IP!(dst=10.0.0.2, id=I)/UDP(src=1000, dst=53)/Raw(\"x\")\n  print(LAST[IP].id) }")
   "3ps: 4660\n3ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53, checksum=0x1234) { Raw(\"a\")\n  print(LAST[UDP].checksum) }")
-  "3ps: {ack_num: 0, checksum: ?, dst: 80, flags: 2, length: 0, mss: -1, options: [], sack_ok: false, seq_num: 0, src: 1000, ts_ecr: -1, ts_val: -1, urg_ptr: 0, win_size: 65535, wscale: -1}\n3ps: failed: line 3, column 5: TCP.checksum is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
+  "3ps: {ack_num: 0, checksum: ?, dst: 80, flags: 2, length: 0, mss: -1, options: [], sack_ok: false, seq_num: 0, src: 1000, ts_ecr: -1, ts_val: -1, urg_ptr: 0, win_size: 65535, wscale: -1}\n3ps: failed: line 3, column 5: TCP.checksum is not known: only a packet captured as it leaves has it (p = MESSAGE)" \
     (runs "/IP(dst=10.0.0.2)/TCP!(src=1000, dst=80, flags=SYN, seq_num=0)/Raw()\nprint(LAST[TCP])\nx = LAST[TCP].checksum")
-  "3ps: failed: line 2, column 7: UDP.checksum is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
+  "3ps: failed: line 2, column 7: UDP.checksum is not known: only a packet captured as it leaves has it (p = MESSAGE)" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  x = LAST[UDP].checksum }")
-  "3ps: failed: line 2, column 7: IP.id is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
+  "3ps: failed: line 2, column 7: IP.id is not known: only a packet captured as it leaves has it (p = MESSAGE)" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  x = LAST[IP].id }")
-  "2ps: failed: line 3, column 7: Eth.ts is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
+  "2ps: failed: line 3, column 7: Eth.ts is not known: only a packet captured as it leaves has it (p = MESSAGE)" \
     (runs "/IP!(dst=10.0.0.2)/UDP(src=1000, dst=53)/Raw(\"a\")\nx = LAST\nprint(x[Eth].ts)")
 *)
 (* expect runs the block of the first pattern to match, and no other: *)
@@ -2206,12 +2233,12 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       let tree =
           Crafty_tree.make_root eth ~on_removed:(fun n ->
               if closed then line ("closed "^ Crafty_tree.stats_line n)) in
-      ignore (run_on_tree sim.SimTypes.root.power tree ~print:line ~print_err:(fun s -> line ("err "^ s))
+      run_on_tree sim.SimTypes.root.power tree ~print:line ~print_err:(fun s -> line ("err "^ s))
           ~on_exit:(function
               | Done -> line ("done "^ Crafty_tree.to_string tree)
               | Failed e -> line ("failed: "^ IO.to_string Crafty_parser.print_error e ^" "^ Crafty_tree.to_string tree)
               | Stopped -> line "stopped"
-              | Running -> ()) (compile text))
+              | Running -> ()) (compile text)
 
   let frame_line sim out dir bits =
       let d = describe bits in
@@ -2247,31 +2274,37 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
               skip := false ; Stdlib.Buffer.add_char b c)) s ;
       Stdlib.Buffer.contents b
 
-  let two ?(loss=0.) ?(arp=false) ?(frames=false) ?v6 ?closed a b =
+  let two ?(loss=0.) ?(arp=false) ?(frames=false) ?(sent=false) ?v6 ?closed a b =
       let sim = Simulation.make ~realtime:false "crafty-pair" in
       let out = ref [] in
       let ea = crafty_peer ?v6 sim 1 and eb = crafty_peer ?v6 sim 2 in
       ea.loss <- loss ; eb.loss <- loss ;
       if arp then (knows ea 2 ; knows eb 1) ;
-      let log = if frames then Some (frame_line sim out) else None in
-      plug sim ?log ea.Eth.State.iface.widget eb.Eth.State.iface.widget ;
-      start ?closed sim out "b" eb b ;
-      start ?closed sim out "a" ea a ;
+      let emitted = ref ignore in
+      let log dir bits =
+          if frames then frame_line sim out dir bits ;
+          if sent && dir = ">" then Simulation.asap sim.root.power !emitted bits in
+      plug sim ~log ea.Eth.State.iface.widget eb.Eth.State.iface.widget ;
+      ignore (start ?closed sim out "b" eb b) ;
+      emitted := (start ?closed sim out "a" ea a).emitted ;
       Simulation.run sim false ;
       String.concat "\n" (List.rev !out)
 
-  let with_host ?(setup=fun _ _ -> ()) ?(frames=false) ?(v6=false) ?closed text =
+  let with_host ?(setup=fun _ _ -> ()) ?(frames=false) ?(sent=false) ?(v6=false) ?closed text =
       let sim = Simulation.make ~realtime:false "crafty-host" in
       let out = ref [] in
       let ea = crafty_peer ~v6 sim 1 in
       let addresses = if v6 then [ Ip.Cidr.o (address6 2, 64) ] else [] in
       let h = Host.make ~parent:sim.SimTypes.root ~static_ip:(address 2) ~netmask ~addresses "host" in
-      let log = if frames then Some (frame_line sim out) else None in
-      plug sim ?log ea.Eth.State.iface.widget h.Host.trx.Host.widget ;
+      let emitted = ref ignore in
+      let log dir bits =
+          if frames then frame_line sim out dir bits ;
+          if sent && dir = ">" then Simulation.asap sim.root.power !emitted bits in
+      plug sim ~log ea.Eth.State.iface.widget h.Host.trx.Host.widget ;
       Simulation.run_startup sim ;
       setup h (fun s ->
           out := Printf.sprintf "host %.3fs: %s" (Clock.Time.to_secs (Simulation.now sim)) s :: !out) ;
-      start ?closed sim out "a" ea text ;
+      emitted := (start ?closed sim out "a" ea text).emitted ;
       Simulation.run sim false ;
       String.concat "\n" (List.rev !out)
 *)
@@ -2430,11 +2463,50 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80)/HTTP {\n  HttpRequest(\"/ws\", headers=[{name: \"Upgrade\", value: \"websocket\"}, {name: \"Connection\", value: \"Upgrade\"}, {name: \"Sec-WebSocket-Key\", value: \"dGhlIHNhbXBsZSBub25jZQ==\"}])\n  expect timeout=1s HttpAnswer(101) {}\n  on WebSocket!(opcode != WS_TEXT && opcode != WS_CLOSE) { print(\"frame ${MATCH[WebSocket].opcode}\") }\n  WebSocket(WS_TEXT)/Raw(\"hello\")\n  WebSocket!(WS_TEXT, final=false)/Raw(\"frag\")\n  WebSocket!(WS_CONTINUATION)/Raw(\"mented\")\n  expect timeout=1s WebSocket { print(\"message ${MATCH[WebSocket].opcode} ${MATCH[Raw].data}\") }\n  WebSocket(WS_CLOSE)/Raw(#03e8)\n  expect timeout=1s WebSocket(WS_CLOSE) { print(\"closed ${MATCH[Raw].data}\") } }" \
          "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP/HttpAnswer(101, headers=[{name: \"Upgrade\", value: \"websocket\"}]) }\non for=1s /IP/TCP(dst == 80)/HTTP/WebSocket! { print(\"frame ${MATCH[WebSocket].opcode} ${MATCH[WebSocket].final} ${MATCH[Raw].data}\") }\non for=1s /IP/TCP(dst == 80)/HTTP/WebSocket {\n  print(\"message ${MATCH[WebSocket].opcode} ${MATCH[Raw].data}\")\n  if MATCH[Raw].data == \"hello\" {\n    /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP { WebSocket!(WS_PING)/Raw(\"p\")\n      WebSocket(WS_TEXT)/Raw(\"bye\") } } }")
 *)
+(* Self-driven WebSocket frames captured as they leave, masked; one that TCP
+ * splits by its first segment, which holds no whole frame to decode: *)
+(*$= & ~printer:identity
+  "a 0.000s: 1 true hello 11 1460 true\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=5000, dst=80)#2}}\nb 1.000s: done Eth#10{IP(src=10.0.0.2, dst=10.0.0.1)#9{TCP(src=80, dst=5000)#9}}" \
+    (two ~sent:true \
+        "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80)/HTTP {\n\
+           HttpRequest(\"/ws\", headers=[{name: \"Upgrade\", value: \"websocket\"}, {name: \"Connection\", value: \"Upgrade\"}, {name: \"Sec-WebSocket-Key\", value: \"dGhlIHNhbXBsZSBub25jZQ==\"}])\n\
+           expect timeout=1s HttpAnswer(101) {}\n\
+           p = WebSocket(WS_TEXT)/Raw(\"hello\")\n\
+           q = WebSocket(WS_BINARY)/Raw(randbytes(3000))\n\
+           print(\"${p[WebSocket].opcode} ${p[WebSocket].masked} ${string(p[Raw].data)} ${q[TCP].seq_num - p[TCP].seq_num} ${length(q[Raw].data)} ${p[Eth].ts <= q[Eth].ts}\") }" \
+        "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n\
+           /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP/HttpAnswer(101, headers=[{name: \"Upgrade\", value: \"websocket\"}]) }")
+*)
 (* The HTTP server of the manual: *)
 (*$= & ~printer:identity
   "a 0.000s: 200, 6 bytes\na 0.000s: 404, 0 bytes\na 0.000s: done Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=5000, dst=80)#3}}\nb 1.000s: done Eth#7{IP(src=10.0.0.2, dst=10.0.0.1)#6{TCP(src=80, dst=5000)#6}}" \
     (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80)/HTTP {\n  HttpRequest(\"/\")\n  HttpRequest(\"/missing\")\n  repeat count=2 {\n    expect timeout=2s HttpAnswer { print(\"${MATCH[HttpAnswer].code}, ${length(MATCH[Raw].data)} bytes\") } } }" \
          "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP {\n    if MATCH[HttpRequest].url == \"/\" { HttpAnswer(200)/Raw(\"hello\\n\") }\n    else { HttpAnswer(404) }\n  }\n}")
+*)
+(* A write captured through a self-driven TCP is its first segment: once the
+ * connection is established, cut to the MSS, each write its own: *)
+(*$= & ~printer:identity
+  "a 0.000s: hello 1460 5 3005 world\na 0.000s: true /index.html" \
+    (with_host ~setup:tcp_echo ~sent:true \
+        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n\
+           a = Raw(\"hello\")\n\
+           b = Raw(randbytes(3000))\n\
+           c = Raw(\"world\")\n\
+           r = HTTP/HttpRequest(\"/index.html\")\n\
+           print(\"${string(a[Raw].data)} ${length(b[Raw].data)} ${b[TCP].seq_num - a[TCP].seq_num} ${c[TCP].seq_num - a[TCP].seq_num} ${string(c[Raw].data)}\")\n\
+           print(\"${a[Eth].ts <= b[Eth].ts && b[Eth].ts <= c[Eth].ts} ${r[HttpRequest].url}\") }" |> \
+     fun s -> String.concat "\n" (List.take 2 (String.split_on_char '\n' s)))
+*)
+(* A write waits for the connection as long as it takes, unless it fails: *)
+(*$= & ~printer:identity
+  "a 3.000s: left late\na 3.000s: done Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=5000, dst=80)#1{Raw}}}\nb 4.500s: done Eth#8{IP(src=10.0.0.2, dst=10.0.0.1)#5{TCP(src=80, dst=5000)#5}}" \
+    (two ~sent:true \
+        "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n\
+           p = Raw(\"late\")\n\
+           print(\"left ${string(p[Raw].data)}\") }" \
+        "wait 1500ms\non for=3s /IP/TCP(dst == 80)/Raw {}")
+  "a 1.000s: failed: line 1, column 42: The packet sent was not seen leaving within 1s Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=5000, dst=9)#1{Raw}}}" \
+    (with_host ~sent:true "/IP(dst=10.0.0.2)/TCP(src=5000, dst=9) { p = Raw(\"anyone?\") }")
 *)
 (* The stats of a TCP stream, as data is echoed, then of each stream as it
  * goes away; of a UDP one; with losses: *)
@@ -2502,8 +2574,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         "/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=100)/Raw()\nexpect timeout=1s /IP/TCP!(src == 7, flags & RST) { print(MATCH[TCP].ack_num) }")
 *)
 (* IPv6, with neighbor discovery: ping, a UDP echo server, in fragments too,
- * a closed port, a TCP echo server; an address of the wrong family; a packet
- * too big forged by a program, quoting the datagram: *)
+ * a closed port, a TCP echo server; datagrams and segments captured as they
+ * leave, a fragmented one by its first fragment; an address of the wrong
+ * family; a packet too big forged by a program, quoting the datagram: *)
 (*$= & ~printer:identity
   "a 0.000s: seq 1 from 2001:db8::2 hop 64\na 0.100s: seq 2 from 2001:db8::2 hop 64\na 0.100s: done Eth#4" \
     (with_host ~v6:true "/IP6(dst=2001:db8::2)/ICMP6/Echo { repeat count=2 every=100ms { Request(\"hi\")\n    expect timeout=1s Reply { assert(MATCH[Reply].payload == \"hi\")\n      print(\"seq ${MATCH[Reply].seq} from ${MATCH[IP6].src} hop ${MATCH[IP6].hop_limit}\") } } }")
@@ -2520,6 +2593,18 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "a 0.000s: hello\na 0.000s: 1440\na 0.000s: done Eth#4{IP6(src=2001:db8::1, dst=2001:db8::2)#2{TCP(src=4000, dst=7)#2{Raw#1}}}" \
     (with_host ~v6:true ~setup:tcp_echo \
         "/IP6(dst=2001:db8::2)/TCP(src=4000, dst=7) {\n  Raw(\"hello\")\n  expect timeout=1s Raw { print(MATCH[Raw].data)\n    print(stats().snd_mss) } }")
+  "a 0.000s: ping false true 17 7 true\na 0.000s: done Eth#2" \
+    (with_host ~v6:true ~sent:true \
+        "/IP6(dst=2001:db8::2)/UDP(src=4000, dst=7) {\n\
+           a = Raw(\"ping\")\n\
+           b = Raw(randbytes(3000))\n\
+           print(\"${string(a[Raw].data)} ${a[IP6].is_fragment} ${b[IP6].is_fragment} ${b[IP6].proto} ${b[UDP].dst} ${a[Eth].ts <= b[Eth].ts}\") }")
+  "a 0.000s: hello 1440 5\na 0.000s: done Eth#3{IP6(src=2001:db8::1, dst=2001:db8::2)#1{TCP(src=4000, dst=7)#1{Raw}}}" \
+    (with_host ~v6:true ~setup:tcp_echo ~sent:true \
+        "/IP6(dst=2001:db8::2)/TCP(src=4000, dst=7) {\n\
+           a = Raw(\"hello\")\n\
+           b = Raw(randbytes(3000))\n\
+           print(\"${string(a[Raw].data)} ${length(b[Raw].data)} ${b[TCP].seq_num - a[TCP].seq_num}\") }")
   "a 0.000s: failed: line 1, column 1: IP takes IPv4 addresses, not 2001:db8::2: use IP6 Eth" \
     (with_host ~v6:true "/IP(dst=2001:db8::2)/UDP(src=4000, dst=9)/Raw(\"x\")")
   "a 0.000s: mtu 1280 for 2001:db8::2 port 33434\na 0.000s: done Eth#2\nb 0.000s: done Eth#2" \

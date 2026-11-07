@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 e082808d2e7ca0d4fb494f0a8dd19e5d) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 ae91719730b97a39f51982bab463ea83) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -129,7 +129,7 @@ without data.
         print("SYN-ACK: seq ${MATCH[TCP].seq_num}, ack ${MATCH[TCP].ack_num}")
       }
       # Sends the segment, and waits until it is seen leaving: "seg" is the
-      # packet as captured. Only fully manual messages can be captured.
+      # packet as captured.
       seg = /IP!(dst=target)/TCP!(src=40000, dst=7, flags=SYN, seq_num=1000)/Raw()
       print("SYN of seq ${seg[TCP].seq_num} sent")
     }
@@ -338,12 +338,16 @@ error.
 
 ### Self-driven vs manual stacks
 
-Sent messages can be assigned to a variable if they are purely manual:
+Sent messages can be assigned to a variable:
 
 `p = /IP!(dst=target)/TCP!(src=1, dst=2, flags=SYN)/Raw()`
 
-This sends a packet and waits until that packet is recaptured on its way out.
-Its timestamp `p[Eth].ts` is therefore accurate.
+This sends a packet and waits until it is recaptured on its way out, failing 1s
+after no layer holds it any more (a self-driven `TCP` holds what waits for the
+connection or the windows, and what is not acked). Its timestamp `p[Eth].ts` is
+therefore accurate. Through self-driven layers, `p` is the first frame that
+carries some of the message: its first fragment, if `IP` fragments it, or its
+first segment, if `TCP` splits it, decoded as far as that frame goes.
 
 Self-driven and manual layers can be mixed with some restrictions: a manual
 layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
@@ -870,7 +874,7 @@ sees each segment of the connection.
 
 ### When did it leave?
 
-    /IP!(dst=192.0.2.10)/UDP(dst=7) {
+    /IP(dst=192.0.2.10)/UDP(dst=7) {
       p = Raw("ping")
       expect timeout=1s Raw { print("rtt: ${MATCH[Eth].ts - p[Eth].ts}") }
     }

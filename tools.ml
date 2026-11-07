@@ -56,7 +56,7 @@ let bytelength bs = (bitstring_length bs + 7) lsr 3
 
 (* [Bitstring.concat], but pieces of whole bytes, as those of packets are, are
  * copied once, straight into a result of the right size. Either way the result
- * is a fresh buffer of its own, at offset 0. *)
+ * is a fresh buffer of its own, at offset 0, with the marks of the pieces. *)
 (* TODO: add to bitstring itself *)
 let concat bss =
     let rec aligned_len n = function
@@ -65,13 +65,19 @@ let concat bss =
             if off land 7 = 0 && len land 7 = 0 then aligned_len (n + len) rest
             else -1 in
     let len = aligned_len 0 bss in
-    if len < 0 then Bitstring.concat bss else (
-        let b = Stdlib.Bytes.create (len lsr 3) in
-        ignore (List.fold_left (fun o (d, off, len) ->
-            let n = len lsr 3 in
-            Stdlib.Bytes.blit d (off lsr 3) b o n ;
-            o + n) 0 bss) ;
-        b, 0, len)
+    let res =
+        if len < 0 then Bitstring.concat bss else (
+            let b = Stdlib.Bytes.create (len lsr 3) in
+            ignore (List.fold_left (fun o (d, off, len) ->
+                let n = len lsr 3 in
+                Stdlib.Bytes.blit d (off lsr 3) b o n ;
+                o + n) 0 bss) ;
+            b, 0, len) in
+    if Mark.active () then
+        ignore (List.fold_left (fun at bs ->
+            Mark.carry ~src:bs ~dst:res ~at ;
+            at + bitstring_length bs) 0 bss) ;
+    res
 (*$Q concat
   Q.(list_small (triple string_small nat_small nat_small)) (fun l -> \
     let bss = List.map (fun (s, skip, cut) -> \
