@@ -617,7 +617,9 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
         (here ++ (name >>= fun s -> if is_constructor s then return s else fail) ++
          in_ '(' (optional ~def:None (expr >>: Option.some)) ')' >>:
             fun ((loc, c), e) -> { loc ; desc = Construct (c, e) }) |||
-        (here ++ (name ||| predefined_var) >>:
+        (* Followed by a parenthesis, a name is a call (to [unknown_function]
+         * if need be), never a variable in a condition with its branch: *)
+        (here ++ ((name ||| predefined_var) +- nay (item '(')) >>:
             fun (loc, n) -> { loc ; desc = Var n }) |||
         (here ++ constant >>: fun (loc, (n, l)) -> { loc ; desc = Constant (n, l) }) |||
         (* A layer that is not followed by what makes it a value is not an
@@ -1220,6 +1222,9 @@ let parse_patterns text =
   "line 1, column 18: Unknown function foo" (reads "expect UDP(foo(1)) {}")
   "line 1, column 15: Unknown function foo" (reads "/IP(dst=foo(1))/UDP(dst=1)/Raw(\"x\")")
   "line 1, column 16: Unknown function foo" (reads "print(\"${foo(2)}\")")
+  "line 1, column 10: Unknown function foo" (reads "if foo(1) { x := 1 }")
+  "line 2, column 12: Unknown function foo" \
+    (reads "catch {\n  if foo(1) { x := 1 } else { x := 2 }\n}")
   "line 1, column 10: A layer is selected by the layers below it, not by carets: /IP is the first IP, TimeExceeded/IP the one on top of TimeExceeded" (reads "x = a[^IP]")
   "line 1, column 6: _ is a reserved name" (reads "_ = 1")
   "line 1, column 14: _ is a reserved name" (reads "foreach var=_ [1] {}")
