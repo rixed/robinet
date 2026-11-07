@@ -752,7 +752,7 @@ let assign_op =
 
 let () = set_stmt (
     let body = sp -+ block in
-    (* Of first and on, separated by bars that may start or end lines: *)
+    (* Of expect and on, separated by bars that may start or end lines: *)
     let cases = repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp) (patterns ++ body) in
     let with_loc p = here ++ p >>: fun (stmt_loc, stmt) -> { stmt_loc ; stmt } in
     (* Any name, that is then refused if reserved, for a better message: *)
@@ -889,11 +889,8 @@ let () = set_stmt (
                     | Some d -> Wait d
                     | None -> reject "%s needs a duration" k in
          wait "wait" ||| wait "sleep") |||
-        (keyword "expect" -+ params ~pattern:true "expect" [ "timeout" ] +- sp ++ patterns ++
-         body >>: fun ((p, patterns), body) ->
-            Expect { timeout = p "timeout" ; patterns ; body }) |||
-        (keyword "first" -+ params ~pattern:true "first" [ "timeout" ] +- sp ++
-         cases >>: fun (p, cases) -> First { timeout = p "timeout" ; cases }) |||
+        (keyword "expect" -+ params ~pattern:true "expect" [ "timeout" ] +- sp ++
+         cases >>: fun (p, cases) -> Expect { timeout = p "timeout" ; cases }) |||
         (keyword "on" -+
          params ~pattern:true "on" [ "for" ; "linger" ; "timeout" ; "max" ] +- sp ++
          cases >>: fun (p, cases) ->
@@ -1056,10 +1053,10 @@ let parse_patterns text =
   "p = Raw(\"a\")\n" (reads "p = Raw(\"a\")")
   "p := ../../IP!/UDP(dst=7)/Raw(\"a\")\n" (reads "p:=../../IP!/UDP(dst=7)/Raw(\"a\")")
   "line 1, column 13: UDP is not a terminal layer, therefore /IP!/UDP is not a complete message that could be sent: it needs a terminal layer on top (Raw)." (reads "p = /IP!/UDP")
-  "first timeout=1s Raw(\"a\") {\n} | Raw(\"b\") {\n  x := 1\n}\n" \
-    (reads "first 1s Raw(\"a\") {} | Raw(\"b\") { x := 1 }")
-  "first Raw(data == \"a\") {\n} | ../ICMP {\n} | /IP(src == x)/UDP {\n}\nx := 1\n" \
-    (reads "first Raw(data = \"a\") {}\n| ../ICMP {} |\n/IP(src=x)/UDP {}\nx := 1")
+  "expect timeout=1s Raw(\"a\") {\n} | Raw(\"b\") {\n  x := 1\n}\n" \
+    (reads "expect 1s Raw(\"a\") {} | Raw(\"b\") { x := 1 }")
+  "expect Raw(data == \"a\") {\n} | ../ICMP {\n} | /IP(src == x)/UDP {\n}\nx := 1\n" \
+    (reads "expect Raw(data = \"a\") {}\n| ../ICMP {} |\n/IP(src=x)/UDP {}\nx := 1")
   "on for=1s Raw {\n} | ../ICMP | /IP/UDP {\n  x := 1\n}\n" \
     (reads "on for=1s Raw {} | (../ICMP | /IP/UDP) { x := 1 }")
   "expect Raw | ../ICMP | /IP/UDP {\n}\n" \
@@ -1143,7 +1140,7 @@ let parse_patterns text =
     "expect ../../TCP!(flags & RST) {}" ; "IP!(ttl=1)/TCP!(flags=2)/Raw(\"x\")" ; \
     "/IP/UDP/Raw(\"x\")\n{ y = !(a == b) }" ; \
     "if a & 1 {} elsif (b || c) && d { x := 1 }\nelse { if e {} }" ; \
-    "first timeout=2s * n Raw(\"a\") {} | ../TCP!(flags & (SYN | RST)) {}" ; \
+    "expect timeout=2s * n Raw(\"a\") {} | ../TCP!(flags & (SYN | RST)) {}" ; \
     "x = 1 + if a { { y = 1; y * 2 } } elsif b { 2 } else { 3 }" ; \
     "x = case var=l MATCH[0] Eth { l.src } | IP { if a { 1 } else { 2 } } | else { 0 }" ; \
     "x = case y IP { 1 }\nelse { 2 }" ; \
@@ -1189,8 +1186,8 @@ let parse_patterns text =
   "line 1, column 18: Expected '=' in statement" (reads "repeat count=3 x {\n}")
   "line 1, column 7: IP is not a terminal layer, therefore IP is not a complete message that could be sent: it needs a terminal layer on top (Raw)." (reads "x = IP")
   "line 1, column 7: ip is a reserved name" (reads "ip = 3")
-  "line 1, column 29: first is a keyword, it cannot name a variable" \
-    (reads "first = int(getenv(\"FIRST\"))")
+  "line 1, column 30: expect is a keyword, it cannot name a variable" \
+    (reads "expect = int(getenv(\"FIRST\"))")
   "line 1, column 10: wait is a keyword, it cannot name a variable" (reads "wait += 1")
   "line 2, column 8: on is a keyword, it cannot name a variable" (reads "x = 1\non := 2")
   "line 1, column 7: while is no keyword: loop with repeat, which a break ends: repeat { if !cond { break } ... }" \
@@ -1211,7 +1208,7 @@ let parse_patterns text =
   "line 1, column 11: Unknown layer Rae, do you mean Raw?" (reads "expect Rae(\"x\") {}")
   "line 1, column 22: Unknown layer Rae, do you mean Raw?" (reads "expect timeout=1s Rae {}")
   "line 1, column 7: Unknown layer Rae, do you mean Raw?" (reads "on Rae {}")
-  "line 1, column 10: Unknown layer Rae, do you mean Raw?" (reads "first Rae {} | Raw {}")
+  "line 1, column 11: Unknown layer Rae, do you mean Raw?" (reads "expect Rae {} | Raw {}")
   "line 1, column 8: Expected pattern in statement" (reads "expect 2s {}")
   "line 1, column 11: Unknown function pirnt, do you mean print?" (reads "pirnt(\"x\")")
   "line 1, column 7: Unknown function foo" (reads "foo(1)")
@@ -1232,8 +1229,8 @@ let parse_patterns text =
   "line 1, column 10: Expected '{' in block" (reads "case x IP")
   "line 2, column 15: MATCH is a reserved name" (reads "x = 1\ncase var=MATCH x IP {}")
   "line 2, column 18: Expected expression in statement" (reads "x = 1\ncase x else {} | IP {}")
-  "line 1, column 7: Expected pattern in statement" (reads "first {}")
-  "line 1, column 21: Expected pattern in statement" (reads "first Raw(\"a\") {} | {}")
+  "line 1, column 8: Expected pattern in statement" (reads "expect {}")
+  "line 1, column 22: Expected pattern in statement" (reads "expect Raw(\"a\") {} | {}")
   "line 1, column 14: Expected pattern in statement" (reads "expect Raw | {}")
   "line 1, column 15: Expected pattern in statement" (reads "expect (Raw | ) {}")
   "line 1, column 13: Expected ')' in pattern" (reads "expect (Raw {}")

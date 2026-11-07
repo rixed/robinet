@@ -238,9 +238,8 @@ and stmt_desc =
     | Catch of block
     | Break of { depth : expr option }
     | Wait of expr
-    | Expect of { timeout : expr option ; patterns : patterns ; body : block }
     (* The block of the first of those patterns to match, never empty: *)
-    | First of { timeout : expr option ; cases : (patterns * block) list }
+    | Expect of { timeout : expr option ; cases : (patterns * block) list }
     (* The block of the patterns of each match, never empty: *)
     | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
               max : expr option ; cases : (patterns * block) list }
@@ -323,7 +322,7 @@ let predefined = [ "MATCH" ; "LAST" ] @ self_declared
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
     [ "true" ; "false" ; "repeat" ; "foreach" ; "retry" ; "catch" ; "if" ;
-      "elsif" ; "else" ; "case" ; "break" ; "expect" ; "first" ; "on" ; "wait" ;
+      "elsif" ; "else" ; "case" ; "break" ; "expect" ; "on" ; "wait" ;
       "sleep" ; "in" ; "spawn" ]
 
 (** {2 Printing}
@@ -549,12 +548,8 @@ and print_stmt ~all indent oc s =
     | Wait dur ->
         if all then (String.print oc "wait" ; param "dur" (Some dur))
         else Printf.fprintf oc "wait %a" expr dur
-    | Expect { timeout ; patterns = p ; body } ->
+    | Expect { timeout ; cases } ->
         String.print oc "expect" ; param "timeout" timeout ;
-        Printf.fprintf oc " %a " pattern p ;
-        print_block ~all indent oc body
-    | First { timeout ; cases } ->
-        String.print oc "first" ; param "timeout" timeout ;
         print_cases cases
     | On { for_ ; linger ; timeout ; max ; cases } ->
         String.print oc "on" ; param "for" for_ ; param "linger" linger ;

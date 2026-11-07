@@ -45,8 +45,8 @@
    typer lets it only compute, and it is evaluated at once. An error
    reaching the program's block ends the program.
 
-   [expect] waits for its pattern, failing after its timeout if any, then
-   runs its block once. [first] does the same with the first of its patterns to match.
+   [expect] waits for the first of its patterns to match, failing after its
+   timeout if any, then runs the block of that pattern once.
    A packet sent, by any block, is then [LAST]. [on] lets its block go on, and runs the block of the pattern of every
    match until its timeout, its [max] or a [break] out of it; a block ends
    only once its statements are done and its [on]s are over. The packet
@@ -1000,8 +1000,8 @@ and exec t b env (s : T.stmt) k =
                 let d = Crafty_tree.busy_for stack in
                 if Interval.compare d Interval.zero <= 0 then k env else wait d in
             wait (Interval.psec 1))
-    | T.First { form ; timeout ; cases } ->
-        guard (fun () -> timeout_of eval form timeout) |>
+    | T.Expect { timeout ; cases } ->
+        guard (fun () -> timeout_of eval "expect" timeout) |>
         Option.may (fun timeout ->
             let armed = ref true and unregister = ref ignore in
             let disarm () = armed := false ; !unregister () in
@@ -2000,19 +2000,19 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "2ps: failed: line 3, column 7: Eth.ts is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
     (runs "/IP!(dst=10.0.0.2)/UDP(src=1000, dst=53)/Raw(\"a\")\nx = LAST\nprint(x[Eth].ts)")
 *)
-(* first runs the block of the first pattern to match, and no other: *)
+(* expect runs the block of the first pattern to match, and no other: *)
 (*$= runs & ~printer:identity
   "500ms: b\n500ms: after\n500ms: done" \
     (runs ~inject:[ 0.3, reply "nope" ; 0.5, reply "b" ; 0.6, reply "a" ; 0.7, reply "b" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  first Raw(\"a\") { print(\"a\") } | Raw(\"b\") { print(MATCH[Raw].data) }\n  print(\"after\") }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw(\"a\") { print(\"a\") } | Raw(\"b\") { print(MATCH[Raw].data) }\n  print(\"after\") }")
   "1s: failed: line 2, column 3: Nothing matched within 1s" \
     (runs ~inject:[ 1.5, reply "a" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  first timeout=1s Raw(\"a\") {} | Raw(\"b\") {} }")
-  "0s: failed: line 1, column 15: The timeout of first cannot be negative" \
-    (runs "first timeout=-1s Raw(\"x\") {} | Raw(\"y\") {}")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect timeout=1s Raw(\"a\") {} | Raw(\"b\") {} }")
+  "0s: failed: line 1, column 16: The timeout of expect cannot be negative" \
+    (runs "expect timeout=-1s Raw(\"x\") {} | Raw(\"y\") {}")
   "500ms: b\n500ms: done" \
     (runs ~inject:[ 0.3, reply "nope" ; 0.5, reply "b" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  first Raw(\"a\") | Raw(\"b\") { print(MATCH[Raw].data) } | Raw(\"c\") { print(\"c\") } }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw(\"a\") | Raw(\"b\") { print(MATCH[Raw].data) } | Raw(\"c\") { print(\"c\") } }")
 *)
 (* on runs the block of the pattern of each match, a packet matching once: *)
 (*$= runs & ~printer:identity
@@ -2296,7 +2296,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
         "/IP(dst=10.0.0.2)/UDP(dst=7) { repeat count=2 { Raw(\"echo ${I}\")\n    expect timeout=1s Raw { print(MATCH[Raw].data) } } }")
   "a 0.000s: unreachable\na 0.000s: done Eth#2" \
-    (with_host "/IP(dst=10.0.0.2)/UDP(dst=9) { Raw(\"anyone?\")\n  first timeout=1s Raw { print(\"answer\") } | ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
+    (with_host "/IP(dst=10.0.0.2)/UDP(dst=9) { Raw(\"anyone?\")\n  expect timeout=1s Raw { print(\"answer\") } | ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
   "a 0.000s: unreachable\na 0.000s: done Eth#2" \
     (with_host "/IP(dst=10.0.0.2)/UDP(dst=9) { Raw(\"anyone?\")\n  expect timeout=1s ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
 *)

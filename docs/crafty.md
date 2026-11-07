@@ -78,7 +78,7 @@ target = ip_addr(getenv("TARGET"))  # Read the envvar and cast to an IP, or fail
   # back, or the ICMP error a closed port answers with. "../" goes back to
   # /IP(dst=target), and ICMP goes on top of that IP stream instead of
   # UDP: these are the ICMP errors that it receives.
-  first timeout=1s Raw { print(MATCH[Raw].data) }
+  expect timeout=1s Raw { print(MATCH[Raw].data) }
     | ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print("closed") }
 }
 ```
@@ -281,7 +281,7 @@ with the constructors of all, which `case` tells apart:
 
 ```
 result = Pending   # of type (Failed string | Got int | Pending)
-first Raw("pong") { result := Got(length(MATCH)) }
+expect Raw("pong") { result := Got(length(MATCH)) }
   | ../ICMP { result := Failed("unreachable") }
 print(case result Got { "${I} layers" } else { "${result}" })
 ```
@@ -292,7 +292,7 @@ print(case result Got { "${I} layers" } else { "${result}" })
   Declaring a name twice in one block is an error; an inner block may shadow
   it.
 - `x := expr` assigns it, and `x += expr` (also `-=`, `*=`, etc.) updates it.
-- Predefined: `MATCH` (in the block of an `expect`, `first` or `on`), `LAST`
+- Predefined: `MATCH` (in the block of an `expect` or `on`), `LAST`
   (the last packet sent, once a block has sent one), `I`, the counter of
   a `repeat` or the item of a `foreach`, and `BUDGET` and `PORTS`.
 - `LAST` is the packet as given, not as it left: reading a field that only
@@ -438,10 +438,9 @@ what their engine computes (checksums).
 - `break n`: leaves the `n` (default 1) innermost `repeat`, `foreach`, `on` or
   `spawn`.
 - `wait d` (or `sleep d`): pauses.
-- `expect timeout=d PATTERN { ... }`: waits for one matching packet, then
-  runs the block; a timeout (none by default) is an error.
-- `first timeout=d PATTERN { ... } | PATTERN { ... }`: waits for the first
-  packet that matches any pattern.
+- `expect timeout=d PATTERN { ... } | PATTERN { ... }`: waits for the first
+  packet that matches any pattern, then runs its block; a timeout (none by
+  default) is an error.
 - `on for=d linger=d timeout=d max=n PATTERN { ... } | PATTERN { ... }`: the
   enclosing block goes on; each matching packet runs the block of its pattern,
   repeatedly (`max` times or unlimited) until its lifetime or that of the
@@ -992,7 +991,7 @@ port = int(arg(3, default="33434"))
       p = ../../IP!(ttl=hop + 1, id=probe)/UDP/Raw("probe")
       if probe == 1 { print("to ${target} from UDP port ${p[UDP].src} to ${port}") }
       catch {
-        first timeout=1s /IP/ICMP/TimeExceeded/IP(id == probe, dst == target)/UDP {
+        expect timeout=1s /IP/ICMP/TimeExceeded/IP(id == probe, dst == target)/UDP {
           rtts[MATCH[/IP].src] += MATCH[Eth].ts - p[Eth].ts
         } | /IP/ICMP/DestUnreachable/IP(id == probe, dst == target)/UDP {
           rtts[MATCH[/IP].src] += MATCH[Eth].ts - p[Eth].ts
@@ -1058,7 +1057,7 @@ ret_mtu = 0                                     # the way back fragmented at thi
       frag_max := 0
       Request(seq=size, payload=#00 * (size - 28))
       catch {
-        first timeout=1s Reply(seq == size) {
+        expect timeout=1s Reply(seq == size) {
           answered := true
           lo := size
           if frag_max > 0 {

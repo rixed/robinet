@@ -146,8 +146,7 @@ and stmt_desc =
     (* How many enclosing [repeat], [on] and [spawn] to leave: *)
     | Break of int
     | Wait of expr
-    (* An [expect] being a [first] of a single case; [form] is which: *)
-    | First of { form : string ; timeout : expr option ; cases : case list }
+    | Expect of { timeout : expr option ; cases : case list }
     (* Without [for_], it ends [linger] after the statements of its block: *)
     | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
               max : expr option ; cases : case list }
@@ -845,7 +844,7 @@ let lookup_var env loc name =
     | None ->
         if List.mem name env.poisoned then raise Already_told ;
         if name = "MATCH" then
-            error loc "MATCH is only defined in the blocks of expect, first and on" ;
+            error loc "MATCH is only defined in the blocks of expect and on" ;
         (* In a condition, a name can also be a field of the layer, and
          * those of the layers around it read otherwise: *)
         let fields, elsewhere =
@@ -2254,9 +2253,6 @@ and stmt errors env (s : A.stmt) =
                 block errors { env with vars = match_ :: env.vars ;
                                         loops = env.loops + loops } body in
             { patterns ; match_ ; body }) cs in
-    let first form timeout cs =
-        let timeout = timeout_of env form timeout in
-        env, Some (mk (First { form ; timeout ; cases = cases cs })) in
     let declare_typ env name typ =
         if List.mem name env.declared_here then
             error loc "%s is already declared in this block (:= changes it)" name ;
@@ -2273,7 +2269,7 @@ and stmt errors env (s : A.stmt) =
                 | A.Repeat _ -> Some "repeat" | A.Foreach _ -> Some "foreach"
                 | A.Retry _ -> Some "retry" | A.Catch _ -> Some "catch"
                 | A.Break _ -> Some "break" | A.Wait _ -> Some "wait"
-                | A.Expect _ -> Some "expect" | A.First _ -> Some "first"
+                | A.Expect _ -> Some "expect"
                 | A.On _ -> Some "on" | A.Spawn _ -> Some "spawn"
                 | A.Expr _ | A.Declare _ | A.Assign _ -> None in
             Option.may (fun what ->
@@ -2489,14 +2485,9 @@ and stmt errors env (s : A.stmt) =
             env, Some (mk (Break depth))
         | A.Wait dur ->
             env, Some (mk (Wait (expect "The duration of wait" (expr env dur) Type.Interval)))
-        | A.Expect { timeout ; patterns ; body } ->
-            first "expect" timeout [ patterns, body ]
-        | A.First { timeout ; cases = cs } ->
-            if List.length cs = 1 then
-                env.warnings :=
-                    (loc, "This first has a single case: it is an expect") ::
-                    !(env.warnings) ;
-            first "first" timeout cs
+        | A.Expect { timeout ; cases = cs } ->
+            let timeout = timeout_of env "expect" timeout in
+            env, Some (mk (Expect { timeout ; cases = cases cs }))
         | A.On { for_ ; linger ; timeout ; max ; cases = cs } ->
             if for_ <> None && linger <> None then
                 error loc "An on lasts either for its own duration (for), \
@@ -2526,7 +2517,7 @@ let rec declarations (b : block) =
         | Expr e -> expr_declarations e
         | Stack { body = b ; _ } | Retry { body = b ; _ } | Catch b
         | Spawn { body = b ; _ } -> declarations b
-        | First { cases ; _ } | On { cases ; _ } ->
+        | Expect { cases ; _ } | On { cases ; _ } ->
             List.concat_map (fun (c : case) -> declarations c.body) cases
         | Repeat { var ; body ; _ } -> var :: declarations body
         | _ -> []) b
@@ -2568,7 +2559,7 @@ let stmt_exprs s =
     | Assign { path ; value ; _ } -> List.map snd path @ [ value ]
     | Repeat { count ; items ; every ; for_ ; _ } -> opts [ count ; items ; every ; for_ ]
     | Retry { max ; _ } -> opts [ max ]
-    | First { timeout ; _ } -> opts [ timeout ]
+    | Expect { timeout ; _ } -> opts [ timeout ]
     | On { for_ ; linger ; timeout ; max ; _ } -> opts [ for_ ; linger ; timeout ; max ]
     | Spawn { for_ ; _ } -> opts [ for_ ]
     | Catch _ | Break _ -> []
@@ -2593,7 +2584,7 @@ let stmt_blocks s =
     | Stack { body ; _ } | Repeat { body ; _ } | Retry { body ; _ } | Catch body
     | Spawn { body ; _ } ->
         [ body ]
-    | First { cases ; _ } | On { cases ; _ } -> List.map (fun (c : case) -> c.body) cases
+    | Expect { cases ; _ } | On { cases ; _ } -> List.map (fun (c : case) -> c.body) cases
     | Send _ | Expr _ | Declare _ | Wait _ | Assign _ | Break _ -> []
 
 let expr_blocks e =
@@ -2720,7 +2711,7 @@ let exfiltrations (b : block) =
             | Declare (v, e) -> flows v e
             | Assign { var ; value ; _ } -> flows var value
             | Repeat { var ; items = Some e ; _ } -> flows var e
-            | First { cases ; _ } | On { cases ; _ } ->
+            | Expect { cases ; _ } | On { cases ; _ } ->
                 List.iter (fun (c : case) -> mark packets c.match_) cases
             | _ -> ()) b
     done ;
@@ -2908,9 +2899,7 @@ let check_patterns (ps : A.patterns) =
   "" (warns "/IP(dst=1.2.3.4)/UDP(dst=53) { expect /IP/ICMP {} }")
   "" (warns "/IP(dst=1.2.3.4)/TCP(dst=53) { expect /IP/UDP/DNS/Answer {} }")
   "" (warns "expect /IP/UDP/DNS/Answer {}")
-  "line 1, column 1: This first has a single case: it is an expect" \
-    (warns "first Raw | ../ICMP {}")
-  "" (warns "first Raw {} | ../ICMP {}")
+  "" (warns "expect Raw {} | ../ICMP {}")
   "line 1, column 41: This I is the number of the iteration of this repeat, which hides an outer I: name one of them with var=" \
     (warns "repeat count=2 { repeat count=2 { print(I) } }")
   "line 1, column 41: This I is the item of this foreach, which hides an outer I: name one of them with var=" \
@@ -2975,7 +2964,7 @@ let check_patterns (ps : A.patterns) =
   "I: int" \
     (types "repeat { on Raw(\"x\") { break 2 } }")
   "x: int, y: ip" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { first Raw(\"a\") { x = length(MATCH) } | ../ICMP { y = MATCH[IP].src } }")
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect Raw(\"a\") { x = length(MATCH) } | ../ICMP { y = MATCH[IP].src } }")
   "x: int, y: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Raw(\"a\")\n  { x = LAST[UDP].src }\n  Raw(\"b\")\n  expect ../UDP(IP.src == LAST[IP].dst) { y = LAST[IP].src } }")
   "t: float, x: float, p: {a: int}, y: int" \
@@ -3139,10 +3128,10 @@ let check_patterns (ps : A.patterns) =
     (types "x = 1 + { spawn {} ; 1 }")
   "line 1, column 4: The condition of if must be a bool, not a string" \
     (types "if \"x\" {}")
-  "line 1, column 15: The timeout of first must be an interval, not an int" \
-    (types "first timeout=1 Raw {}")
-  "line 2, column 5: MATCH is only defined in the blocks of expect, first and on" \
-    (types "first Raw {} | Raw { x = MATCH }\ny = MATCH")
+  "line 1, column 16: The timeout of expect must be an interval, not an int" \
+    (types "expect timeout=1 Raw {}")
+  "line 2, column 5: MATCH is only defined in the blocks of expect and on" \
+    (types "expect Raw {} | Raw { x = MATCH }\ny = MATCH")
   "line 1, column 11: The maximum of retry must be an int, not an interval" \
     (types "retry max=1s {}")
   "line 1, column 11: The items of foreach must be an array or a map, not an int" \
@@ -3247,7 +3236,7 @@ let check_patterns (ps : A.patterns) =
     (types "/UDP {}")
   "line 1, column 18: IP cannot be on top of IP\n  On top of IP can be: TCP, UDP, ICMP, Raw." \
     (types "/IP(dst=1.2.3.4)/IP {}")
-  "line 1, column 5: MATCH is only defined in the blocks of expect, first and on" \
+  "line 1, column 5: MATCH is only defined in the blocks of expect and on" \
     (types "x = MATCH")
   "line 1, column 5: IP.src is a field of a packet being matched, which only the condition of a pattern can read (as in \"expect Raw(IP.src == x)\").\n  Of a packet in a variable, it is \"p[IP].src\": \"LAST[IP].src\" for the last one sent, \"MATCH[IP].src\" for the one that matched." \
     (types "x = IP.src")
