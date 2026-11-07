@@ -590,9 +590,17 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
         string_lit expr |||
         in_ '(' self ')' |||
         (* The items of an array, or the keys and values of a map: *)
+        (* A key is no part of a longer literal with colons ([2001:db8::1]
+         * is no key 2001 and value db8::1): *)
+        let with_colons =
+            (ip6_addr -- end_of_word >>: ignore) ||| (cidr_lit >>: ignore) |||
+            (mac_lit >>: ignore) ||| (time_lit >>: ignore) in
+        let key =
+            quiet (nay (with_colons -- sp -- nay (item ':'))) -+ expr +- sp +-
+            item ':' +- nl_sp in
         (here ++ in_ '[' (list_of (
-            expr ++ optional ~def:None (
-                sp -- item ':' -- nl_sp -+ expr >>: Option.some))) ']' >>:
+            (key ++ expr >>: fun (k, v) -> k, Some v) |||
+            (expr >>: fun e -> e, None))) ']' >>:
             fun (loc, es) ->
                 let desc =
                     if List.for_all (Option.is_none % snd) es then
@@ -939,8 +947,50 @@ let message_of what =
                     else w in
             "Expected "^ w ^ in_ ctx)
 
-(* That text read with [p], or where and why it is not: *)
-let parse_with p text =
+(* Where two readings of a program differ first, and how: *)
+let ambiguity readings =
+    let rec diff = function
+        | s1 :: p1, s2 :: p2 ->
+            let print s = IO.to_string (Crafty_ast.print_stmt ~all:true 0) s in
+            let t1 = print s1 and t2 = print s2 in
+            if t1 = t2 then diff (p1, p2) else (
+                let l1 = String.split_on_char '\n' t1
+                and l2 = String.split_on_char '\n' t2 in
+                let rec first = function
+                    | a :: r1, b :: r2 -> if a = b then first (r1, r2) else a, b
+                    | a :: _, [] -> a, ""
+                    | [], b :: _ -> "", b
+                    | [], [] -> t1, t2 in
+                let a, b = first (l1, l2) in
+                { where = s1.stmt_loc ;
+                  message =
+                    Printf.sprintf "This statement can be read in %d ways, \
+                                    such as:\n  %s\nand:\n  %s"
+                        (List.length readings) (String.strip a) (String.strip b) })
+        | _ ->
+            { where = { line = 1 ; column = 1 } ;
+              message = Printf.sprintf "The program can be read in %d ways"
+                                       (List.length readings) } in
+    match readings with
+    | p1 :: p2 :: _ -> diff (p1, p2)
+    | _ -> diff ([], [])
+
+(*$= ambiguity & ~printer:(IO.to_string print_error)
+  { where = { line = 2 ; column = 1 } ; \
+    message = "This statement can be read in 2 ways, such as:\n  y = [a, b]\nand:\n  y = [a: b]" } \
+    (let open Crafty_ast in \
+     let reading m = \
+         let p = Result.get_ok (parse ("x = 1\ny = [a, b]")) in \
+         if m then List.map (fun s -> match s.stmt with \
+             | Declare (v, ({ desc = Array [ k ; e ] ; _ } as a)) -> \
+                 { s with stmt = Declare (v, { a with desc = Map [ k, e ] }) } \
+             | _ -> s) p else p in \
+     ambiguity [ reading false ; reading true ])
+*)
+
+(* That text read with [p], or where and why it is not ([ambiguous] telling
+ * why it can be read several ways): *)
+let parse_with ?ambiguous p text =
     match to_result (p [] None Parsers.no_error_correction
                        (stream_of_string text)) with
     | Ok (p, _) -> Ok p
@@ -949,15 +999,18 @@ let parse_with p text =
     | Error (NoSolution (Some e)) ->
         Error { where = loc_of e.where ; message = message_of e.what }
     | Error (Ambiguous rs) ->
-        Error { where = { line = 1 ; column = 1 } ;
-                message = Printf.sprintf "The program can be read in %d ways"
-                                         (List.length rs) }
+        Error (match ambiguous with
+              | Some f -> f (List.map (fun (r, _, _) -> r) rs)
+              | None ->
+                  { where = { line = 1 ; column = 1 } ;
+                    message = Printf.sprintf "The text can be read in %d ways"
+                                             (List.length rs) })
     | Error (Approximation _) ->
         (* Only with error correction, which is not asked for *)
         assert false
 
 (** Parse that text, or tell where and why it does not parse. *)
-let parse text = parse_with program text
+let parse text = parse_with ~ambiguous:ambiguity program text
 
 (** Parse that text as patterns, alternatives. *)
 let parse_patterns text =
@@ -997,6 +1050,8 @@ let parse_patterns text =
   "x = ((1m30s + 10ms) + 1µs500ns)\n" (reads "x = 1m30s + 10ms + 1.5µs")
   "x = [(1.2.3.4 == y), AA:BB:CC:DD:EE:FF]\n" \
     (reads "x = [1.2.3.4 == y, aa:bb:cc:dd:ee:ff]")
+  "x = [2001:db8::1, 2001:db8::/32]\ny = [2001: \"a\", ::1: \"lo\"]\n" \
+    (reads "x = [2001:db8::1, 2001:db8::/32]\ny = [2001: \"a\", ::1: \"lo\"]")
   "x = [#1e, #e7]\nx = #0f\n" (reads "x = #1ee7 # a comment\nx = #f")
   "x = \"a ${(x + 1)} b \\${not} A\\$\"\n" \
     (reads "x = \"a ${x + 1} b \\${not} \\x41$\"")
