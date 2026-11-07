@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 841f8798df11b2cea1f59bf532f90e6d) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 214fe3cb200c90b6d7ff8451e52d50c6) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -167,7 +167,8 @@ Options:
 -   `--check`: only compiles the program.
 -   `--max-duration`, `--max-packets`, `--max-bytes`, `--max-packets-per-secs`,
     `--max-bytes-per-secs`, `--max-syns`, `--max-syns-per-secs`: self-imposed
-    budget.
+    budget. When neither `--max-duration` nor `BUDGET.max_duration` is set, a
+    run stops after 10m.
 -   `--local-ip accept|deny:CIDR`, `--remote-ip accept|deny:CIDR` (repeatable),
     `--mac-spoofing BOOL`, `--exfiltration BOOL`: permissions, over the
     program's (see [Budget, ports and
@@ -391,9 +392,9 @@ what their engine computes (checksums).
 ### Special forms
 
 -   `repeat var=v count=n every=d for=d { ... }`: runs the block `count` times,
-    or while `for` (default 1m) has not elapsed. An iteration starts `every`
-    after the previous one started, or when it ends if later. `v` (default `I`)
-    counts from 0.
+    or while `for` (default unlimited) has not elapsed. An iteration starts
+    `every` after the previous one started, or when it ends if later. `v`
+    (default `I`) counts from 0.
 -   `foreach v every=d for=d ARRAY { ... }`: a `repeat` over the items of the
     array or map (as `{key: k, value: v}`), `v` (default `I`) being the item.
 -   `retry max=n { ... }`: runs the block again, up to `n` times (default 3),
@@ -815,6 +816,7 @@ The first record is an address only if the name has no CNAME.
 
 ### An HTTP server
 
+    BUDGET = {max_duration: 61m}
     on for=1h /IP/TCP(dst == 80)/HTTP/HttpRequest {
       /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP {
         if MATCH[HttpRequest].url == "/" { HttpAnswer(200)/Raw("hello\n") }
@@ -827,6 +829,7 @@ The first record is an address only if the name has no CNAME.
 ### A UDP echo server
 
     PERMISSIONS = {exfiltration: true}  # it sends back what it receives
+    BUDGET = {max_duration: 61m}
     on for=1h /IP/UDP(dst == 7)/Raw {
       /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Raw(MATCH[Raw].data)
     }

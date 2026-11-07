@@ -192,7 +192,8 @@ Options:
 - `--check`: only compiles the program.
 - `--max-duration`, `--max-packets`, `--max-bytes`, `--max-packets-per-secs`,
   `--max-bytes-per-secs`, `--max-syns`, `--max-syns-per-secs`: self-imposed
-  budget.
+  budget. When neither `--max-duration` nor `BUDGET.max_duration` is set, a
+  run stops after 10m.
 - `--local-ip accept|deny:CIDR`, `--remote-ip accept|deny:CIDR` (repeatable),
   `--mac-spoofing BOOL`, `--exfiltration BOOL`: permissions, over the
   program's (see [Budget, ports and permissions](#budget-ports-and-permissions)).
@@ -424,7 +425,7 @@ what their engine computes (checksums).
 ### Special forms
 
 - `repeat var=v count=n every=d for=d { ... }`: runs the block `count` times,
-  or while `for` (default 1m) has not elapsed. An iteration starts `every`
+  or while `for` (default unlimited) has not elapsed. An iteration starts `every`
   after the previous one started, or when it ends if later. `v` (default `I`)
   counts from 0.
 - `foreach v every=d for=d ARRAY { ... }`: a `repeat` over the items of the
@@ -875,6 +876,7 @@ The first record is an address only if the name has no CNAME.
 ### An HTTP server
 
 ```
+BUDGET = {max_duration: 61m}
 on for=1h /IP/TCP(dst == 80)/HTTP/HttpRequest {
   /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP {
     if MATCH[HttpRequest].url == "/" { HttpAnswer(200)/Raw("hello\n") }
@@ -891,6 +893,7 @@ on for=1h /IP/TCP(dst == 80)/HTTP/HttpRequest {
 
 ```
 PERMISSIONS = {exfiltration: true}  # it sends back what it receives
+BUDGET = {max_duration: 61m}
 on for=1h /IP/UDP(dst == 7)/Raw {
   /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Raw(MATCH[Raw].data)
 }

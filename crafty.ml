@@ -96,6 +96,9 @@ let () = Random.self_init ()
  * pipe; OCaml channels have no line buffering: *)
 let () = Out_channel.set_buffered Stdlib.stdout false
 
+(* Unless the command line or the program's BUDGET sets one: *)
+let default_max_duration = Clock.Interval.min 10.
+
 let () =
     let ifname = ref "" and own_ip = ref None and ports = ref []
     and fw = ref false and promisc = ref false and print_packets = ref false
@@ -188,7 +191,7 @@ let () =
             Arg.Symbol ([ "full" ; "half" ], fun s -> full_duplex := Some (s = "full")),
             " the duplex of the link, rather than the interface's (or else full)" ;
         "--mtu", some_int mtu, "N the MTU, rather than the interface's" ;
-        "--max-duration", some_interval max_duration, "DURATION run no longer" ;
+        "--max-duration", some_interval max_duration, "DURATION run no longer (default 10m)" ;
         "--max-packets", some_int max_packets, "N send no more packets" ;
         "--max-bytes", some_int max_volume, "N send no more bytes" ;
         "--max-packets-per-secs", some_float max_packet_rate,
@@ -302,7 +305,10 @@ let () =
                                     udp = ranges Host_config.Udp } ;
                 permissions = cli_permissions } in
         match Crafty_typing.combine ~program:program.limits ~cli with
-        | Ok l -> l
+        | Ok l when List.mem_assoc "max_duration" l.budget -> l
+        | Ok l ->
+            { l with budget = ("max_duration", Crafty_ast.Interval default_max_duration)
+                              :: l.budget }
         | Error e -> die "%s: %s its PORTS and --tcp/--udp." prog_name e in
     let ports =
         Option.map_default (fun (p : Crafty_typing.ports) ->

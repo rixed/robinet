@@ -31,8 +31,9 @@
 
    [repeat] runs its iterations one after the other, each starting [every]
    after the previous one started (or as soon as it ends, if later), until
-   it has run [count] of them or the next one would start once [for] has
-   elapsed since it started; it ends right after its last iteration. Over
+   it has run [count] of them or the next one would start once [for] (if
+   any) has elapsed since it started; it ends right after its last
+   iteration. Over
    [items], as from a [foreach], it runs one iteration per item.
    [retry max=N] runs its block again up to N times (3 by default) while it
    fails, the error of the last attempt going to the enclosing block.
@@ -1160,9 +1161,7 @@ and on t b env loc cases ~for_ ~linger ~timeout max =
 
 and repeat t b env var count items every for_ body body_loc k =
     let eval = eval t.output env in
-    let interval d = function
-        | Some e -> (match eval e with Interval i -> i | _ -> assert false)
-        | None -> d in
+    let interval e = match eval e with Interval i -> i | _ -> assert false in
     guard b (fun () ->
         let items =
             Option.map (fun e ->
@@ -1178,13 +1177,14 @@ and repeat t b env var count items every for_ body body_loc k =
         | None, Some (Int n) -> Some n
         | _ -> None),
         items,
-        interval Interval.zero every,
-        interval (Interval.min 1.) for_) |>
+        Option.map_default interval Interval.zero every,
+        Option.map interval for_) |>
     Option.may (fun (count, items, every, for_) ->
     let now () = Simulation.now t.power.sim in
     let start = now () in
-    let deadline = Clock.Time.add start for_ in
-    let too_late time = Clock.Time.compare time deadline >= 0 in
+    let deadline = Option.map (Clock.Time.add start) for_ in
+    let too_late time =
+        Option.map_default (fun d -> Clock.Time.compare time d >= 0) false deadline in
     (* The iteration being run, for a break to leave it: *)
     let current = ref None in
     (* Iterations that are due run in a loop rather than one from the end of
@@ -1570,8 +1570,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "repeat for=2500ms every=1s { print(I) }")
   "0s: 0\n1s: 1\n1s: done" \
     (runs "repeat for=2s every=1s { print(I) }")
-  "0s: 0\n25s: 1\n50s: 2\n50s: done" \
-    (runs "repeat every=25s { print(I) }")
+  "0s: 0\n25s: 1\n50s: 2\n1m15s: 3\n1m15s: done" \
+    (runs "repeat count=4 every=25s { print(I) }")
   "0s: 0\n1s: 1\n2s: done" \
     (runs "repeat for=1500ms { print(I)\n  repeat count=2 every=1s {} }")
   "0s: 0\n400ms: 1\n1s: 0\n1s400ms: 1\n2s: 0\n2s400ms: 1\n2s400ms: done" \
