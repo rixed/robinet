@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 214fe3cb200c90b6d7ff8451e52d50c6) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 e082808d2e7ca0d4fb494f0a8dd19e5d) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -392,9 +392,9 @@ what their engine computes (checksums).
 ### Special forms
 
 -   `repeat var=v count=n every=d for=d { ... }`: runs the block `count` times,
-    or while `for` (default unlimited) has not elapsed. An iteration starts
-    `every` after the previous one started, or when it ends if later. `v`
-    (default `I`) counts from 0.
+    or while `for` has not elapsed. An iteration starts `every` after the
+    previous one started, or when it ends if later. `v` (default `I`) counts
+    from 0.
 -   `foreach v every=d for=d ARRAY { ... }`: a `repeat` over the items of the
     array or map (as `{key: k, value: v}`), `v` (default `I`) being the item.
 -   `retry max=n { ... }`: runs the block again, up to `n` times (default 3),
