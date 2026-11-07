@@ -1135,6 +1135,14 @@ let mode_on loc base (l : L.layer) ~bang =
         ) (List.find_opt (fun ((b : L.layer), m) -> b.driven && m = L.Manual) base) ;
     mode
 
+(* The other mode of [l], when [modes] has it and not [mode]: *)
+let other_mode_hint (l : L.layer) mode modes =
+    let other = if mode = L.Driven then L.Manual else L.Driven in
+    if l.driven && List.mem other modes then
+        Printf.sprintf "\n  Do you mean \"%s%s\"?" (L.to_string l)
+            (if other = L.Manual then "!" else "")
+    else ""
+
 let implicit_root loc = { layer_loc = loc ; layer = L.root ; mode = L.Driven ; options = [] }
 
 (* How many of [layers] (bottom first), from the first, are the same as
@@ -1784,8 +1792,9 @@ and var env loc name =
         | Some i ->
             let f = ctx.cur.fields.(i) in
             if not (List.mem ctx.cur_mode f.read_in) then
-                error loc "%s cannot be read in a %s %s" f.name
-                    (L.string_of_mode ctx.cur_mode) (L.to_string ctx.cur) ;
+                error loc "%s cannot be read in a %s %s%s" f.name
+                    (L.string_of_mode ctx.cur_mode) (L.to_string ctx.cur)
+                    (other_mode_hint ctx.cur ctx.cur_mode f.read_in) ;
             mk f.typ (Packet_field { layer = Array.length ctx.below ; field = i })
         | None -> as_var ())
     | _ -> as_var ()
@@ -1833,8 +1842,9 @@ and layer_field env loc path absolute f =
                 ctx.prefixed := i :: !(ctx.prefixed) ;
             let fd = l.fields.(i) in
             if not (List.mem mode fd.read_in) then
-                error loc "%s cannot be read in a %s %s" fd.name
-                    (L.string_of_mode mode) (L.to_string l) ;
+                error loc "%s cannot be read in a %s %s%s" fd.name
+                    (L.string_of_mode mode) (L.to_string l)
+                    (other_mode_hint l mode fd.read_in) ;
             { loc ; typ = fd.typ ; desc = Packet_field { layer ; field = i } }
 
 (* The function, its arguments in the order of its parameters, and the type
@@ -2080,8 +2090,9 @@ and stack_layers ~hint env base over (layers : A.layer list) =
                             (if f.about = "" then "" else
                              " ("^ String.nreplace ~str:f.about ~sub:"%s" ~by:ln ^")")
                     else
-                        error a.arg_loc "%s cannot be set in a %s %s" f.name
-                            (L.string_of_mode mode) (L.to_string l)) ;
+                        error a.arg_loc "%s cannot be set in a %s %s%s" f.name
+                            (L.string_of_mode mode) (L.to_string l)
+                            (other_mode_hint l mode f.set_in)) ;
                 let e = expr ~expected:f.typ env a.value in
                 i, expect ("The value of "^ f.name) e f.typ
             ) al.options in
@@ -3235,9 +3246,9 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/TCP!(dst=80, len=3)/Raw(\"x\")")
   "line 1, column 7: Eth.ts is a virtual field (when the frame was captured): it cannot be set" \
     (types "/Eth!(ts=now(), dst=ff:ff:ff:ff:ff:ff, proto=1)/Raw(\"x\")")
-  "line 1, column 30: sack_ok cannot be set in a self-driven TCP" \
+  "line 1, column 30: sack_ok cannot be set in a self-driven TCP\n  Do you mean \"TCP!\"?" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80, sack_ok=true) {}")
-  "line 1, column 5: id cannot be set in a self-driven IP" \
+  "line 1, column 5: id cannot be set in a self-driven IP\n  Do you mean \"IP!\"?" \
     (types "/IP(id=3)/TCP(dst=80) {}")
   "line 1, column 19: TCP cannot be self-driven on top of a manual IP" \
     (types "/IP!(dst=1.2.3.4)/TCP(dst=80) {}")
@@ -3308,7 +3319,7 @@ let check_patterns (ps : A.patterns) =
     (types "expect /IP/UDP(/IP/_/_/IP.ttl == 1) {}")
   "line 1, column 46: The condition on TCP must be a bool, not a string" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP(\"x\") {} }")
-  "line 1, column 46: flags cannot be read in a self-driven TCP" \
+  "line 1, column 46: flags cannot be read in a self-driven TCP\n  Do you mean \"TCP!\"?" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP(flags & ACK) {} }")
   "line 1, column 5: Field a given twice" \
     (types "x = {a: 1, A: 2}")
@@ -3364,7 +3375,7 @@ let check_patterns (ps : A.patterns) =
   "" (types (Tools.file_content "tests/crafty/reset.crafty"))
   "line 3, column 33: Unknown variable n" \
     (types (Tools.file_content "tests/crafty/pong_counter.crafty"))
-  "line 4, column 19: flags cannot be read in a self-driven TCP" \
+  "line 4, column 19: flags cannot be read in a self-driven TCP\n  Do you mean \"TCP!\"?" \
     (types (Tools.file_content "tests/crafty/not_acked.crafty"))
   "line 4, column 54: =~ is not supported yet" \
     (types (Tools.file_content "tests/crafty/icmp_error.crafty"))
