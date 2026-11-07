@@ -282,7 +282,12 @@ exception Already_told
 
 let error loc fmt = Printf.ksprintf (fun s -> raise (Error (loc, s))) fmt
 
-let tname = Type.to_string
+(* Packets and their layers are named, rather than spelled out: *)
+let tname =
+    let layer = match packet_type with Type.Array t -> t | _ -> assert false in
+    Type.to_string ~name:(fun t ->
+        if t = packet_type then Some "packet" else
+        if t = layer then Some "layer" else None)
 
 (* The name of a type with its article: *)
 let a_type t =
@@ -1508,6 +1513,16 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                     (match List.unique (List.map L.to_string ls) with
                     | [ n ] -> error loc "No field %s in %s (only %s)%s" f n (tname r.typ) hint
                     | _ -> error loc "No field %s in %s%s" f (tname r.typ) hint)))
+        | Type.Variant cs as t ->
+            no_constructor env r ;
+            let have =
+                List.filter_map (function
+                    | c, Type.Record fs when List.exists (fun (n, _) -> same_name n f) fs ->
+                        Some c
+                    | _ -> None) cs in
+            if have = [] then error loc "No field %s in %s" f (a_type t) else
+            error loc "No field %s in %s: case tells its constructors apart, \
+                       and %s have one" f (a_type t) (String.concat ", " have)
         | t -> no_constructor env r ; error loc "No field %s in %s" f (a_type t))
     | A.Index (a, { desc = A.Layer { path ; absolute } ; _ }) ->
         let a = expr env a in
@@ -3161,6 +3176,10 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(IP.scr == 1.2.3.4) {} }")
   "line 2, column 5: Unknown variable anwsers, do you mean answers?" \
     (types "answers = 1\nx = anwsers")
+  "line 1, column 21: No field src in a layer: case tells its constructors apart, and Eth, IP, IP6, TCP, UDP have one" \
+    (types "on for=1s /IP { x = MATCH[0].src }")
+  "line 1, column 21: Cannot apply + to MATCH (a packet) and an int" \
+    (types "on for=1s /IP { x = MATCH + 1 }")
   "line 1, column 39: No field unused in TimeExceeded (only {code: int, length: int})\n  The packet it quotes is on top of it: MATCH[TimeExceeded/IP].id is the id of the quoted IP, MATCH[/IP] the IP of the error." \
     (types "on for=1s /IP/ICMP/TimeExceeded { x = MATCH[TimeExceeded].unused }")
   "line 1, column 36: No field cod in TimeExceeded (only {code: int, length: int}), do you mean code?" \

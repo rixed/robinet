@@ -88,7 +88,13 @@ struct
 
     let bytes = Array Byte
 
-    let rec print oc = function
+    (* [name] gives a short name to some types, printed in their stead: *)
+    let rec print ?(name=fun _ -> None) oc t =
+        let print = print ~name in
+        match name t with
+        | Some n -> String.print oc n
+        | None ->
+        match t with
         | Void -> String.print oc "void"
         | Bool -> String.print oc "bool"
         | Byte -> String.print oc "byte"
@@ -111,7 +117,7 @@ struct
                 else Printf.fprintf oc "%s %a" n print t) oc cs
         | Pattern -> String.print oc "pattern"
 
-    let to_string t = IO.to_string print t
+    let to_string ?name t = IO.to_string (print ?name) t
 end
 
 type unop = Not | Neg
