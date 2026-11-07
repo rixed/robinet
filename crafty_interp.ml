@@ -2377,6 +2377,12 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
          "expect timeout=1s /IP/UDP(dst == 33434)/Raw {\n  /IP(dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, ttl=1)/UDP(src=MATCH[UDP].src, dst=MATCH[UDP].dst)/Raw(MATCH[Raw].data)\n  /IP(dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, proto=6, tot_len=60)/Raw(#0fa0005000000007) }")
   "a 0.000s: 10.0.0.2\na 0.000s: done Eth#2" \
     (with_host "/IP(dst=10.0.0.2)/UDP(src=4000, dst=9)/Raw(\"anyone?\")\nexpect timeout=1s /IP/ICMP/DestUnreachable/IP/UDP { print(\"${MATCH[IP].dst}\") }")
+  "a 0.000s: from 10.0.0.9\na 0.000s: done Eth#1\nb 0.000s: done Eth#1" \
+    (two ~arp:true "/IP(dst=10.0.0.2)/UDP(src=4000, dst=33434) { Raw(\"probe\")\n  expect timeout=1s ../ICMP/TimeExceeded { print(\"from ${MATCH[/IP].src}\") } }" \
+         "expect timeout=1s /IP/UDP(dst == 33434)/Raw {\n  /IP!(src=10.0.0.9, dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, ttl=1)/UDP(src=MATCH[UDP].src, dst=MATCH[UDP].dst)/Raw(MATCH[Raw].data) }")
+  "a 0.000s: from 2001:db8::9\na 0.000s: done Eth#2\nb 0.000s: done Eth#2" \
+    (two ~arp:true ~v6:true "/IP6(dst=2001:db8::2)/ICMP6/Echo(id=7) { Request(seq=1)\n  expect timeout=1s ../TimeExceeded { print(\"from ${MATCH[/IP6].src}\") } }" \
+         "expect timeout=1s /IP6/ICMP6/Echo/Request {\n  /IP6!(src=2001:db8::9, dst=MATCH[IP6].src)/ICMP6/TimeExceeded/IP6(src=MATCH[IP6].src, dst=MATCH[IP6].dst, proto=58, hop_limit=1)/Raw(#8000000000070001) }")
 *)
 (* DNS: a name resolved by a host's server then pinged; and between two
  * programs, the server's query also seen as bytes: *)

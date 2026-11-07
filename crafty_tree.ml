@@ -512,11 +512,31 @@ let register cases ~hold ~failed =
 let incoming_key (l : L.layer) (u : L.unpacked) =
     List.map (fun i -> i, List.assoc l.fields.(i).peer u.values) (L.key_fields l)
 
-(** Whether a received layer, of that of [n], is of the stream of [n]: of
- * the root, any is. *)
+(* Of an ICMP error carried by [u], of layer [l], the key of the node of [l]
+ * that sent the packet it quotes (a quote of [l] a few layers up): *)
+let quoted_key (l : L.layer) (u : L.unpacked) =
+    let rec up depth (below : L.layer) (u : L.unpacked) =
+        if depth = 0 then None else
+        List.find_map_opt (fun (ul : L.layer) ->
+            Option.bind (ul.unpack u.up_hints u.payload) (fun uu ->
+                if ul.quoted && ul.name = l.name then
+                    List.fold_right (fun i key ->
+                        Option.bind key (fun key ->
+                            Option.map (fun v -> (i, v) :: key)
+                                (List.assoc_opt l.fields.(i).name uu.values))
+                    ) (L.key_fields l) (Some [])
+                else up (depth - 1) ul uu)) (L.on_top below u.upper) in
+    (* Such as IP, ICMP, TimeExceeded, then the quoted IP: *)
+    up 3 l u
+
+(** Whether a received layer, of that of [n], is of the stream of [n], or an
+ * ICMP error about it: of the root, any is. *)
 let of_stream n (u : L.unpacked) =
+    let has key =
+        List.for_all (fun (i, v) -> List.exists (fun (j, w) -> i = j && equal v w) key) n.key in
     List.for_all (fun (i, v) ->
-        equal v (List.assoc n.layer.fields.(i).peer u.values)) n.key
+        equal v (List.assoc n.layer.fields.(i).peer u.values)) n.key ||
+    Option.map_default has false (quoted_key n.layer u)
 
 type event = Match of packet | Condition_error of A.location * string
 
@@ -579,7 +599,12 @@ and up_to w node seen packet pending (ul : L.layer) =
     | None -> ()
     | Some uu ->
         let key = incoming_key ul uu in
-        match Option.bind streams (fun s -> Siblings.find_option s key) with
+        (* An ICMP error goes to the stream it is about, whoever sends it: *)
+        let find s =
+            match Siblings.find_option s key with
+            | None -> Option.bind (quoted_key ul uu) (Siblings.find_option s)
+            | c -> c in
+        match Option.bind streams find with
         | Some c -> enter w c seen packet uu pending
         | None ->
             let above = (ul, uu) :: packet in

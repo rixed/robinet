@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 ae91719730b97a39f51982bab463ea83) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 b2823d94c09c10a6d0629ca8694bfd93) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -63,7 +63,7 @@ The language is statically typed.
       # Waits for the first packet that matches either pattern: a datagram
       # back, or the ICMP error a closed port answers with. "../" goes back to
       # /IP(dst=target), and ICMP goes on top of that IP stream instead of
-      # UDP: these are the ICMP errors that it receives.
+      # UDP: these are the ICMP errors about it, whoever sends them (a router).
       expect timeout=1s Raw { print(MATCH[Raw].data) }
         | ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print("closed") }
     }
@@ -75,8 +75,8 @@ With `dst=8`, where nothing listens, it prints `closed`.
 Each leading `../` goes one layer down the current stack: here, `../` is
 `/IP(dst=target)` and `../../` is `/Eth`. Relative stacks reuse opened streams,
 whereas absolute stacks create new streams: `/IP/ICMP/DestUnreachable` matches
-any Dest-Unreachable packet whereas `../ICMP` matches only those from the same
-`IP/UDP` stream.
+any Dest-Unreachable packet whereas `../ICMP` matches only those about the
+packets of `/IP(dst=target)`.
 
 ### Overlaying
 

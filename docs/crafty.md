@@ -77,7 +77,7 @@ target = ip_addr(getenv("TARGET"))  # Read the envvar and cast to an IP, or fail
   # Waits for the first packet that matches either pattern: a datagram
   # back, or the ICMP error a closed port answers with. "../" goes back to
   # /IP(dst=target), and ICMP goes on top of that IP stream instead of
-  # UDP: these are the ICMP errors that it receives.
+  # UDP: these are the ICMP errors about it, whoever sends them (a router).
   expect timeout=1s Raw { print(MATCH[Raw].data) }
     | ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print("closed") }
 }
@@ -92,8 +92,8 @@ With `dst=8`, where nothing listens, it prints `closed`.
 Each leading `../` goes one layer down the current stack: here, `../` is
 `/IP(dst=target)` and `../../` is `/Eth`.  Relative stacks reuse opened
 streams, whereas absolute stacks create new streams: `/IP/ICMP/DestUnreachable`
-matches any Dest-Unreachable packet whereas `../ICMP` matches only those from
-the same `IP/UDP` stream.
+matches any Dest-Unreachable packet whereas `../ICMP` matches only those about
+the packets of `/IP(dst=target)`.
 
 ### Overlaying
 
