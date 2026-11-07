@@ -748,15 +748,17 @@ type t =
       tree : Crafty_tree.node ;
       (* What was sent and is waited for on its way out, by order of
        * sending, and who waits for it: *)
-      awaited : (Crafty_tree.emitted * (Crafty_tree.packet -> unit)) list ref }
+      awaited : (Crafty_tree.emitted * (Bitstring.bitstring -> unit)) list ref }
 
 (* How long a packet sent may take to be seen leaving: *)
 let capture_timeout = Interval.sec 1.
 
 (* Calls [k] with the packet that the interface emits as [e], once it is
- * captured on its way out, or else fails [b] at [loc]: *)
-let await t b loc e k =
-    let rec w = e, (fun p -> if b.live then (disarm () ; k p))
+ * captured on its way out, decoded [along] the layers it was sent through,
+ * or else fails [b] at [loc]: *)
+let await t b loc e along k =
+    let rec w = e, (fun frame ->
+        if b.live then (disarm () ; k (Crafty_tree.captured ~along t.tree frame)))
     and disarm () = t.awaited := List.filter ((!=) w) !(t.awaited) in
     t.awaited := !(t.awaited) @ [ w ] ;
     b.cleanups <- disarm :: b.cleanups ;
@@ -770,7 +772,7 @@ let await t b loc e k =
 (* Tells the first that waits for [frame], captured on its way out: *)
 let emitted t frame =
     match List.find_opt (fun (e, _) -> Crafty_tree.is_emitted e frame) !(t.awaited) with
-    | Some (_, k) -> k (Crafty_tree.captured t.tree frame)
+    | Some (_, k) -> k frame
     | None -> ()
 
 (* The stack of [env] with these layers on top of its [depth] first ones,
@@ -988,7 +990,8 @@ and exec t b env (s : T.stmt) k =
                 else bind env v x in
             match capture, emitted with
             | Some v, Some e ->
-                await t b s.stmt_loc e (fun p -> k (set env v (packet_value p)))
+                await t b s.stmt_loc e (Crafty_tree.along stack)
+                      (fun p -> k (set env v (packet_value p)))
             | Some _, None -> assert false (* the typer said so *)
             | None, _ ->
             let rec wait d =
@@ -1936,6 +1939,15 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
            print(\"${p[UDP].dst} ${p[Raw].data}\") }")
   "1s: failed: line 1, column 44: The packet sent was not seen leaving within 1s" \
     (runs "/IP!(dst=10.0.0.2)/UDP(src=1000, dst=53) { p = Raw(\"ping\") }")
+*)
+(* A packet captured is decoded as the stack it was sent down, beyond what its
+ * bytes tell: *)
+(*$= runs & ~printer:identity
+  "3ps: 53 28 example.com\n3ps: done" \
+    (runs ~sent:true \
+        "/IP!(dst=10.0.0.2)/UDP(src=1000, dst=53)/DNS {\n\
+           q = Query(\"example.com\", type=TYPE_AAAA)\n\
+           print(\"${q[UDP].dst} ${q[Query].type} ${q[Query].name}\") }")
 *)
 (* A frame's [ts] is when it came in, which conditions can read: *)
 (*$= runs & ~printer:identity

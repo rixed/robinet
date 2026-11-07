@@ -669,12 +669,25 @@ let decode frame : packet =
     | None -> []
     | Some u -> complete [ L.root, u ]
 
-(** A frame the interface sent, as captured on its way out, decoded as
- * [decode] does, with its [ts]. *)
-let captured root frame : packet =
+(** A frame the interface sent, as captured on its way out, with its [ts]:
+ * decoded [along] the layers of the stack it was sent through, as far as
+ * they decode it, and then as [decode] does. *)
+let captured ?(along=[]) root frame : packet =
+    let rec loop packet = function
+        | [] -> complete packet
+        | (l : L.layer) :: rest ->
+            let _, (u : L.unpacked) = List.hd packet in
+            (match l.unpack u.up_hints u.payload with
+            | Some uu -> loop ((l, uu) :: packet) rest
+            | None -> complete packet) in
     match unpack_root root frame with
     | None -> []
-    | Some u -> complete [ L.root, u ]
+    | Some u -> loop [ L.root, u ] along
+
+(** The layers above the root that a packet sent down [stack] goes through,
+ * the bottom first: *)
+let along stack =
+    List.rev_map (fun e -> e.node.layer) stack |> List.tl
 
 (** Whether [frame], with its [ts] as {!receive} tells it, has the layers of
  * a pattern registered on [root], each of them decoded as the one below
