@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 65127e64c1c271b65385c416f4ae6215) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 dfd342c3bf7ed9244e828dd6edc19a6c) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -189,9 +189,9 @@ Options:
 -   `--stats`: prints the stats of each stream (see `stats()`) as it ends.
 -   `--check`: only compiles the program.
 -   `--max-duration`, `--max-packets`, `--max-bytes`, `--max-packets-per-secs`,
-    `--max-bytes-per-secs`, `--max-syns`, `--max-syns-per-secs`: self-imposed
-    budget. When neither `--max-duration` nor `BUDGET.max_duration` is set, a
-    run stops after 10m.
+    `--max-bytes-per-secs`, `--max-syns`, `--max-syns-per-secs`, `--max-ram`:
+    self-imposed budget. When neither `--max-duration` nor `BUDGET.max_duration`
+    is set, a run stops after 10m.
 -   `--local-ip accept|deny:CIDR`, `--remote-ip accept|deny:CIDR` (repeatable),
     `--mac-spoofing BOOL`, `--exfiltration BOOL`, `--promiscuous BOOL`:
     permissions, over the program's (see [Budget, ports and
@@ -314,6 +314,9 @@ and `OWN_IPS` only:
                    remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
 
 -   `BUDGET`'s fields are the budget options of crafty, named alike.
+-   `max_ram`, in bytes, stops a program that leaks: its heap is checked now and
+    then, so expect overshoot. Also stops it before making an array, bytes (8
+    bytes per item) or a string that would outgrow it.
 -   `PORTS` has ranges `[first, last]` by protocol; a protocol left out gets no
     port.
 -   crafty runs with what both the program and the command line allow.

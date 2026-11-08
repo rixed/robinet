@@ -112,6 +112,7 @@ let () =
     and max_duration = ref None and max_packets = ref None
     and max_volume = ref None and max_packet_rate = ref None
     and max_throughput = ref None and max_syns = ref None and max_syn_rate = ref None
+    and max_ram = ref None
     and speed = ref None and full_duplex = ref None and mtu = ref None
     and local_ips = ref None and remote_ips = ref None
     and mac_spoofing = ref None and exfiltration = ref None and promiscuous = ref None in
@@ -204,6 +205,8 @@ let () =
         "--max-syns", some_int max_syns, "N send no more TCP SYNs (without ACK)" ;
         "--max-syns-per-secs", some_float max_syn_rate,
             "N send no more TCP SYNs (without ACK) per second" ;
+        "--max-ram", some_int max_ram,
+            "N stop once the heap, or an array, bytes or string about to be made, outgrows that many bytes" ;
         "--local-ip", rule local_ips,
             "VERDICT:CIDR accept or deny these local addresses, before the program's rules (repeatable)" ;
         "--remote-ip", rule remote_ips,
@@ -299,7 +302,8 @@ let () =
                 Option.map (fun x -> "max_packets_per_secs", Float x) !max_packet_rate ;
                 Option.map (fun x -> "max_bytes_per_secs", Float x) !max_throughput ;
                 Option.map (fun n -> "max_syns", Int n) !max_syns ;
-                Option.map (fun x -> "max_syns_per_secs", Float x) !max_syn_rate ] in
+                Option.map (fun x -> "max_syns_per_secs", Float x) !max_syn_rate ;
+                Option.map (fun n -> "max_ram", Int n) !max_ram ] in
         let ranges proto =
             List.filter_map (fun (r : Host_config.port_range) ->
                 if r.proto = proto then Some (r.lo, r.hi) else None) !ports |>
@@ -612,6 +616,13 @@ let () =
                 else check (!pkts_out + !pkts_in) (secs () +. linger))
             program in
     handle := Some h ;
+    (* For a program that waits, which the interpreter does not look at. From a
+     * thread rather than a recurring event, as an event pending slows down
+     * every statement: *)
+    if List.mem_assoc "max_ram" limits.budget then
+        ignore (Thread.create (fun () ->
+            while not (h.over_ram ()) do Thread.delay 1. done ;
+            Simulation.asap sim.root.power h.stop ()) ()) ;
     let policer =
         Policer.make ~parent:sim.root
             ?max_duration:(match List.assoc_opt "max_duration" limits.budget with
@@ -748,6 +759,7 @@ let () =
         | Crafty_interp.Done, _ -> "OK", 0
         | Failed e, _ -> "failed: "^ IO.to_string Crafty_interp.print_error e, 1
         | Stopped, Some l -> "stopped: "^ Policer.string_of_limit l, 3
+        | Stopped, None when h.over_ram () -> "stopped: max-ram", 3
         | Stopped, None -> "stopped", 3
         | Running, _ -> "interrupted", 130 in
     (* What was seen, with the counters that are not 0: *)

@@ -29,6 +29,9 @@ open Batteries
 (** Where something starts in the source, counting from 1. *)
 type location = { line : int ; column : int }
 
+(* Of what no part of the program can be blamed for: *)
+let nowhere = { line = 0 ; column = 0 }
+
 let print_location oc loc =
     Printf.fprintf oc "line %d, column %d" loc.line loc.column
 

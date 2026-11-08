@@ -306,10 +306,10 @@ let hostname (ip : Ip.Addr.t) =
         Hashtbl.add hostnames ip name ;
         name
 
-let rec call loc (b : T.builtin) args ~print ~print_err ~now =
+let rec call loc (b : T.builtin) args ~print ~print_err ~now ~check_words =
     let number = function Bool _ | Int _ | Float _ -> true | _ -> false in
     let reparse what ok s =
-        call loc b [ parsed loc what ok s ] ~print ~print_err ~now in
+        call loc b [ parsed loc what ok s ] ~print ~print_err ~now ~check_words in
     match b, args with
     | T.To_int, [ String s ] -> reparse "an int" number s
     | T.To_float, [ String s ] -> reparse "a float" number s
@@ -330,6 +330,7 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
     | T.Rand, [ max ] -> rand loc max
     | T.Randbytes, [ Int len ] ->
         if len < 0 then error loc "randbytes needs a length, not %d" len ;
+        check_words loc len ;
         Array (Array.init len (fun _ -> Byte (Random.int 256)))
     | T.Exp, [ x ] -> Float (exp (float_of x))
     | T.Ln, [ x ] -> Float (log (float_of x))
@@ -396,11 +397,18 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
         Array (Array.of_list (List.map (fun p -> String p) (String.split_on_string ~by s)))
     | T.Make_array, [ init ; Int len ] ->
         if len < 0 then error loc "array needs a length, not %d" len ;
+        check_words loc len ;
         Array (Array.make len init)
     | T.Length, [ Array a ] -> Int (Array.length a)
-    | T.Concat, [ Array a ; Array b ] -> Array (Array.append a b)
-    | T.Append, [ Array a ; x ] -> Array (Array.append a [| x |])
-    | T.Prepend, [ x ; Array a ] -> Array (Array.append [| x |] a)
+    | T.Concat, [ Array a ; Array b ] ->
+        check_words loc (Array.length a + Array.length b) ;
+        Array (Array.append a b)
+    | T.Append, [ Array a ; x ] ->
+        check_words loc (Array.length a + 1) ;
+        Array (Array.append a [| x |])
+    | T.Prepend, [ x ; Array a ] ->
+        check_words loc (Array.length a + 1) ;
+        Array (Array.append [| x |] a)
     | T.Length, [ Map (m, _) ] -> Int (Map.PMap.cardinal m)
     | T.Make_map, [ _ ; default ] -> empty_map (Some default)
     | T.Has, [ Map (m, _) ; k ] -> Bool (Map.PMap.mem k m)
@@ -468,7 +476,7 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
         Void
     | _ -> assert false
 
-let arith loc op a b =
+let arith ~check_words loc op a b =
     match op, a, b with
     | A.Add, Int a, Int b -> Int (a + b)
     | A.Sub, Int a, Int b -> Int (a - b)
@@ -488,6 +496,7 @@ let arith loc op a b =
     | A.Mul, Array a, Int n | A.Mul, Int n, Array a ->
         if n < 0 then error loc "Cannot repeat %d times" n ;
         let len = Array.length a in
+        check_words loc (if len = 0 || n <= max_int / len then len * n else max_int) ;
         Array (Array.init (len * n) (fun i -> a.(i mod len)))
     | A.Div, Interval _, Float 0. -> error loc "Division by zero"
     | A.Div, Interval a, Float b -> Interval (Interval.div a b)
@@ -528,7 +537,11 @@ type output =
       (* What [format()] writes: *)
       format : format ;
       (* Given what [report] reports: its name, the type and value, and when: *)
-      report : string -> A.Type.t -> value -> Clock.Wall.t -> unit }
+      report : string -> A.Type.t -> value -> Clock.Wall.t -> unit ;
+      (* Told how many words an array, bytes or string about to be made takes,
+       * which is one per item but for a string, it may stop the program and
+       * raise: *)
+      check_words : A.location -> int -> unit }
 
 (* The stack of [env] with these layers on top of its [depth] first ones,
  * given to [hold] (but for the root, which stays, and for a terminal layer's,
@@ -586,9 +599,13 @@ let rec eval output (env : env) (e : T.expr) =
             m.cached <- Some v ;
             v)
     | T.String parts ->
-        String (String.concat "" (List.map (function
-            | T.Text s -> s
-            | T.Interp e -> to_string e.typ (eval e)) parts))
+        let parts =
+            List.map (function
+                | T.Text s -> s
+                | T.Interp e -> to_string e.typ (eval e)) parts in
+        output.check_words e.loc
+            (List.fold_left (fun n s -> n + String.length s) 0 parts / (Sys.word_size / 8)) ;
+        String (String.concat "" parts)
     | T.Var v when v.id = T.last_var.id ->
         (match Lazy.force !(env.last) with
         | Void -> error e.loc "LAST is not set: no packet was sent yet"
@@ -669,9 +686,11 @@ let rec eval output (env : env) (e : T.expr) =
     | T.Call ((T.Print | T.Print_err) as b, [ x ]) when x.typ <> A.Type.String ->
         call e.loc b [ String (to_string x.typ (eval x)) ]
              ~print:output.print ~print_err:output.print_err ~now:output.now
+             ~check_words:output.check_words
     | T.Call (b, args) ->
         call e.loc b (List.map eval args)
              ~print:output.print ~print_err:output.print_err ~now:output.now
+             ~check_words:output.check_words
     | T.Encode { depth ; overlay ; layers } ->
         let held = ref [] in
         let written =
@@ -709,7 +728,7 @@ let rec eval output (env : env) (e : T.expr) =
             (match a, b with
             | Ip ip, Cidr c -> Bool (Ip.Cidr.mem c ip)
             | _ -> assert false)
-        | op -> arith e.loc op a b)
+        | op -> arith ~check_words:output.check_words e.loc op a b)
     | T.Record es -> Record (Array.of_list (List.map eval es))
     | T.Array es -> Array (Array.of_list (List.map eval es))
     | T.Map kvs ->
@@ -718,7 +737,12 @@ let rec eval output (env : env) (e : T.expr) =
             Map (List.fold_left (fun m (k, v) ->
                 let k = eval k in Map.PMap.add k (eval v) m) m kvs, d)
         | _ -> assert false)
-    | T.Convert a -> convert e.loc a.typ e.typ (eval a)
+    | T.Convert a ->
+        let v = eval a in
+        (match v, e.typ with
+        | String s, A.Type.Array A.Type.Byte -> output.check_words e.loc (String.length s)
+        | _ -> ()) ;
+        convert e.loc a.typ e.typ v
     | T.Construct (c, a) -> Variant (c, Option.map_default eval Void a)
     | T.Block b -> eval_block output env b
     | T.If { cond ; then_ ; else_ } ->
@@ -825,7 +849,10 @@ type t =
       tree : Crafty_tree.node ;
       (* What was sent and is waited for on its way out, by order of
        * sending, and who waits for it: *)
-      awaited : (Crafty_tree.emitted * (Bitstring.bitstring -> unit)) list ref }
+      awaited : (Crafty_tree.emitted * (Bitstring.bitstring -> unit)) list ref ;
+      (* Run before each statement, which it may stop the program from running;
+       * so must cost next to nothing: *)
+      checkpoint : unit -> unit }
 
 (* How long a packet sent may take to be seen leaving, once no node of its
  * stack holds it: *)
@@ -951,12 +978,15 @@ let rec run_block ?(enter=fun _ env -> Some env) t parent env (stmts : T.block)
         b.stmts_done <- [] ;
         List.iter (fun f -> f ()) stmts_done ;
         release b in
-    let rec loop env = function
-        | [] -> finish Void
-        | [ { T.stmt = T.Expr e ; _ } ] ->
-            exec_value t b env e (fun v -> if b.live then finish v)
-        | s :: rest ->
-            exec t b env s (fun env -> if b.live then loop env rest) in
+    let rec loop env stmts =
+        t.checkpoint () ;
+        if b.live then
+            match stmts with
+            | [] -> finish Void
+            | [ { T.stmt = T.Expr e ; _ } ] ->
+                exec_value t b env e (fun v -> if b.live then finish v)
+            | s :: rest ->
+                exec t b env s (fun env -> if b.live then loop env rest) in
     Option.may (fun env -> loop env stmts) (enter b env) ;
     b
 
@@ -1329,7 +1359,10 @@ type handle =
       (* The streams still open: *)
       open_streams : unit -> Crafty_tree.node list ;
       (* Whether a layer of that name used that local port: *)
-      uses_port : string -> int -> bool }
+      uses_port : string -> int -> bool ;
+      (* Whether [BUDGET.max_ram] was outgrown, by the heap as of now or by an
+       * array too large to make: *)
+      over_ram : unit -> bool }
 
 (** Alternative absolute patterns, matched against a frame on its own: *)
 and filter = T.pattern list
@@ -1345,11 +1378,11 @@ let print_report print name typ v _ =
     let typ, v = summarize typ v in
     print (name ^": "^ to_string typ v)
 
-let output_of power ?(format=Human) ?report ~print ~print_err () =
+let output_of power ?(format=Human) ?report ?(check_words=fun _ _ -> ()) ~print ~print_err () =
     let now () =
         let sim = power.SimTypes.sim in
         Simulation.date_of sim (Simulation.now sim) in
-    { print ; print_err ; now ; format ; report = report |? print_report print }
+    { print ; print_err ; now ; format ; report = report |? print_report print ; check_words }
 
 let matches output tree (ps : filter) frame =
     List.exists (fun (p : T.pattern) ->
@@ -1399,10 +1432,9 @@ let self_values ~own (l : T.limits) =
         | _ -> flag p.exfiltration)
 
 let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
-                ?(limits=T.no_limits) (program : T.block) =
+                ?(limits=T.no_limits) ?(on_start=ignore) ?(on_exception=fun _ -> true)
+                (program : T.block) =
     let status = ref Running in
-    let t = { power ; output = output_of power ?format ?report ~print ~print_err () ; tree ;
-              awaited = ref [] } in
     let exit s =
         if !status = Running then (
             status := s ;
@@ -1412,6 +1444,30 @@ let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
           fail = (fun e -> cancel root ; exit (Failed e)) ;
           break_ = (fun ~continue:_ _ -> assert false) ; busy = 0 ; holding = 0 ;
           stmts_done = [] ; ending = [] ; finish = None } in
+    let stop () = cancel root ; exit Stopped in
+    let word = Sys.word_size / 8 in
+    let max_ram =
+        match List.assoc_opt "max_ram" limits.budget with
+        | Some (A.Int n) -> Some n
+        | _ -> None in
+    let over_ram = ref false in
+    let check_ram () =
+        Option.may (fun max ->
+            if (Gc.quick_stat ()).heap_words * word > max then over_ram := true) max_ram ;
+        !over_ram in
+    let check_words loc n =
+        Option.may (fun max ->
+            if n > max / word then (
+                over_ram := true ;
+                stop () ;
+                error loc "%d words would outgrow BUDGET.max_ram" n)) max_ram in
+    (* Only so often, as a leak takes its time: *)
+    let statements = ref 0 in
+    let checkpoint () =
+        incr statements ;
+        if !statements land 0xffff = 0 && !status = Running && check_ram () then stop () in
+    let t = { power ; output = output_of power ?format ?report ~check_words ~print ~print_err () ;
+              tree ; awaited = ref [] ; checkpoint } in
     let own =
         List.map (fun (a : Eth.State.my_address) -> Ip.Addr.of_bitstring a.addr)
                  tree.Crafty_tree.eth.my_addresses |>
@@ -1424,16 +1480,26 @@ let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
                                     T.permissions_var permissions)
                               T.own_ip_var own_ip)
                         T.own_ips_var (Array (Array.of_list (List.map (fun a -> Ip a) own))) in
+    let h =
+        { stop ;
+          status = (fun () -> !status) ;
+          idle = idle tree ;
+          emitted = emitted t ;
+          matches = matches t.output tree ;
+          open_streams = open_streams tree ;
+          uses_port = tree.uses_port ;
+          over_ram = check_ram } in
+    on_start h ;
+    let sim = power.SimTypes.sim in
+    let others = sim.on_exception in
+    sim.on_exception <- (fun exn ->
+        others exn ;
+        if on_exception exn then
+            root.fail Crafty_parser.{ where = A.nowhere ; message = Printexc.to_string exn }) ;
     ignore (run_block t root vars program
                 ~fail:root.fail ~break_:root.break_
                 (fun _ -> cancel root ; exit Done)) ;
-    { stop = (fun () -> cancel root ; exit Stopped) ;
-      status = (fun () -> !status) ;
-      idle = idle tree ;
-      emitted = emitted t ;
-      matches = matches t.output tree ;
-      open_streams = open_streams tree ;
-      uses_port = tree.uses_port }
+    h
 
 (* With what it declares of itself: *)
 type program = { body : Crafty_typing.block ; limits : Crafty_typing.limits }
@@ -1476,12 +1542,15 @@ let print_status oc = function
  * stream that goes away. Unless [rx_wire], what is written to the device was
  * received already (captured) and is taken at once, in order. Returns the device of the interface, and a handle to stop the
  * program, ask its status or tell it what the interface sent. The program starts at the next tick of the
- * simulation, once that device can be connected. *)
+ * simulation, once that device can be connected.
+ * Told what an event handler of the simulation raised, [on_exception] says
+ * whether the program fails of it, which by default it does. *)
 let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         ?(promisc=false)
         ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu ?router
         ?limits ?format ?report ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
-        ?(on_warning=ignore) ?(on_closed=ignore) ?(rx_wire=true) (program : program) =
+        ?(on_warning=ignore) ?(on_closed=ignore) ?(rx_wire=true) ?on_exception
+        (program : program) =
     let limits = limits |? program.limits in
     let ports =
         Option.map (fun (p : T.ports) -> [ "TCP", p.tcp ; "UDP", p.udp ])
@@ -1520,9 +1589,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     let started = ref None and stopped = ref false in
     Simulation.asap power (fun () ->
         if not !stopped then
-            started :=
-                Some (run_on_tree power tree ?format ?report ~print ~print_err ~on_exit
-                                  ~limits program.body)
+            ignore (run_on_tree power tree ?format ?report ~print ~print_err ~on_exit
+                                ~limits ~on_start:(fun h -> started := Some h)
+                                ?on_exception program.body)
     ) () ;
     Eth.Iface.dev eth.iface,
     { stop = (fun () ->
@@ -1540,7 +1609,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       emitted = (fun frame -> Option.may (fun (h : handle) -> h.emitted frame) !started) ;
       matches = matches (output_of power ?format ?report ~print ~print_err ()) tree ;
       open_streams = open_streams tree ;
-      uses_port = tree.uses_port }
+      uses_port = tree.uses_port ;
+      over_ram = (fun () ->
+        Option.map_default (fun (h : handle) -> h.over_ram ()) false !started) }
 
 (* [runs ?stop_at ?trees ?frames ?sent ?inject text] is what the program in that text
  * prints, each line with the time it is printed at (and with [trees], the
@@ -2851,8 +2922,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
  * the gateway 02:00:00:00:00:fe. It is stopped at [stop_at] seconds, or with
  * [stop] as soon as it is run. *)
 (*$inject
-  let policed ?max_packets ?max_packet_rate ?max_syns ?max_syn_rate ?stop_at ?(stop=false)
-              ?(addresses=[ "10.0.0.1/24" ]) text =
+  let policed ?max_packets ?max_packet_rate ?max_syns ?max_syn_rate ?stop_at ?raise_at ?(stop=false)
+              ?(addresses=[ "10.0.0.1/24" ]) ?on_exception text =
       match Crafty_interp.compile text with
       | Error es -> String.concat "\n" (List.map (IO.to_string print_error) es)
       | Ok p ->
@@ -2866,7 +2937,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
                   ~gateways:[ Eth.Gateway.Mac (Eth.Addr.of_string "02:00:00:00:00:fe") ]
                   ~print:line ~print_err:line
                   ~on_warning:(fun e -> line ("warning "^ IO.to_string print_error e))
-                  ~on_exit:(fun s -> line (IO.to_string print_status s)) p in
+                  ~on_exit:(fun s -> line (IO.to_string print_status s)) ?on_exception p in
           let policer =
               Policer.make ~parent:sim.root ?max_packets ?max_packet_rate ?max_syns ?max_syn_rate
                   ~on_limit:(fun l -> line ("hit "^ Policer.string_of_limit l) ; h.stop ()) "policer" in
@@ -2875,6 +2946,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
           Tools.(policer.widget.ports.dev 1 --> sink (fun _ -> incr frames)) ;
           if stop then h.stop () ;
           Option.may (fun t -> Simulation.at sim.root.power (Clock.Time.of_secs t) h.stop ()) stop_at ;
+          Option.may (fun t ->
+              Simulation.at sim.root.power (Clock.Time.of_secs t)
+                  (fun () -> failwith "boom") ()) raise_at ;
           Simulation.run sim false ;
           String.concat "\n" (List.rev !out) ^ Printf.sprintf "\n%d frames" !frames
 
@@ -2932,6 +3006,60 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (policed "PERMISSIONS = {promiscuous: true}\nprint(PERMISSIONS.promiscuous)")
   "0.000s: failed: line 1, column 7: mac_spoofing is not set, by the program or the command line\n0 frames" \
     (policed "print(PERMISSIONS.mac_spoofing)")
+  "0.000s: 1000\n0.000s: done\n0 frames" \
+    (policed "BUDGET = {max_ram: 1000}\nprint(BUDGET.max_ram)")
+  "line 1, column 20: BUDGET.max_ram must be a literal int, 0 or more" \
+    (policed "BUDGET = {max_ram: -1}")
+  "0.000s: stopped\n0 frames" \
+    (policed "BUDGET = {max_ram: 1}\nn = 0\nrepeat count=1000000 { n := n + 1 }\nprint(\"never\")")
+  "0.000s: 1000 1000\n0.000s: done\n0 frames" \
+    (policed "BUDGET = {max_ram: 8000}\na = [0] * 1000\nb = #00 * 1000\nprint(\"${length(a)} ${length(b)}\")")
+  "0.000s: a\n0.000s: stopped\n0 frames" \
+    (policed "BUDGET = {max_ram: 8000}\nprint(\"a\")\nx = [0] * 1001\nprint(\"b\")")
+  "0.000s: stopped\n0 frames" \
+    (policed "BUDGET = {max_ram: 8000}\nx = [0] * 1000000000000000000\nprint(\"b\")")
+  "0.000s: stopped\n0 frames" \
+    (policed "BUDGET = {max_ram: 8000}\nx = #00 * 1001\nprint(\"b\")")
+  "0.000s: stopped\n0 frames" \
+    (policed "BUDGET = {max_ram: 8000}\nx = array(init=0, len=1001)\nprint(\"b\")")
+  "0.000s: stopped\n0 frames" \
+    (policed "BUDGET = {max_ram: 8000}\nx = randbytes(1001)\nprint(\"b\")")
+  "0.000s: stopped\n0 frames" \
+    (policed "BUDGET = {max_ram: 8000}\na = [0] * 600\nb = a + a\nprint(\"b\")")
+  "0.000s: stopped\n0 frames" \
+    (policed "BUDGET = {max_ram: 8000}\na = [0] * 1000\nb = a + 1\nprint(\"b\")")
+  "0.000s: stopped\n0 frames" \
+    (policed "BUDGET = {max_ram: 8000}\na = [0] * 1000\nb = 1 + a\nprint(\"b\")")
+  "0.000s: stopped\n0 frames" \
+    (policed ("BUDGET = {max_ram: 8000}\nx = bytes(\""^ String.make 1001 'x' ^"\")\nprint(\"b\")"))
+  "0.000s: stopped\n0 frames" \
+    (policed "BUDGET = {max_ram: 8000}\ncatch { x = [0] * 1001 }\nprint(\"not caught\")")
+  "0.000s: failed: Out of memory\n0 frames" \
+    (policed "x = [0] * 1000000000000000\nprint(\"not reached\")")
+  "0.000s: failed: Out of memory\n0 frames" \
+    (policed "catch { x = array(init=0, len=1000000000000000) }\nprint(\"not caught\")")
+  "0.000s: a\n1.000s: failed: Out of memory\n0 frames" \
+    (policed "print(\"a\")\nwait 1s\nx = [0] * 1000000000000000\nprint(\"not reached\")")
+  "0.000s: failed: Invalid_argument(\"Array.make\")\n0 frames" \
+    (policed "x = [0] * 1000000000000000000\nprint(\"not reached\")")
+  "1.000s: failed: Failure(\"boom\")\n0 frames" \
+    (policed ~raise_at:1. "wait 10s\nprint(\"not reached\")")
+  "0.000s: a\n0.000s: done\n0 frames" (policed ~raise_at:1. "print(\"a\")")
+  "told Failure(\"boom\")\n2.000s: reached\n2.000s: done\n0 frames" \
+    (let told = ref "" in \
+     let out = policed ~raise_at:1. \
+                       ~on_exception:(fun e -> told := Printexc.to_string e ; false) \
+                       "wait 2s\nprint(\"reached\")" in \
+     "told "^ !told ^"\n"^ out)
+  "0.000s: fits\n0.000s: done\n0 frames" \
+    (let s = String.make 4000 'x' in \
+     policed ("BUDGET = {max_ram: 8000}\ns = \""^ s ^"\"\nt = s + s\nprint(\"fits\")"))
+  "0.000s: stopped\n0 frames" \
+    (let s = String.make 4000 'x' in \
+     policed ("BUDGET = {max_ram: 8000}\ns = \""^ s ^"\"\nt = s + s + \"12345678\"\nprint(\"b\")"))
+  "0.000s: stopped\n0 frames" \
+    (let s = String.make 4008 'x' in \
+     policed ("BUDGET = {max_ram: 8000}\ns = \""^ s ^"\"\nt = \"${s}${s}\"\nprint(\"b\")"))
   "0.000s: [10.0.0.1] 10.0.0.1\n0.000s: done\n0 frames" \
     (policed "print(\"${OWN_IPS} ${OWN_IPS[0]}\")")
   "0.000s: [Deny 10.0.0.66/32, Accept 10.0.0.1/32, Accept 10.20.4.1/32]\n0.000s: done\n0 frames" \

@@ -603,7 +603,7 @@ let new_var =
 let budget_fields =
     Type.[ "max_duration", Interval ; "max_packets", Int ; "max_bytes", Int ;
            "max_packets_per_secs", Float ; "max_bytes_per_secs", Float ;
-           "max_syns", Int ; "max_syns_per_secs", Float ]
+           "max_syns", Int ; "max_syns_per_secs", Float ; "max_ram", Int ]
 
 let budget_type = record_type budget_fields
 

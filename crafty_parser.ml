@@ -96,7 +96,8 @@ open P
 type error = { where : location ; message : string }
 
 let print_error oc e =
-    Printf.fprintf oc "%a: %s" print_location e.where e.message
+    if e.where = nowhere then String.print oc e.message
+    else Printf.fprintf oc "%a: %s" print_location e.where e.message
 
 (* Rejections are told from what was expected by this mark: *)
 let rejection_mark = "\001"

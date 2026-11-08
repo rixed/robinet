@@ -550,6 +550,9 @@ and simulation =
        * [Simulation.reset_max_late]. Unlike [late], pausing and changing the
        * pace leave it alone. *)
       mutable max_late : Interval.t ;
+      (* Run with what an event handler raised, which leaves undone whatever
+       * it was doing: *)
+      mutable on_exception : exn -> unit ;
       (* Realtime only: the simulated time the dispatcher last woke up at. An
        * event dated before it was scheduled while the dispatcher slept, by a
        * thread reading a [now] that sleeping leaves behind, and is late only

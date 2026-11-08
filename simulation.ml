@@ -1296,6 +1296,7 @@ let make =
               pace_anchor = None ;
               late = Interval.zero ;
               max_late = Interval.zero ;
+              on_exception = ignore ;
               awake_since = Time.zero ;
               metrics_sample_rate = default_metrics_sample_rate ;
               metric_samples = Array.make default_metrics_max_samples None ;
@@ -1504,11 +1505,15 @@ let next_event_locked (t : t) =
             (* The handler will call back into [now] and [at], which
              * want the lock too and get it for free, since it is
              * re-entrant and already ours. *)
+            let tell what exn =
+                Printf.eprintf "Clock: %s triggered an exception : %a\n%s%!" what
+                    Printexc.print exn
+                    (Printexc.get_backtrace ()) in
             (try f ()
             with exn ->
-                Printf.printf "Clock: event handler triggered an exception : %a\n%s%!"
-                    Printexc.print exn
-                    (Printexc.get_backtrace ()))
+                tell "event handler" exn ;
+                try t.on_exception exn
+                with exn -> tell "on_exception" exn)
     )
 
 (** Will process the next event. The lock is held from deciding whether there
@@ -1546,6 +1551,18 @@ let run (t : t) wait =
   let took = Unix.gettimeofday () -. t0 in
   assert_bool (Printf.sprintf "ten 5ms hops took %.1fms" (took *. 1e3))
               (took >= 0.0495)
+ *)
+
+(* What a handler raises is told, and what [on_exception] raises stops nothing: *)
+(*$R run
+  let t = make ~realtime:false "raising" in
+  let told = ref [] and after = ref false in
+  t.on_exception <- (fun e -> told := e :: !told ; failwith "again") ;
+  asap t.root.power (fun () -> failwith "boom") () ;
+  delay t.root.power (Clock.Interval.sec 1.) (fun () -> after := true) () ;
+  run t false ;
+  assert_equal [ Failure "boom" ] !told ;
+  assert_bool "the next event ran" !after
  *)
 
 (* A background timer runs as long as there is something else to do, and no

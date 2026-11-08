@@ -216,7 +216,7 @@ Options:
 - `--stats`: prints the stats of each stream (see `stats()`) as it ends.
 - `--check`: only compiles the program.
 - `--max-duration`, `--max-packets`, `--max-bytes`, `--max-packets-per-secs`,
-  `--max-bytes-per-secs`, `--max-syns`, `--max-syns-per-secs`: self-imposed
+  `--max-bytes-per-secs`, `--max-syns`, `--max-syns-per-secs`, `--max-ram`: self-imposed
   budget. When neither `--max-duration` nor `BUDGET.max_duration` is set, a
   run stops after 10m.
 - `--local-ip accept|deny:CIDR`, `--remote-ip accept|deny:CIDR` (repeatable),
@@ -345,6 +345,9 @@ PERMISSIONS = {local_ips: [Accept(OWN_IP), Accept(10.20.4.1)],  # spoofs 10.20.4
 ```
 
 - `BUDGET`'s fields are the budget options of crafty, named alike.
+- `max_ram`, in bytes, stops a program that leaks: its heap is checked now and
+  then, so expect overshoot. Also stops it before making an array, bytes (8 bytes
+  per item) or a string that would outgrow it.
 - `PORTS` has ranges `[first, last]` by protocol; a protocol left out gets
   no port.
 - crafty runs with what both the program and the command line allow.
