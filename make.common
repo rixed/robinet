@@ -86,10 +86,12 @@ all_tests.ml: $(LIB_SOURCES)
 
 check: all_tests.opt $(EXTRA_TESTS)
 	$(RM) oUnit-anon.cache
-	@for t in $^; do \
+	@failed= ;\
+	for t in $^; do \
 		echo "Running $$t" ;\
-		./$$t ;\
-	done
+		./$$t || failed="$$failed $$t" ;\
+	done ;\
+	if [ -n "$$failed" ]; then echo "Failed:$$failed" ; exit 1 ; fi
 
 # Clean up
 clean: clean-spec
