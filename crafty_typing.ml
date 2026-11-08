@@ -2035,8 +2035,14 @@ and binop env loc op a b =
         no_constructor env a ; no_constructor env b ;
         error loc "Cannot apply %s to %s and %s" sym (describe env a) (describe env b) in
     let unify = unify ~describe:(describe env) in
+    let as_bytes x =
+        if x.typ = Type.Byte then
+            { x with typ = Type.bytes ; desc = Array [ x ] }
+        else x in
     match op with
     | A.Add | A.Sub | A.Mul | A.Div | A.Mod ->
+        (* To [+], a byte is one-element bytes: *)
+        let a, b = if op = A.Add then as_bytes a, as_bytes b else a, b in
         (match a.typ, b.typ with
         | (Type.Int | Type.Float), (Type.Int | Type.Float) ->
             let a, b = unify sym a b in
@@ -2052,11 +2058,7 @@ and binop env loc op a b =
         (* A repetition, of a byte as of bytes: *)
         | (Type.Array _ | Type.Byte), Type.Int | Type.Int, (Type.Array _ | Type.Byte)
           when op = A.Mul ->
-            let as_array x =
-                if x.typ = Type.Byte then
-                    { x with typ = Type.Array Type.Byte ; desc = Array [ x ] }
-                else x in
-            let a = as_array a and b = as_array b in
+            let a = as_bytes a and b = as_bytes b in
             mk (if b.typ = Type.Int then a.typ else b.typ) (Binop (op, a, b))
         (* Numbers offset times by that many seconds: *)
         | Type.Time, Type.Time when op = A.Sub ->
@@ -2069,13 +2071,9 @@ and binop env loc op a b =
             mk Type.Time (Binop (op, a, expect "" b Type.Float))
         | (Type.Int | Type.Float), Type.Time when op = A.Add ->
             mk Type.Time (Binop (op, expect "" a Type.Float, b))
-        (* A string and anything but an array other than bytes, as their
-         * interpolations: *)
-        | _ when op = A.Add &&
-                 (let other x y =
-                      x.typ = Type.String && any_value y.typ <> None &&
-                      (match y.typ with Type.Array _ -> y.typ = Type.bytes | _ -> true) in
-                  other a b || other b a) ->
+        (* A string and a string or bytes, as their interpolations: *)
+        | (Type.String, Type.String | Type.String, Type.Array Type.Byte | Type.Array Type.Byte, Type.String)
+          when op = A.Add ->
             let parts x =
                 match x.desc with
                 | String ps -> ps
@@ -3278,9 +3276,21 @@ let check_patterns (ps : A.patterns) =
 *)
 (*$= types & ~printer:identity
   "x: string, y: string, z: string, w: string[], v: string" \
-    (types "x = \"a\" + 1\ny = #4243 + x + 10.0.0.1\nz = string(y)\nw = [\"a\"] + \"b\"\nv = string(#41) + string(1)")
+    (types "x = \"a\" + \"b\"\ny = #4243 + x + #4445\nz = string(y)\nw = [\"a\"] + \"b\"\nv = string(#41) + string(1)")
   "line 1, column 5: Cannot apply + to a string and an int[]" \
     (types "x = \"a\" + [1]")
+  "x: string, y: string, z: byte[], w: byte[], v: byte[][]" \
+    (types "x = \"a\" + #41\ny = #41 + \"a\"\nz = #41 + #42\nw = #41 + #4243\nv = [#4243] + #41")
+  "line 1, column 5: Cannot apply + to a byte and an int" \
+    (types "x = #41 + 1")
+  "line 1, column 5: Cannot apply + to a byte and an ip" \
+    (types "x = #41 + 1.2.3.4")
+  "line 1, column 5: Cannot apply + to a string and an int" \
+    (types "x = \"a\" + 1")
+  "line 1, column 5: Cannot apply + to an int and a string" \
+    (types "x = 1 + \"a\"")
+  "line 1, column 5: Cannot apply + to a string and an ip" \
+    (types "x = \"a\" + 1.2.3.4")
   "line 1, column 8: ACK is a reserved name" \
     (types "ACK = 1")
   "line 2, column 1: x is already declared in this block (:= changes it)" \

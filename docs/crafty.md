@@ -372,10 +372,11 @@ Operators, from the tightest binding to the loosest:
 3. `+`, `-`: on numbers; a time minus a time is an interval, a time plus an
    interval (or a number of seconds) is a time. `+` also concatenates arrays
    (`[1] + [2, 3]`) and appends or prepends an item
-   (`[1, 2] + 3`, `0 + [1, 2]`). With a string on one side, `+` makes a
-   string, as if both sides were interpolated: `"n=" + 1 + 2` is
-   `"n=${1}${2}"`, so `"n=12"`. Bytes come out in hexadecimal, unless given as
-   `string(b)`. Other arrays are not interpolated: `["a"] + "b"` appends.
+   (`[1, 2] + 3`, `0 + [1, 2]`). To `+`, a byte is one-element bytes:
+   `#41 + #42` is `#4142`. A string plus a string or bytes is a string,
+   as if interpolated: `"a=" + #4142` is `"a=${#4142}"`, so `"a=#4142"`; use
+   `string(b)` for bytes as text. Others convert explicitly: `"n=" + string(1)`.
+   Other arrays append: `["a"] + "b"`.
 4. `<<`, `>>`: shift an int or a byte by an int; `>>` keeps the sign of an
    int, and a byte stays 8 bits.
 5. `&`, then `^`, then `|`: bitwise, on ints or bytes. They bind tighter than

@@ -1686,8 +1686,10 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (*$= runs & ~printer:identity
   "0s: hello 3\nerr 0s: oops\n0s: done" \
     (runs "print(\"hello ${1 + 2}\")\nprint_err(\"oops\")")
-  "0s: n=12 #4142 1.2.3.4\n0s: AB 3\n0s: done" \
-    (runs "b = #4142\nprint(\"n=\" + 1 + 2 + \" \" + b + \" \" + 1.2.3.4)\nprint(string(b) + \" \" + string(3))")
+  "0s: n=#4142 #4344\n0s: AB 3\n0s: done" \
+    (runs "b = #4142\nprint(\"n=\" + b + \" \" + #4344)\nprint(string(b) + \" \" + string(3))")
+  "0s: a#41 #41a\n0s: #4142 #414243 #424341\n0s: BA\n0s: 2 [1, 65] [65, 1]\n0s: done" \
+    (runs "b = #4142\nprint(\"a\" + #41 + \" \" + #41 + \"a\")\nprint(\"${#41 + #42} ${#41 + #4243} ${#4243 + #41}\")\nprint(b[1] + b[0])\nprint(\"${length([#4243] + #41)} ${[1] + #41} ${#41 + [1]}\")")
   "0s: 0\n1s: 1\n2s: 2\n2s: after\n2s: done" \
     (runs "repeat count=3 every=1s { print(I) }\nprint(\"after\")")
   "0s: 0\n1s: 1\n2s: 2\n2s: done" \
