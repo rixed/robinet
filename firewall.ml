@@ -37,7 +37,8 @@
    ARP passes, and so does neighbor discovery. What cannot be inspected
    (neither IP nor ARP, IP carrying IP, an ICMP error quoting no IP header)
    takes the verdict [uninspectable]. What goes out may also be required to have a given
-   Ethernet source. Switched off, it passes nothing. *)
+   Ethernet source. Promiscuous, what comes in for an inside address that no
+   rule matches passes. Switched off, it passes nothing. *)
 open Batteries
 open Bitstring
 open SimTypes
@@ -138,6 +139,7 @@ type t =
       mutable uninspectable : verdict ;
       (* The Ethernet source of what goes out, if imposed: *)
       mutable mac : Eth.Addr.t option ;
+      promiscuous : bool ;
       (* Called on each frame dropped: *)
       mutable on_drop : direction -> cause -> bitstring -> unit ;
       (* Per port, whether a cable is on it and what to emit into it: *)
@@ -285,14 +287,15 @@ let is_ndp ip =
     | {| typ : 8 ; _ |} -> typ >= 133 && typ <= 137
     | {| _ |} -> false
 
-(* Why addresses [src] and [dst] are denied, if they are, [src_inside]
- * telling which side the source is on, of a TCP segment with [flags] if
- * they are given: *)
-let judge t ~src_inside ?flags src dst =
+(* Why addresses [src] and [dst], of a packet going [dir], are denied, if they
+ * are, [src_inside] telling which side the source is on, of a TCP segment
+ * with [flags] if they are given: *)
+let judge t dir ~src_inside ?flags src dst =
     let check inside ip =
         match decide ?flags (if inside then t.inside else t.outside) ip with
         | Some (Accept, _) -> None
         | Some (Deny, HasTcpFlags f) -> Some (Tcp_flags f)
+        | None when inside && dir = In && t.promiscuous -> None
         | Some (Deny, Ip _) | None ->
             Some (if inside then Inside ip else Outside ip) in
     match check src_inside src with
@@ -320,13 +323,13 @@ let inspect t dir bits =
             | Some ip ->
                 let src_inside = dir = Out in
                 let outer () =
-                    judge t ~src_inside ?flags:(tcp_flags ip) ip.src ip.dst in
+                    judge t dir ~src_inside ?flags:(tcp_flags ip) ip.src ip.dst in
                 match quote ip with
                 | `None -> outer ()
                 | `Unreadable -> uninspectable ()
                 | `Quote q ->
                     let quoted () =
-                        judge t ~src_inside:(not src_inside) q.src q.dst in
+                        judge t dir ~src_inside:(not src_inside) q.src q.dst in
                     if dir = In then quoted ()
                     else match outer () with
                         | None -> quoted ()
@@ -433,11 +436,12 @@ let accept_all = of_address_rules accept_all_addresses
 let num_ports = 2
 
 let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
-         ?(uninspectable=Deny) ?mac ?(on_drop=fun _ _ _ -> ()) name =
+         ?(uninspectable=Deny) ?mac ?(promiscuous=false)
+         ?(on_drop=fun _ _ _ -> ()) name =
     let widget =
         Widget.make ~parent ?location ~device_type:"firewall" ~own_power:true
                     name in
-    let t = { widget ; inside ; outside ; uninspectable ; mac ; on_drop ;
+    let t = { widget ; inside ; outside ; uninspectable ; mac ; promiscuous ; on_drop ;
               forward = Array.make num_ports (false, ignore) ;
               peers = Array.make num_ports None ;
               passed = Metric.Counter.make () ;
@@ -529,11 +533,12 @@ let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
   let solicit ~ttl =
       packet6 ~proto:Ip.Proto.icmpv6 ~ttl "fe80::1" "ff02::1:ff00:1"
           ~payload:Icmp6.Pdu.(pack (make_neighbor_solicit (addr "2001:db8:1::1")))
-  let through ?(mac=mine) dir bits =
+  let through ?(mac=mine) ?promiscuous dir bits =
       let sim = Simulation.make ~realtime:false "firewall" in
       let cause = ref "passed" in
-      let t = make ~parent:sim.root ~mac
+      let t = make ~parent:sim.root ~mac ?promiscuous
                 ~inside:(of_address_rules [
+                    Deny, cidr_of_string "10.0.0.66" ;
                     Accept, cidr_of_string "10.0.0.0/8" ;
                     Accept, cidr_of_string "2001:db8:1::/48" ])
                 ~outside:(
@@ -550,6 +555,19 @@ let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
 *)
 (*$= through & ~printer:identity
   "passed" (through Out (packet "10.0.0.1" "192.0.2.1"))
+  "inside address 192.168.0.1 denied" \
+    (through In (packet "192.0.2.1" "192.168.0.1"))
+  "passed" (through ~promiscuous:true In (packet "192.0.2.1" "192.168.0.1"))
+  "passed" (through ~promiscuous:true In (packet6 "2001:db8:2::1" "2001:db8:3::1"))
+  "passed" \
+    (through ~promiscuous:true In (error_about ~src:"192.0.2.1" ~dst:"192.168.0.1" \
+                                     (ip "192.168.0.1" "192.0.2.1")))
+  "inside address 10.0.0.66 denied" \
+    (through ~promiscuous:true In (packet "192.0.2.1" "10.0.0.66"))
+  "outside address 192.0.2.66 denied" \
+    (through ~promiscuous:true In (packet "192.0.2.66" "192.168.0.1"))
+  "inside address 192.168.0.1 denied" \
+    (through ~promiscuous:true Out (packet "192.168.0.1" "192.0.2.1"))
   "passed" (through In (packet "192.0.2.1" "10.0.0.1"))
   "inside address 192.168.0.1 denied" \
     (through Out (packet "192.168.0.1" "192.0.2.1"))

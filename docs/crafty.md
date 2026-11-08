@@ -343,7 +343,8 @@ PERMISSIONS = {remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
   - `mac_spoofing`: allows sending from another MAC than the interface's.
   - `exfiltration`: allows sending a payload  made of the payload of a received
     packet.
-  - `promiscuous`: receives the frames for other addresses too.
+  - `promiscuous`: receives the frames for other addresses too, unless
+    `local_ips` denies them.
   - A sent packet denied by the above rules stops the program. A received one
     that is denied is dropped. Received ICMP errors are judged by the packet
     they quote, not by the router that sent it.

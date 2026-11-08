@@ -468,7 +468,7 @@ let () =
         open_iface ~blocking:true ~direction:Pcap.Out ~filter:"less 0" ()
     and pcap =
         open_iface ~direction:Pcap.InOut
-            ~filter:(Host_config.pcap_filter ?ip:!own_ip ports) () in
+            ~filter:(Host_config.pcap_filter ?ip:(if promisc then None else !own_ip) ports) () in
     let secs () = Clock.Time.to_secs (Simulation.now sim) in
     (* Dated to the microsecond, as the text and captures are: *)
     let emit ?json kind fields =
@@ -602,6 +602,7 @@ let () =
             ~inside:(Firewall.of_address_rules (rules permissions.local_ips))
             ~outside:(Firewall.of_address_rules (rules permissions.remote_ips))
             ?mac:(if flag permissions.mac_spoofing then None else Some iface.mac)
+            ~promiscuous:promisc
             ~on_drop:(fun dir cause bits ->
                 match dir with
                 | Firewall.In -> incr denied_in
