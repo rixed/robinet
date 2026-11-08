@@ -164,6 +164,8 @@ and expr_desc =
      * second (else the end) of an array or string ([a[1:-1]]): *)
     | Slice of expr * expr option * expr option
     | Call of string * arg list
+    (* The bytes of those layers, on top of the [anchor]: *)
+    | Encode of { anchor : anchor ; layers : layer list }
     | Unop of unop * expr
     | Binop of binop * expr * expr
     | Record of (string * expr) list
@@ -311,11 +313,23 @@ let did_you_mean names s =
 (** Whether that name is a constructor's: it starts with a capital letter. *)
 let is_constructor s = s <> "" && Char.is_uppercase s.[0]
 
+(** The functions making bytes of an int: name, size in bytes, big endian. *)
+let words =
+    List.concat_map (fun n ->
+        let bits = string_of_int (n * 8) in
+        [ "be"^ bits, n, true ; "le"^ bits, n, false ]) (List.init 7 ((+) 2))
+
+(** Whether that int fits in that many bytes, signed or not: *)
+let word_fits size x =
+    let bits = size * 8 in
+    bits >= Sys.int_size || (x < 1 lsl bits && x >= - (1 lsl (bits - 1)))
+
 (** The functions a statement can call (any other name being a layer).
  * Lower case. *)
 let functions =
+    List.map (fun (name, _, _) -> name) words @
     [ "rand" ; "randbytes" ; "exp" ; "ln" ; "log" ; "log2" ; "int" ; "float" ;
-      "bool" ; "byte" ; "interval" ; "time" ; "now" ; "string" ; "bytes" ; "checksum" ; "ip_addr" ; "mac_addr" ; "cidr" ; "getenv" ;
+      "bool" ; "byte" ; "interval" ; "time" ; "now" ; "string" ; "bytes" ; "checksum" ; "encode" ; "ip_addr" ; "mac_addr" ; "cidr" ; "getenv" ;
       "arg" ; "nargs" ; "resolve" ; "hostname" ; "is_ip4" ; "is_ip6" ; "split" ;
       "array" ; "length" ; "concat" ; "append" ; "prepend" ;
       "map" ; "has" ; "remove" ; "keys" ; "values" ;
@@ -467,6 +481,9 @@ let rec print_expr_at ?(bare=false) ~all ~indent p oc e =
         paren q (fun oc ->
             Printf.fprintf oc "%a =~ %a"
                 (at (q + 1)) e (print_pattern ~all ~indent) pat)
+    | Encode { anchor ; layers } ->
+        Printf.fprintf oc "encode(%a%a)" print_anchor anchor
+            (List.print ~first:"" ~last:"" ~sep:"/" (print_layer ~all ~indent)) layers
     | Construct (c, e) ->
         Printf.fprintf oc "%s(%a)" c (fun oc -> Option.may (bare_sub oc)) e
     | Block b -> block oc b

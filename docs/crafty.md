@@ -158,6 +158,23 @@ target = 192.0.2.10
 }
 ```
 
+`encode(STACK)` is the bytes of the layers of `STACK`, all manual, as if sent,
+but nothing is. An `IP` or `IP6` right below them fills in the checksum of what
+they carry, as of a whole packet, ignoring its fragment fields. It uses up what
+a send does (`IP!` ids, `Request` and `TCP!` sequence numbers). Its top may
+be non-terminal. It cannot be in a condition.
+
+This is how to fragment by hand, since no fragment has what the checksum covers:
+
+```
+# A datagram in two fragments, the last first; frag_offset counts 8 byte blocks:
+/IP!(dst=target, id=1234, proto=17) {
+  d = encode(UDP(src=4000, dst=7)/Raw(randbytes(100)))
+  ../IP!(frag_offset=8)/Raw(d[64:])
+  ../IP!(more_frags=true)/Raw(d[:64])
+}
+```
+
 ```
 % sudo crafty --tcp 40000 --fw syn.cfty
 SYN of seq 1000 sent
@@ -275,6 +292,10 @@ An IPv4 address converts to an int and back: `ip_addr(int(a) + 1)`.
 `bytes(x)` makes bytes of a byte or of what converts to them, for `+`:
 `#0102 + bytes(10.0.0.1)`. `checksum(b)` is the 2 bytes of the Internet
 checksum of `b` (RFC 1071): `h1 + checksum(h1 + #0000 + h2) + h2`.
+`be16(x)` and `le16(x)` are the bytes of an int, big and little endian
+(`be16(0x0102) == #0102`, `le16(0x0102) == #0201`), likewise for 24, 32, 40, 48,
+56 and 64 bits. A negative one is in two's complement; one that does not fit
+fails, before the program runs if it is constant.
 
 **Variants** need no declaration. Where variants meet (items of an array,
 branches of an `if`, values assigned to a variable...), they make one variant
@@ -554,7 +575,7 @@ frames go out as they are.
 - `id`: int; set M; read M, S. Default: the stream's counter, from a random
   value.
 - `more_frags`: bool; set M; read M.
-- `frag_offset`: int; set M; read M.
+- `frag_offset`: int; set M; read M. In blocks of 8 bytes.
 - `tot_len`: int; set M; read M. Default: computed.
 - `options`: bytes; set M, S; read M, S.
 - `rr_slots`: int; set M, S; read M, S. The slots of the record route
@@ -580,7 +601,7 @@ checksum.
 - `hop_limit`: int; set M, S; read M, S. Default 64.
 - `flow_label`: int; set M; read M, S. Default 0.
 - `frag_id`: int; set M; read M. Default 0.
-- `frag_offset`: int; set M; read M. Default 0.
+- `frag_offset`: int; set M; read M. In blocks of 8 bytes. Default 0.
 - `more_frags`: bool; set M; read M. Default false.
 - `is_fragment`: bool; read M.
 
@@ -599,7 +620,8 @@ Self-driven IP6 fragments to the MTU and reassembles, as `IP`.
   `URG`, `ECE`, `CWR`.
 - `win_size`: int; set M; read M.
 - `urg_ptr`: int; set M; read M.
-- `checksum`: int; set M; read M. Default: computed, as when 0.
+- `checksum`: int; set M; read M. Default: computed, as when 0, but in a
+  fragment (see `encode`).
 - `options`: bytes; set M; read M. Default: none.
 - `mss`, `wscale`: int; set M, S; read M. The first option of each kind,
   or -1.
@@ -626,7 +648,8 @@ not retransmitted.
 - `dst` (key): int; set M; read M. Required, unless told by the layer on
   top.
 - `length`: int; set M; read M. Default: computed.
-- `checksum`: int; set M; read M. Default: computed, as when 0.
+- `checksum`: int; set M; read M. Default: computed, as when 0, but in a
+  fragment (see `encode`).
 
 #### `ICMP`
 

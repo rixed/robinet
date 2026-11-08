@@ -538,10 +538,23 @@ let op s v = word s >>: fun () -> v
 (* An operator that must not be followed by [c]: *)
 let op_not_before s c v = word s -- nay (item c) >>: fun () -> v
 
+(* From the root ([/]), or else down the current stack ([../] each): *)
+let anchor =
+    (slash >>: fun () -> Absolute) |||
+    (repeat_greedy ~sep:none (word ".." -- slash) >>:
+        fun l -> Relative (List.length l))
+
+let make_layer expr =
+    here ++ layer_name ++ optional ~def:false (item '!' >>: fun _ -> true) ++
+    optional ~def:[] (args expr) >>:
+    fun (((layer_loc, layer_name), manual), options) ->
+        { layer_loc ; layer_name ; manual ; options }
+
 (* [self] is the grammar being built: that of normal expressions, or that of
  * conditions, where [=] compares. [expr] is that of normal expressions, used
  * within brackets. *)
 let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
+    let layer = make_layer expr in
     let body = sp -+ block in
     (* A branch of an [if]: a statement on the same line, a block being the
      * branch itself: *)
@@ -616,6 +629,11 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
         (here ++ block >>: fun (loc, b) -> { loc ; desc = Block b }) |||
         (here ++ (keyword "if" -+ if_) >>: fun (loc, desc) -> { loc ; desc }) |||
         (here ++ (keyword "case" -+ case) >>: fun (loc, desc) -> { loc ; desc }) |||
+        (* A stack rather than arguments: *)
+        (here +- quiet (identifier >>= fun s ->
+            if String.lowercase_ascii s = "encode" then return () else fail) ++
+         in_ '(' (anchor ++ repeat ~min:1 ~sep:(maybe_next (slash -- nl_sp)) layer) ')' >>:
+            fun (loc, (anchor, layers)) -> { loc ; desc = Encode { anchor ; layers } }) |||
         (here ++ function_name ++ args expr >>:
             fun ((loc, f), args) -> { loc ; desc = Call (f, args) }) |||
         unknown_function (args expr) |||
@@ -698,12 +716,6 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
     let conjunction = left_assoc (op "&&" And) comparison in
     left_assoc (op "||" Or) conjunction |? "expression"
 
-(* From the root ([/]), or else down the current stack ([../] each): *)
-let anchor =
-    (slash >>: fun () -> Absolute) |||
-    (repeat_greedy ~sep:none (word ".." -- slash) >>:
-        fun l -> Relative (List.length l))
-
 let make_pattern cond_expr =
     let conditions =
         in_ '(' (list_of cond_expr) ')' >>: function
@@ -748,11 +760,7 @@ let stmt_end =
     check (sp -- ((item '\n' ||| item ';' ||| item '}' >>: ignore) |||
                   quiet (keyword "else" ||| keyword "elsif") ||| eof))
 
-let layer =
-    here ++ layer_name ++ optional ~def:false (item '!' >>: fun _ -> true) ++
-    optional ~def:[] (args expr) >>:
-    fun (((layer_loc, layer_name), manual), options) ->
-        { layer_loc ; layer_name ; manual ; options }
+let layer = make_layer expr
 
 let assign_op =
     op ":=" None |||

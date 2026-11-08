@@ -47,7 +47,7 @@ type var = { name : string ; id : int ; typ : Type.t }
 type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
-    | To_string | To_bytes | Checksum | To_ip | To_mac | To_cidr | Getenv | Arg | Nargs | Resolve | Hostname
+    | To_string | To_bytes | Word of int * bool | Checksum | To_ip | To_mac | To_cidr | Getenv | Arg | Nargs | Resolve | Hostname
     | Is_ip4 | Is_ip6 | Split
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
@@ -73,6 +73,9 @@ and desc =
                   path : string option list ; absolute : bool }
     (* With all the arguments, in the order of the function's parameters: *)
     | Call of builtin * expr list
+    (* The bytes of those layers but a self-driven root, as a [Send] of them
+     * would make them: *)
+    | Encode of { depth : int ; overlay : int ; layers : layer list }
     | Unop of A.unop * expr
     | Binop of A.binop * expr * expr
     (* In the order of the record type's fields: *)
@@ -1374,7 +1377,10 @@ let builtins =
         [ param "cond" "a bool or an int" (only_exactly Type.[ Bool ; Int ]) ;
           param "msg" "a string" (only Type.[ String ])
                 ~default:(Quote ("Assertion failed: ", "cond")) ],
-        res Type.Void ]
+        res Type.Void ] @
+    List.map (fun (name, size, big) ->
+        name, Word (size, big), [ param "x" "an int" (only Type.[ Int ]) ],
+        res Type.bytes) A.words
 
 let find_builtin loc name =
     match List.find_opt (fun (n, _, _, _) -> same_name n name) builtins with
@@ -1444,6 +1450,28 @@ let is_last_eth r =
                layer = Some layer ; _ } ->
         layer.name = L.(eth.name)
     | _ -> false
+
+(* The value of an int expression made of literals and constants only, as
+ * evaluating it would make it, if that cannot fail: *)
+let rec const_int e =
+    match e.desc with
+    | Lit (A.Int i) -> Some i
+    | Unop (A.Neg, a) -> Option.map (~-) (const_int a)
+    | Binop (op, a, b) ->
+        (match const_int a, const_int b with
+        | Some a, Some b ->
+            (match op with
+            | A.Add -> Some (a + b)
+            | A.Sub -> Some (a - b)
+            | A.Mul -> Some (a * b)
+            | A.BitAnd -> Some (a land b)
+            | A.BitOr -> Some (a lor b)
+            | A.BitXor -> Some (a lxor b)
+            | A.Shl when b >= 0 -> Some (if b >= Sys.int_size then 0 else a lsl b)
+            | A.Shr when b >= 0 -> Some (a asr min b (Sys.int_size - 1))
+            | _ -> None)
+        | _ -> None)
+    | _ -> None
 
 (* With [tail], [e] is the value of a declaration, an assignment or a
  * statement, which can wait if its block can. Without [used], the value of
@@ -1565,6 +1593,21 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         | t -> no_constructor env a ; error loc "Cannot slice %s" (a_type t))
     | A.Call (f, _) when same_name f "sort" ->
         error loc "sort changes its array and has no value; sorted(a) is a sorted copy"
+    | A.Call (f, _) when same_name f "encode" ->
+        error loc "encode takes a stack: encode(UDP(src=1, dst=2)/Raw(\"x\"))"
+    | A.Encode { anchor ; layers } ->
+        (* Making nodes, which cannot be while the tree is walked: *)
+        (match env.layer_ctx with
+        | Some { in_cond = true ; _ } -> error loc "encode cannot be in a condition"
+        | _ -> ()) ;
+        let hint = stack_hint env anchor layers ~sends:false in
+        let base, over = anchor_base ~hint env loc anchor in
+        let _, tls, overlay = stack_layers ~hint env base over layers in
+        List.iter (fun tl ->
+            if tl.mode = L.Driven && tl.layer != L.root then
+                let n = L.to_string tl.layer in
+                error tl.layer_loc "encode needs manual layers: %s!, not %s" n n) tls ;
+        mk Type.bytes (Encode { depth = List.length base ; overlay ; layers = tls })
     | A.Call (f, args) ->
         (match call ?expected env loc f args with
         | (Concat | Append | Prepend as b), [ x ; y ], _ ->
@@ -1618,6 +1661,11 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 | Type.Interval -> A.Interval Clock.Interval.zero
                 | _ -> A.Int 0 in
             mk t (Call (Sum, [ a ; { loc ; typ = t ; desc = Lit zero } ]))
+        | Word (size, _) as b, [ x ], t ->
+            Option.may (fun i ->
+                if not (A.word_fits size i) then
+                    error x.loc "%d does not fit in %d bytes" i size) (const_int x) ;
+            mk t (Call (b, [ x ]))
         | b, args, t -> mk t (Call (b, args)))
     | A.Unop (A.Not, e) ->
         let e = as_bool "The operand of !" (expr env e) in
@@ -2572,6 +2620,9 @@ and expr_declarations e =
     | Slice (a, from, to_) ->
         List.concat_map expr_declarations (a :: List.filter_map identity [ from ; to_ ])
     | Call (_, es) | Record es | Array es -> List.concat_map expr_declarations es
+    | Encode { layers ; _ } ->
+        List.concat_map (fun l ->
+            List.concat_map (expr_declarations % snd) l.options) layers
     | Map kvs ->
         List.concat_map (fun (k, v) -> expr_declarations k @ expr_declarations v) kvs
     | String parts ->
@@ -2606,6 +2657,8 @@ let sub_exprs e =
     | Index (a, b) | Binop (_, a, b) -> [ a ; b ]
     | Slice (a, from, to_) -> a :: List.filter_map identity [ from ; to_ ]
     | Call (_, es) | Record es | Array es -> es
+    | Encode { layers ; _ } ->
+        List.concat_map (fun l -> List.map snd l.options) layers
     | Map kvs -> List.concat_map (fun (k, v) -> [ k ; v ]) kvs
     | String parts -> List.filter_map (function Interp e -> Some e | Text _ -> None) parts
     | Construct (_, e) -> Option.map_default (fun e -> [ e ]) [] e
@@ -2781,6 +2834,14 @@ let exfiltrations (b : block) =
   "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { p = MATCH\nq = p[Raw]\nRaw(q.data) } }")
   "2:45" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { case var=r MATCH[-1] Raw { Raw(r.data) } else {} } }")
   "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { case var=r MATCH[-1] UDP { Raw(\"${r.src}\") } else {} } }")
+  "3:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { d = encode(Raw(MATCH[Raw].data))\nRaw(d) } }")
+  "2:18" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { Raw(encode(Raw(MATCH[Raw].data))) } }")
+  "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nd = randbytes(1)\nexpect Raw { d := encode(Raw(MATCH[Raw].data)) }\nRaw(d[:1]) }")
+  "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { d = encode(Raw({ x = MATCH[Raw].data\n x }))\nRaw(d) } }")
+  "3:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { p = MATCH\nRaw(encode(Raw(p[Raw].data))) } }")
+  "3:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { d = encode(Raw(\"${MATCH}\"))\nRaw(d) } }")
+  "3:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { d = encode(../UDP(src=1, dst=2, checksum=int(MATCH[Raw].data[0]))/Raw(\"x\"))\nRaw(d) } }")
+  "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { d = encode(../UDP(src=1, dst=MATCH[UDP].src)/Raw(\"x\"))\nRaw(d) } }")
   "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nn = 0\non Raw { n += length(MATCH[Raw].data) }\nRaw(\"${n}\") }")
   "2:23" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { Query(\"a\")\nexpect Answer { Query(MATCH[Answer].answers[0].name) } }")
   "2:33" (exfiltrated "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { HttpRequest(\"/\")\nexpect HttpAnswer { HttpRequest(MATCH[HttpAnswer].headers[0].value) } }")

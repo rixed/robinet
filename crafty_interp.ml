@@ -78,6 +78,8 @@ type env =
     { vars : value ref Lazy.t Env.t ;
       (* The current protocol stack, its top first: *)
       stack : Crafty_tree.entry list ;
+      (* What a stack is on top of, without a [depth]: *)
+      tree : Crafty_tree.node ;
       (* In a condition, the packet being matched up to its layer, the top
        * first: *)
       packet : Crafty_tree.packet }
@@ -351,6 +353,11 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
     | T.Now, [] -> Time (now ())
     | T.To_bytes, [ Byte _ as b ] -> Array [| b |]
     | T.To_bytes, [ b ] -> b
+    | T.Word (size, big), [ Int x ] ->
+        if not (A.word_fits size x) then
+            error loc "%d does not fit in %d bytes" x size ;
+        Array (Array.init size (fun i ->
+            Byte ((x asr (8 * if big then size - 1 - i else i)) land 0xff)))
     | T.Checksum, [ (Byte _ | Array _) as b ] ->
         let a = match b with Array a -> a | b -> [| b |] in
         let s = Tools.sum (Bitstring.bitstring_of_string (string_of_bytes a)) in
@@ -520,6 +527,50 @@ type output =
       (* Given what [report] reports: its name, the type and value, and when: *)
       report : string -> A.Type.t -> value -> Clock.Wall.t -> unit }
 
+(* The stack of [env] with these layers on top of its [depth] first ones,
+ * given to [hold] (but for the root, which stays, and for a terminal layer's,
+ * which goes with its parent) once acquired. The options, valued by [eval],
+ * are those of this stack, not of its nodes; the first [overlay] layers also
+ * take the key and the options (that they can set) of the layers of [env] they
+ * are over, unless they give them. Raises [Failed]. *)
+let push_layers ~eval ~hold env depth overlay (layers : T.layer list) =
+    let n = List.length env.stack - depth in
+    let base = List.drop n env.stack
+    and over = List.rev (List.take n env.stack) in
+    List.fold_lefti (fun stack j (l : T.layer) ->
+        let options =
+            List.map (fun (i, e) -> i, eval e) l.options in
+        let options =
+            if j >= overlay then options else
+            let (o : Crafty_tree.entry) = List.nth over j in
+            let given (i, _) =
+                List.exists (fun (j, _) -> Crafty_layers.overlap l.layer i j) options in
+            let settable (i, _) =
+                let f = l.layer.fields.(i) in
+                List.mem l.mode f.set_in && (o.mode = l.mode || f.part_of = None) in
+            options @
+            List.filter (not % given) o.node.key @
+            List.filter (fun opt ->
+                not (given opt) && not (List.mem_assoc (fst opt) o.node.key) &&
+                settable opt) o.options in
+        let node =
+            match stack with
+            | [] ->
+                assert (l.layer == Crafty_layers.root) ;
+                env.tree
+            | (below : Crafty_tree.entry) :: _ ->
+                let node =
+                    Crafty_tree.child l.layer_loc below.node l.layer options in
+                if not l.layer.terminal then (
+                    Crafty_tree.acquire node ;
+                    hold node) ;
+                node in
+        if l.mode = Crafty_layers.Driven then (
+            node.driven <- true ;
+            node.ops.drive ()) ;
+        Crafty_tree.{ node ; mode = l.mode ; options } :: stack
+    ) base layers
+
 let rec eval output (env : env) (e : T.expr) =
     let eval = eval output env in
     match e.desc with
@@ -607,6 +658,17 @@ let rec eval output (env : env) (e : T.expr) =
     | T.Call (b, args) ->
         call e.loc b (List.map eval args)
              ~print:output.print ~print_err:output.print_err ~now:output.now
+    | T.Encode { depth ; overlay ; layers } ->
+        let held = ref [] in
+        let written =
+            List.count_matching (fun (l : T.layer) -> l.mode = Crafty_layers.Manual) layers in
+        finally (fun () -> List.iter Crafty_tree.release !held) (fun () ->
+            try
+                push_layers env depth overlay layers ~eval
+                            ~hold:(fun n -> held := n :: !held) |>
+                Crafty_tree.encode written |>
+                Crafty_layers.bytes_value
+            with Failed msg -> error e.loc "%s" msg) ()
     | T.Unop (A.Not, a) ->
         (match eval a with Bool b -> Bool (not b) | _ -> assert false)
     | T.Unop (A.Neg, a) ->
@@ -783,49 +845,11 @@ let emitted t frame =
     | Some (_, k) -> k frame
     | None -> ()
 
-(* The stack of [env] with these layers on top of its [depth] first ones,
- * their nodes held by [b] (but for the root, which stays, and for a terminal
- * layer's, which goes with its parent). The options are those of this stack,
- * not of its nodes; the first [overlay] layers also take the key and the
- * options (that they can set) of the layers of [env] they are over, unless
- * they give them. Raises [Failed]. *)
-let push t b env depth overlay (layers : T.layer list) =
-    let n = List.length env.stack - depth in
-    let base = List.drop n env.stack
-    and over = List.rev (List.take n env.stack) in
-    List.fold_lefti (fun stack j (l : T.layer) ->
-        let options =
-            List.map (fun (i, e) -> i, eval t.output env e) l.options in
-        let options =
-            if j >= overlay then options else
-            let (o : Crafty_tree.entry) = List.nth over j in
-            let given (i, _) =
-                List.exists (fun (j, _) -> Crafty_layers.overlap l.layer i j) options in
-            let settable (i, _) =
-                let f = l.layer.fields.(i) in
-                List.mem l.mode f.set_in && (o.mode = l.mode || f.part_of = None) in
-            options @
-            List.filter (not % given) o.node.key @
-            List.filter (fun opt ->
-                not (given opt) && not (List.mem_assoc (fst opt) o.node.key) &&
-                settable opt) o.options in
-        let node =
-            match stack with
-            | [] ->
-                assert (l.layer == Crafty_layers.root) ;
-                t.tree
-            | (below : Crafty_tree.entry) :: _ ->
-                let node =
-                    Crafty_tree.child l.layer_loc below.node l.layer options in
-                if not l.layer.terminal then (
-                    Crafty_tree.acquire node ;
-                    b.cleanups <- (fun () -> Crafty_tree.release node) :: b.cleanups) ;
-                node in
-        if l.mode = Crafty_layers.Driven then (
-            node.driven <- true ;
-            node.ops.drive ()) ;
-        Crafty_tree.{ node ; mode = l.mode ; options } :: stack
-    ) base layers
+let push t b env depth overlay layers =
+    push_layers env depth overlay layers
+        ~eval:(eval t.output env)
+        ~hold:(fun node ->
+            b.cleanups <- (fun () -> Crafty_tree.release node) :: b.cleanups)
 
 (* The value of the [timeout] parameter of that statement, if any: *)
 let timeout_of eval what =
@@ -1319,7 +1343,7 @@ let matches output tree (ps : filter) frame =
             Crafty_tree.{
                 player = pl.pl_layer ; pmode = pl.pl_mode ;
                 test = Option.map (fun c packet ->
-                    match eval output { vars = Env.empty ; stack = [] ; packet } c with
+                    match eval output { vars = Env.empty ; stack = [] ; tree ; packet } c with
                     | Bool b -> b
                     | _ -> assert false) pl.cond }) p.pat_layers in
     Crafty_tree.matches tree layers frame) ps
@@ -1374,7 +1398,7 @@ let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
           stmts_done = [] ; ending = [] ; finish = None } in
     let budget, ports, permissions = self_values limits in
     let vars =
-        { vars = Env.empty ; stack = [] ; packet = [] } |>
+        { vars = Env.empty ; stack = [] ; tree ; packet = [] } |>
         fun env -> bind (bind (bind (bind env T.budget_var budget) T.ports_var ports)
                               T.permissions_var permissions)
                         T.last_var Void in
@@ -2665,6 +2689,65 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "a 0.000s: done Eth\nb 0.000s: 3735928559 0 true\nb 0.000s: 3735928559 2 false\nb 0.000s: abcdefghijkl\nb 1.000s: done Eth#3" \
     (two ~v6:true "/IP6!(dst=2001:db8::2, proto=17, frag_id=0xdeadbeef, more_frags=true)/Raw(#0fa00007001400006162636465666768)\n/IP6!(dst=2001:db8::2, proto=17, frag_id=0xdeadbeef, frag_offset=2)/Raw(\"ijkl\")" \
          "on for=1s /IP6!(is_fragment) { print(\"${MATCH[IP6].frag_id} ${MATCH[IP6].frag_offset} ${MATCH[IP6].more_frags}\") }\non for=1s /IP6/UDP(dst == 7) { print(MATCH[Raw].data) }")
+*)
+(* Ints as bytes, of either sign, or failing if they do not fit: *)
+(*$= runs & ~printer:identity
+  "0s: #0102 #0201 #010203 #030201 #01020304 #0201000000000000 #ffff #ffff #fffffffffffffffe #01000000000000\n0s: done" \
+    (runs "print(\"${be16(0x0102)} ${le16(0x0102)} ${be24(0x010203)} ${le24(0x010203)} ${be32(0x01020304)} ${le64(0x0102)} ${be16(0xffff)} ${be16(-1)} ${be64(-2)} ${le56(1)}\")")
+  "0s: failed: line 2, column 5: 65536 does not fit in 2 bytes" \
+    (runs "n = 0x10000\nx = be16(n)")
+  "line 1, column 10: 65536 does not fit in 2 bytes" \
+    (runs "x = be16(0x10000)")
+  "line 1, column 10: -32769 does not fit in 2 bytes" \
+    (runs "x = be16(-32769)")
+  "line 1, column 10: 65536 does not fit in 2 bytes" \
+    (runs "x = le16(1 << 16)")
+  "line 1, column 10: 16777232 does not fit in 3 bytes" \
+    (runs "x = be24(0x1000000 | ACK)")
+  "0s: #1000 #ffff #8000\n0s: done" \
+    (runs "print(\"${be16(0x1000)} ${be16(0xffff)} ${be16(-(1 << 15))}\")")
+  "0s: #ffffffffffffffff\n0s: done" \
+    (runs "print(\"${be64(-1)}\")")
+*)
+(* What encode makes, checked against the pseudo header: sent as fragments, the
+ * last first, it makes a datagram that the receiver takes and whose checksum
+ * is that of the same datagram sent whole. It sends nothing, with or without a
+ * stack, and leaves no node: *)
+(*$= runs & ~printer:identity
+  "0s: #03e800350015865868656c6c6f2c20776f726c6421\n0s: #0000\n0s: done" \
+    (runs "/IP!(dst=10.0.0.2, proto=17, id=7, more_frags=true, frag_offset=3, tot_len=9) {\n  d = encode(UDP(src=1000, dst=53)/Raw(\"hello, world!\"))\n  print(\"${d}\")\n  print(\"${checksum(bytes(10.0.0.1) + bytes(10.0.0.2) + #0011 + be16(length(d)) + d)}\") }")
+  "0s: #0000\n0s: done" \
+    (runs "/IP!(dst=10.0.0.2) {\n  d = encode(TCP!(src=1, dst=2, flags=SYN, seq_num=1)/Raw(\"abc\"))\n  print(\"${checksum(bytes(10.0.0.1) + bytes(10.0.0.2) + #0006 + be16(length(d)) + d)}\") }")
+  "0s: #0000\n0s: done" \
+    (runs "/IP!(dst=10.0.0.2) {\n  print(\"${checksum(encode(ICMP/Echo(id=1)/Request(seq=1, \"abc\")))}\") }")
+  "0s: #4500001d00010000401166cd0a0000010a00000200010002000973d678\n0s: done" \
+    (runs ~frames:true "print(\"${encode(/IP!(dst=10.0.0.2, id=1)/UDP(src=1, dst=2)/Raw(\"x\"))}\")")
+  "0s: #78\n0s: done" \
+    (runs "/IP!(dst=10.0.0.2)/UDP(src=1, dst=2) { print(\"${encode(Raw(\"x\"))}\") }")
+  "0s: #000100020008ebd8\n0s: done" \
+    (runs "/IP!(dst=10.0.0.2) { print(\"${encode(UDP(src=1, dst=2))}\") }")
+  "0s: #00010002000973d678\n0s: done" \
+    (runs "/IP(dst=10.0.0.2) { print(\"${encode(UDP(src=1, dst=2)/Raw(\"x\"))}\") }")
+  "0s: end Eth\n0s: done Eth" \
+    (runs ~trees:true "/IP!(dst=10.0.0.2) {\n  repeat count=2 { x = encode(UDP(src=1, dst=2)/Raw(\"x\")) } }\nx = encode(/IP!(dst=10.0.0.3)/UDP(src=1, dst=2)/Raw(\"x\"))\nprint(\"end\")")
+  "line 1, column 32: encode needs manual layers: TCP!, not TCP" \
+    (runs "/IP(dst=10.0.0.2) { x = encode(TCP(dst=1)/Raw(\"x\")) }")
+  "line 1, column 12: UDP cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP(src=1, dst=2)/Raw(\"x\")\"?" \
+    (runs "x = encode(UDP(src=1, dst=2)/Raw(\"x\"))")
+  "line 1, column 5: encode takes a stack: encode(UDP(src=1, dst=2)/Raw(\"x\"))" \
+    (runs "x = encode(1)")
+  "line 1, column 15: encode cannot be in a condition" \
+    (runs "on for=1s /IP(encode(/IP!(dst=10.0.0.2)/Raw(\"x\")) == #00) { }")
+  "0s: failed: line 2, column 7: Too long for a UDP datagram" \
+    (runs "/IP!(dst=10.0.0.2) {\n  x = encode(UDP(src=1, dst=2)/Raw(randbytes(70000))) }")
+  "b 0.000s: 7 30128 20 abcdefghijkl\na 0.000s: #75b0 #75b0\na 0.000s: done Eth#1\nb 0.000s: 8 30128 20 abcdefghijkl\nb 1.000s: done Eth#4" \
+    (two ~sent:true "/IP!(dst=10.0.0.2, id=7, proto=17) {\n  d = encode(UDP(src=4000, dst=7)/Raw(\"abcdefghijkl\"))\n  ../IP!(frag_offset=1)/Raw(d[8:])\n  ../IP!(more_frags=true)/Raw(d[:8])\n  p = ../IP!(id=8)/UDP(src=4000, dst=7)/Raw(\"abcdefghijkl\")\n  print(\"${d[6:8]} ${be16(p[UDP].checksum)}\") }" \
+         "on for=1s /IP/UDP(dst == 7) { print(\"${MATCH[IP].id} ${MATCH[UDP].checksum} ${MATCH[UDP].length} ${string(MATCH[Raw].data)}\") }")
+  "a 0.000s: #0000\na 0.000s: done Eth\nb 0.000s: 11838 abcdefghijkl\nb 1.000s: done Eth#3" \
+    (two ~v6:true "/IP6!(dst=2001:db8::2, proto=17, frag_id=7) {\n  d = encode(UDP(src=4000, dst=7)/Raw(\"abcdefghijkl\"))\n  print(\"${checksum(bytes(2001:db8::1) + bytes(2001:db8::2) + #000000000011 + be16(length(d)) + d)}\")\n  ../IP6!(frag_offset=1)/Raw(d[8:])\n  ../IP6!(more_frags=true)/Raw(d[:8]) }" \
+         "on for=1s /IP6/UDP(dst == 7) { print(\"${MATCH[UDP].checksum} ${string(MATCH[Raw].data)}\") }")
+  "b 0.000s: done Eth\na 0.000s: #0000\na 0.000s: done Eth" \
+    (two ~v6:true "/IP6!(dst=2001:db8::2) {\n  d = encode(ICMP6/Echo(id=1)/Request(seq=1, \"abc\"))\n  print(\"${checksum(bytes(2001:db8::1) + bytes(2001:db8::2) + #00000000003a + be16(length(d)) + d)}\") }" "")
 *)
 (* Manual TCP options: -1 leaves one out, as it reads when missing; the
  * answer to a manual SYN, missed by a self-driven pattern, which the timeout

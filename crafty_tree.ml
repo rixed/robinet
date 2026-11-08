@@ -357,6 +357,35 @@ let forget = function
     | Frame _ -> ()
     | Marked m -> Mark.release m
 
+(* A top right on the root has no stack to go with: *)
+let prune_top = function
+    | { node = { parent = Some { parent = None ; _ } ; _ } as n ; _ } :: _ -> prune n
+    | _ -> ()
+
+(** What the [n] top layers of that stack, manual, pack to, sending nothing but
+ * using up what a send does (ids, sequence numbers). An IP or IP6 right below
+ * them fills in the checksum of what they carry, for that whole packet
+ * whatever its fragment fields. Raises [Failed]. *)
+let encode n stack =
+    let written, below = List.takedrop n stack in
+    let bits, hints =
+        List.fold_left (fun (bits, hints) e ->
+            tell e.node hints ;
+            e.node.ops.pack (fields_of e) hints bits
+        ) (Bitstring.empty_bitstring, []) written in
+    prune_top stack ;
+    match below with
+    | e :: _ when e.node.layer == L.ip || e.node.layer == L.ip6 ->
+        let fields = function
+            | "id" -> Some (Int 0)
+            | "tot_len" | "more_frags" | "frag_offset" | "frag_id" -> None
+            | name -> fields_of e name in
+        let packet, _ = e.node.ops.pack fields hints bits in
+        (match e.node.layer.unpack [] packet with
+        | Some u -> u.payload
+        | None -> invalid_arg "Crafty_tree.encode: IP does not unpack what it packs")
+    | _ -> bits
+
 (** Sends a packet down that stack, from its top (a terminal layer): each
  * manual layer packs what is above it, until a self-driven one takes it, or
  * the root, which emits it as it is. Returns the packet: what was packed,
@@ -394,10 +423,7 @@ let send ?(mark=false) stack =
                 | rest ->
                     loop hints bits rest)) in
     let bits, hints, driven, emitted = loop [] Bitstring.empty_bitstring stack in
-    (match stack with
-    | { node = { parent = Some { parent = None ; _ } ; _ } as n ; _ } :: _ ->
-        prune n
-    | _ -> ()) ;
+    prune_top stack ;
     (* The packed layers, the bottom first: *)
     let packed = List.rev (List.take (List.length stack - List.length driven) stack) in
     let rec decode_up acc up_hints bits = function
