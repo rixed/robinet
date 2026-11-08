@@ -509,7 +509,7 @@ under:
 | policer | `""` | `max packets`, `max volume`, `max duration`, `max packet rate`, `max throughput`, `max syns`, `max syn rate`; the flags `max packets reached`, `max volume reached`, `max syns reached`, `expired` (which are only reset); and, read only, `start`, `packets`, `volume`, `syns`, `elapsed` |
 | firewall | `""` | `inside rules`, `outside rules`, `uninspectable`, `MAC` |
 | router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `buffer capacity`, `drop hop-by-hop`, `drop segment routing`, `drop IPv6 fragments` |
-| | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay`, `router advertisements`, `router lifetime`, `reverse path filter` |
+| | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay`, `router advertisements`, `router lifetime`, `cur hop limit`, `reverse path filter` |
 | | `admin` | `hostname`, `search suffix`, `prefer IPv6` — the stack answering for all the router's addresses, whichever interface they arrive at |
 | gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
 | | `nat` | `min port`, `port forwards`, `NAT pings`, `send errors`, `answer pings` |
@@ -589,10 +589,11 @@ MAC as a host's. Its neighbor advertisements say it is a router, without
 which a host would drop it from its default routers. With `router advertisements`, off unless set, it advertises
 from it the IPv6 prefixes on its link — those of its addresses, and those
 routed out of it without a `via` that hold one of them — autonomous if /64,
-with its MTU and `router lifetime` (0…9000 seconds, 1800 unless set; 0 is not
-to be used as a default router). It sends three when switched on, 16 seconds
-apart, then one every 200 to 600 seconds, and answers solicitations within
-half a second. The prefixes are valid for 30 days.
+with its MTU, `router lifetime` (0…9000 seconds, 1800 unless set; 0 is not
+to be used as a default router) and `cur hop limit` (0…255, 64 unless set; 0
+leaves it to the hosts, and simulated hosts ignore it). It sends three when
+switched on, 16 seconds apart, then one every 200 to 600 seconds, and answers
+solicitations within half a second. The prefixes are valid for 30 days.
 
 A router's `buffer capacity` is the RAM, in bytes, it holds the frames waiting
 for an interface to be free in. A third of it is reserved to the interfaces in

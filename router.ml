@@ -406,10 +406,11 @@ mutable link_fragmentation : bool ;
                 * of this and the router's probability, after the sum of both
                 * delays: *)
                notify_errs : icmp_probability ;
-               (** Whether router advertisements are sent from here, and the
-                * router lifetime they give, in seconds: *)
+               (** Whether router advertisements are sent from here, the router
+                * lifetime they give, in seconds, and their Cur Hop Limit: *)
                mutable advertise : bool ;
                mutable router_lifetime : int ;
+               mutable cur_hop_limit : int ;
                (* The unsolicited advertisements scheduled by an older
                 * [start_router_adverts] stop when this changes: *)
                mutable ra_gen : int ;
@@ -703,7 +704,8 @@ let router_advert t n =
     let iface = t.ifaces.(n) in
     let prefixes = on_link_prefixes t n in
     if prefixes = [] then None else
-    Some (Icmp6.Pdu.make_router_advert ~lifetime:iface.router_lifetime (
+    Some (Icmp6.Pdu.make_router_advert ~hop_limit:iface.cur_hop_limit
+                                       ~lifetime:iface.router_lifetime (
         Icmp6.Opt.Source_lla (Eth.Ndp.lla iface.eth.mac) ::
         Icmp6.Opt.Mtu iface.eth.mtu ::
         List.map (fun (prefix_len, prefix) ->
@@ -712,6 +714,25 @@ let router_advert t n =
                                valid = ra_valid ; preferred = ra_preferred ;
                                prefix }
         ) prefixes))
+(*$R router_advert
+    let r =
+        make_from_addrs ~parent:(Simulation.make ~realtime:false "ra").root
+            [| [ Ip.Cidr.of_string "2001:db8:1::fe/64", None ],
+               Eth.Addr.random () |] "r" in
+    let advertised () =
+        match router_advert r 0 with
+        | Some { payload = Icmp6.Pdu.Router_advert { hop_limit ; _ } ; _ } ->
+            hop_limit
+        | _ -> assert_failure "no advertisement" in
+    assert_equal ~printer:string_of_int 64 (advertised ()) ;
+    let p = List.find (fun (p : Widget.property) ->
+                p.name = "cur hop limit") r.ifaces.(0).eth.iface.widget.properties in
+    (Option.get p.setter) (`Int 7) ;
+    assert_equal ~printer:string_of_int 7 (advertised ()) ;
+    "and what does not fit a byte is refused" @?
+        (try (Option.get p.setter) (`Int 256) ; false
+         with _ -> true)
+ *)
 
 (* To all nodes, from the link-local address of interface [n]: *)
 let send_router_advert t n =
@@ -1095,7 +1116,8 @@ let iface_make ?speeds ?mtu ?delay ?loss ?inter_frame_gap
     let iface =
         { trx ; eth ; link_fragmentation ;
           max_queue_delay ; notify_errs ; advertise = false ;
-          router_lifetime = 1800 ; ra_gen = 0 ; ra_pending = false ;
+          router_lifetime = 1800 ; cur_hop_limit = 64 ;
+          ra_gen = 0 ; ra_pending = false ;
           rpf = No_rpf ; rpf_dropped = Metric.Counter.make () } in
     Widget.add_properties eth.iface.widget Widget.[
         property "link fragmentation" ~kind:Bool
@@ -1394,7 +1416,13 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                         router."
                 ~getter:(fun () -> `Int iface.router_lifetime)
                 ~setter:(fun v ->
-                    iface.router_lifetime <- to_int_range ~min:0 ~max:9000 v) ] ;
+                    iface.router_lifetime <- to_int_range ~min:0 ~max:9000 v) ;
+            property "cur hop limit" ~kind:(IRange (0, 255))
+                ~descr:"The hop limit advertisements tell hosts to send with; \
+                        0 leaves it to them."
+                ~getter:(fun () -> `Int iface.cur_hop_limit)
+                ~setter:(fun v ->
+                    iface.cur_hop_limit <- to_int_range ~min:0 ~max:255 v) ] ;
         configure_iface t n ;
         (* When packets are received from the outside, go to routing: *)
         iface.trx.ins --> sink (route (Some n) t)
