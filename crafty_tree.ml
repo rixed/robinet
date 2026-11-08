@@ -410,6 +410,8 @@ let send ?(mark=false) stack =
                         Mark.add m bits ;
                         Some (Marked m)
                     ) else None in
+                (* What it arms counts from now, however long [bits] took: *)
+                Simulation.(catch_up (of_widget e.node.eth.iface.widget)) ;
                 (try e.node.ops.send (fields_of e) hints bits
                 with exn -> Option.may forget emitted ; raise exn) ;
                 bits, hints, driven, emitted

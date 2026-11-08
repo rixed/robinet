@@ -52,8 +52,10 @@ let of_literal = function
     | A.Mac mac -> Mac mac
     | A.Cidr c -> Cidr c
 
+let all_bytes = Array.init 256 (fun b -> Byte b)
+
 let bytes_of_string s =
-    Array (Array.init (String.length s) (fun i -> Byte (Char.code s.[i])))
+    Array (Array.init (String.length s) (fun i -> all_bytes.(Char.code s.[i])))
 
 let string_of_bytes a =
     String.init (Array.length a) (fun i ->

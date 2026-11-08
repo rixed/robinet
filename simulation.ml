@@ -831,6 +831,15 @@ let synch (t : t) =
         let upto = try Some (Events.next_ts t.events) with Not_found -> None in
         synch_locked ?upto t) ()
 
+(** {!synch}, if an event took that long, as a timer it arms would otherwise
+ * be due at once. Not for less: the clock stays on the instants asked for,
+ * whatever the small delays in reaching them. *)
+let catch_up ?(after=Interval.msec 100.) (t : t) =
+    if t.realtime then
+        with_lock t (fun () ->
+            if Interval.compare (Time.diff (unpaused_wall_clock t) (now t)) after > 0 then
+                synch t) ()
+
 (* The clock follows the wall clock up to an event yet to run, and no further: *)
 (*$T synch
   let t = make "synch" in \
@@ -844,6 +853,26 @@ let synch (t : t) =
   Unix.sleepf 0.01 ; \
   synch t ; \
   Clock.Interval.(compare (Clock.Time.diff (now t) before) (msec 5.)) > 0
+*)
+
+(* The clock is left alone unless it is that far behind, and if realtime: *)
+(*$T catch_up
+  let t = make "catch-up" in \
+  let before = now t in \
+  catch_up t ; \
+  Unix.sleepf 0.01 ; \
+  catch_up ~after:(Clock.Interval.sec 1.) t ; \
+  Clock.Time.compare (now t) before = 0
+  let t = make "catch-up-late" in \
+  let before = now t in \
+  Unix.sleepf 0.01 ; \
+  catch_up ~after:(Clock.Interval.msec 5.) t ; \
+  Clock.Time.compare (now t) before > 0
+  let t = make ~realtime:false "catch-up-virtual" in \
+  let before = now t in \
+  Unix.sleepf 0.01 ; \
+  catch_up ~after:Clock.Interval.zero t ; \
+  Clock.Time.compare (now t) before = 0
 *)
 
 (*

@@ -485,7 +485,8 @@ let arith loc op a b =
         Interval (Interval.mul a b)
     | A.Mul, Array a, Int n | A.Mul, Int n, Array a ->
         if n < 0 then error loc "Cannot repeat %d times" n ;
-        Array (Array.concat (List.make n a))
+        let len = Array.length a in
+        Array (Array.init (len * n) (fun i -> a.(i mod len)))
     | A.Div, Interval _, Float 0. -> error loc "Division by zero"
     | A.Div, Interval a, Float b -> Interval (Interval.div a b)
     | A.Div, Interval a, Interval b -> Float (Interval.to_secs a /. Interval.to_secs b)
@@ -966,6 +967,7 @@ and exec_value t b env (e : T.expr) k =
 (* Runs that statement in block [b], then [k] with the environment for the
  * next statements: *)
 and exec t b env (s : T.stmt) k =
+    Simulation.catch_up t.power.sim ;
     let eval e = eval t.output env e in
     let guard f = guard b f in
     match s.stmt with
