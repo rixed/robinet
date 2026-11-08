@@ -430,11 +430,19 @@ let ip6_upper (ip : Ip6.Pdu.t) =
     else if ip.proto = Ip.Proto.tcp then N.TCP
     else N.Raw
 
-(* [proto] is that of the upper layer, past the extension headers: *)
+(* [proto] is that of the upper layer, past the extension headers, and the
+ * [frag_] fields those of the fragment header, 0 and false without one: *)
 let ip6_values (ip : Ip6.Pdu.t) =
+    let frag_id, frag_offset, more_frags =
+        List.find_map_opt (function
+            | Ip6.Extension.Fragment f ->
+                Some (Int32.to_int f.id land 0xffff_ffff, f.offset, f.more)
+            | _ -> None) ip.extensions |? (0, 0, false) in
     [ "src", V.Ip ip.src ; "dst", V.Ip ip.dst ; "proto", V.Int (ip.proto :> int) ;
       "traffic_class", V.Int (ip.diff_serv lsl 2 lor ip.ecn) ;
       "hop_limit", V.Int ip.ttl ; "flow_label", V.Int ip.flow_label ;
+      "frag_id", V.Int frag_id ; "frag_offset", V.Int frag_offset ;
+      "more_frags", V.Bool more_frags ;
       "is_fragment", V.Bool (Ip6.Pdu.is_fragment ip) ]
 
 (* As IP: *)
@@ -452,12 +460,21 @@ let unpack_ip6 _ bits =
 
 let ip6_proto_of fields hints = int_of ~hints fields "IP6" "proto" 0 0xff
 
-(* An IPv6 header, without extensions, as given around [payload]: *)
+(* An IPv6 header as given around [payload], with a fragment header if any of
+ * its fields is given (its id 0 if not): *)
 let pack_ip6 fields hints payload =
     let int ~def name hi = int_of ~def fields "IP6!" name 0 hi in
-    if Tools.bytelength payload > 0xffff then V.fail "Too long for an IP6 packet" ;
+    let extensions =
+        if List.for_all (fun n -> fields n = None) [ "frag_id" ; "frag_offset" ; "more_frags" ]
+        then []
+        else [ Ip6.Extension.Fragment {
+                 id = Int32.of_int (int ~def:0 "frag_id" 0xffff_ffff) ;
+                 offset = int ~def:0 "frag_offset" 0x1fff ;
+                 more = bool_of fields "more_frags" ~def:false } ] in
+    if Tools.bytelength payload + 8 * List.length extensions > 0xffff then
+        V.fail "Too long for an IP6 packet" ;
     let tc = int ~def:0 "traffic_class" 0xff in
-    Ip6.Pdu.make ~ttl:(int ~def:64 "hop_limit" 0xff) ~diff_serv:(tc lsr 2)
+    Ip6.Pdu.make ~ttl:(int ~def:64 "hop_limit" 0xff) ~diff_serv:(tc lsr 2) ~extensions
         ~ecn:(tc land 3) ~flow_label:(int ~def:0 "flow_label" 0xfffff)
         (Ip.Proto.o (ip6_proto_of fields hints))
         (ip_of ~v6:true fields "IP6" "src") (ip_of ~v6:true fields "IP6" "dst") payload |>
@@ -1591,6 +1608,9 @@ let ip6 =
         field "hop_limit" Type.Int ~set_in:both ~read_in:both
               ~driven_default:(V.Int 64) ;
         field "flow_label" Type.Int ~read_in:both ~driven_default:(V.Int 0) ;
+        field "frag_id" Type.Int ;
+        field "frag_offset" Type.Int ;
+        field "more_frags" Type.Bool ;
         field "is_fragment" Type.Bool ~set_in:[] ~about:"whether %s is a fragment" ]
 
 (** What the node of any layer tells of its stream: the packets that went

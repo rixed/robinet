@@ -2628,12 +2628,12 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "a 0.000s: hello\na 0.000s: 1440\na 0.000s: done Eth#4{IP6(src=2001:db8::1, dst=2001:db8::2)#2{TCP(src=4000, dst=7)#2{Raw#1}}}" \
     (with_host ~v6:true ~setup:tcp_echo \
         "/IP6(dst=2001:db8::2)/TCP(src=4000, dst=7) {\n  Raw(\"hello\")\n  expect timeout=1s Raw { print(MATCH[Raw].data)\n    print(stats().snd_mss) } }")
-  "a 0.000s: ping false true 17 7 true\na 0.000s: done Eth#2" \
+  "a 0.000s: ping false true 17 7 true 0 true 0 true\na 0.000s: done Eth#2" \
     (with_host ~v6:true ~sent:true \
         "/IP6(dst=2001:db8::2)/UDP(src=4000, dst=7) {\n\
            a = Raw(\"ping\")\n\
            b = Raw(randbytes(3000))\n\
-           print(\"${string(a[Raw].data)} ${a[IP6].is_fragment} ${b[IP6].is_fragment} ${b[IP6].proto} ${b[UDP].dst} ${a[Eth].ts <= b[Eth].ts}\") }")
+           print(\"${string(a[Raw].data)} ${a[IP6].is_fragment} ${b[IP6].is_fragment} ${b[IP6].proto} ${b[UDP].dst} ${a[Eth].ts <= b[Eth].ts} ${a[IP6].frag_id} ${b[IP6].frag_id != 0} ${b[IP6].frag_offset} ${b[IP6].more_frags}\") }")
   "a 0.000s: hello 1440 5\na 0.000s: done Eth#3{IP6(src=2001:db8::1, dst=2001:db8::2)#1{TCP(src=4000, dst=7)#1{Raw}}}" \
     (with_host ~v6:true ~setup:tcp_echo ~sent:true \
         "/IP6(dst=2001:db8::2)/TCP(src=4000, dst=7) {\n\
@@ -2645,6 +2645,12 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "a 0.000s: mtu 1280 for 2001:db8::2 port 33434\na 0.000s: done Eth#2\nb 0.000s: done Eth#2" \
     (two ~v6:true "/IP6(dst=2001:db8::2)/UDP(src=4000, dst=33434)/Raw(\"probe\")\nexpect timeout=1s /IP6/ICMP6/PacketTooBig/IP6/UDP(src == 4000) {\n  print(\"mtu ${MATCH[PacketTooBig].mtu} for ${MATCH[PacketTooBig/IP6].dst} port ${MATCH[UDP].dst}\") }" \
          "expect timeout=1s /IP6/UDP(dst == 33434)/Raw {\n  /IP6(dst=MATCH[IP6].src)/ICMP6/PacketTooBig(mtu=1280)/IP6(src=MATCH[IP6].src, dst=MATCH[IP6].dst)/UDP(src=MATCH[UDP].src, dst=MATCH[UDP].dst)/Raw(MATCH[Raw].data) }")
+  "a 0.000s: frag 3735928559 off 0 more true of 2001:db8::2\na 0.000s: done Eth#2\nb 0.000s: done Eth#2" \
+    (two ~v6:true "/IP6(dst=2001:db8::2)/UDP(src=4000, dst=33434)/Raw(\"probe\")\nexpect timeout=1s /IP6/ICMP6/PacketTooBig/IP6 {\n  q = MATCH[PacketTooBig/IP6]\n  print(\"frag ${q.frag_id} off ${q.frag_offset} more ${q.more_frags} of ${q.dst}\") }" \
+         "expect timeout=1s /IP6/UDP(dst == 33434) {\n  /IP6(dst=MATCH[IP6].src)/ICMP6/PacketTooBig(mtu=1280)/Raw(#6000000000102c4020010db800000000000000000000000120010db800000000000000000000000211000001deadbeef0fa0827a00100000) }")
+  "a 0.000s: done Eth\nb 0.000s: 3735928559 0 true\nb 0.000s: 3735928559 2 false\nb 0.000s: abcdefghijkl\nb 1.000s: done Eth#3" \
+    (two ~v6:true "/IP6!(dst=2001:db8::2, proto=17, frag_id=0xdeadbeef, more_frags=true)/Raw(#0fa00007001400006162636465666768)\n/IP6!(dst=2001:db8::2, proto=17, frag_id=0xdeadbeef, frag_offset=2)/Raw(\"ijkl\")" \
+         "on for=1s /IP6!(is_fragment) { print(\"${MATCH[IP6].frag_id} ${MATCH[IP6].frag_offset} ${MATCH[IP6].more_frags}\") }\non for=1s /IP6/UDP(dst == 7) { print(MATCH[Raw].data) }")
 *)
 (* [policed ?limits ?stop_at ?stop text] is what the program in that text prints,
  * each line with the time to the millisecond, how it ends, then how many

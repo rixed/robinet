@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 fb2caaacf1b29badfeb36ec1eaa06e35) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 0cd2e36f326c44f2b52156fb59772843) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -539,7 +539,13 @@ connection. `IP!` sends the header as given, but for the checksum.
 -   `traffic_class`: int; set M, S; read M, S. Default 0.
 -   `hop_limit`: int; set M, S; read M, S. Default 64.
 -   `flow_label`: int; set M; read M, S. Default 0.
+-   `frag_id`: int; set M; read M. Default 0.
+-   `frag_offset`: int; set M; read M. Default 0.
+-   `more_frags`: bool; set M; read M. Default false.
 -   `is_fragment`: bool; read M.
+
+The `frag_` fields and `more_frags` are those of the fragment header: 0 and
+false without one. `IP6!` has one if any of them is given.
 
 Self-driven IP6 fragments to the MTU and reassembles, as `IP`.
 

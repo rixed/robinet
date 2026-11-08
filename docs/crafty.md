@@ -572,7 +572,13 @@ checksum.
 - `traffic_class`: int; set M, S; read M, S. Default 0.
 - `hop_limit`: int; set M, S; read M, S. Default 64.
 - `flow_label`: int; set M; read M, S. Default 0.
+- `frag_id`: int; set M; read M. Default 0.
+- `frag_offset`: int; set M; read M. Default 0.
+- `more_frags`: bool; set M; read M. Default false.
 - `is_fragment`: bool; read M.
+
+The `frag_` fields and `more_frags` are those of the fragment header: 0 and
+false without one. `IP6!` has one if any of them is given.
 
 Self-driven IP6 fragments to the MTU and reassembles, as `IP`.
 
