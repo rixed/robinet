@@ -2024,7 +2024,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (* expect waits for its pattern, on the stream of the stack, conditions
  * evaluated at match time: *)
 (*$= runs & ~printer:identity
-  "500ms: 10.0.0.2 53 [Eth {dst: 02:00:00:00:00:01, length: 32, proto: 2048, src: 02:00:00:00:00:02, ts: 1970-01-01T00:00:00.5Z}, IP {dont_frag: false, dst: 10.0.0.1, frag_offset: 0, id: 1, is_fragment: false, length: 12, more_frags: false, options: [], proto: 17, src: 10.0.0.2, tos: 0, tot_len: 32, ttl: 64}, UDP {checksum: 2272, dst: 1000, length: 12, src: 53}, Raw {data: #706f6e67, length: 4}]\n500ms: after\n500ms: done" \
+  "500ms: 10.0.0.2 53 [Eth {dst: 02:00:00:00:00:01, length: 32, proto: 2048, src: 02:00:00:00:00:02, ts: 1970-01-01T00:00:00.5Z}, IP {dont_frag: false, dst: 10.0.0.1, frag_offset: 0, id: 1, is_fragment: false, length: 12, more_frags: false, options: [], proto: 17, record_route: [], rr_slots: -1, src: 10.0.0.2, tos: 0, tot_len: 32, ttl: 64}, UDP {checksum: 2272, dst: 1000, length: 12, src: 53}, Raw {data: #706f6e67, length: 4}]\n500ms: after\n500ms: done" \
     (runs ~inject:[ 0.2, reply ~sport:54 "pong" ; 0.3, reply "nope" ; 0.5, reply "pong" ; 0.6, reply "pong" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw(\"pong\") { print(\"${MATCH[IP].src} ${MATCH[UDP].src} ${MATCH}\") }\n  print(\"after\") }")
   "1s: failed: line 2, column 3: Nothing matched within 1s" \
@@ -2052,7 +2052,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (* LAST is the last packet sent by any block: as packed down to the
  * self-driven layers, which only their stack tells: *)
 (*$= runs & ~printer:identity
-  "3ps: [Eth {dst: ?, length: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: ?, id: ?, is_fragment: ?, length: ?, more_frags: ?, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: ?, ttl: 64}, UDP {checksum: ?, dst: 53, length: 10, src: 1000}, Raw {data: #6869, length: 2}]\n3ps: done" \
+  "3ps: [Eth {dst: ?, length: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: ?, id: ?, is_fragment: ?, length: ?, more_frags: ?, options: [], proto: 17, record_route: ?, rr_slots: ?, src: 10.0.0.1, tos: 0, tot_len: ?, ttl: 64}, UDP {checksum: ?, dst: 53, length: 10, src: 1000}, Raw {data: #6869, length: 2}]\n3ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"hi\")\n  print(LAST) }")
   "3ps: #61\n3ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\") }\nprint(\"${LAST[Raw].data}\")")
@@ -2062,7 +2062,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  { Raw(\"b\") }\n  print(\"${LAST[Raw].data}\") }")
   "6ps: 64 1\n6ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  x = LAST[IP].ttl\n  ../../IP(ttl=1)/UDP/Raw(\"b\")\n  print(\"${x} ${LAST[IP].ttl}\") }")
-  "2ps: [Eth {dst: ?, length: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 7, is_fragment: false, length: 10, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 30, ttl: 64}, UDP {checksum: 32593, dst: 53, length: 10, src: 1000}, Raw {data: #6869, length: 2}]\n2ps: done" \
+  "2ps: [Eth {dst: ?, length: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 7, is_fragment: false, length: 10, more_frags: false, options: [], proto: 17, record_route: [], rr_slots: -1, src: 10.0.0.1, tos: 0, tot_len: 30, ttl: 64}, UDP {checksum: 32593, dst: 53, length: 10, src: 1000}, Raw {data: #6869, length: 2}]\n2ps: done" \
     (runs "/IP!(dst=10.0.0.2, id=7)/UDP(src=1000, dst=53)/Raw(\"hi\")\nprint(LAST)")
   "9ps: #61 #6262 #62\n9ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  x = LAST\n  y = x\n  { Raw(\"bb\")\n    y := LAST }\n  Raw(\"b\")\n  print(\"${x[Raw].data} ${y[Raw].data} ${LAST[Raw].data}\") }")
@@ -2677,6 +2677,29 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (with_host ~setup:tcp_echo "/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN)/Raw()\non for=2s timeout=1s /IP/TCP(src == 7) {}")
   "a 1.000s: failed: line 3, column 3: Nothing matched within 1s Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Raw#1}}}" \
     (with_host ~setup:tcp_echo "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Raw(\"hi\")\n  expect timeout=1s /IP/TCP(src == 7)/Raw(data == \"no\") {} }")
+*)
+(* Messages of routers: an advertisement to all nodes, sent with a hop
+ * limit of 255; solicitations, with or without the sender's link-layer
+ * address; a redirect, quoting the packet redirected: *)
+(*$= & ~printer:identity
+  "b 0.000s: 255 ff02::1 64 true false 1800 1400 02:00:00:00:00:01 2001:db8:1::/64 true 86400 14400\nb 0.000s: done Eth#1\na 0.000s: done Eth" \
+    (two ~v6:true "p = {prefix: 2001:db8:1::/64, on_link: true, autonomous: true, valid: 86400, preferred: 14400}\n/IP6(dst=ff02::1)/ICMP6/RouterAdvert(managed=true, mtu=1400, prefixes=[p])" \
+         "expect timeout=1s /IP6/ICMP6/RouterAdvert {\n  r = MATCH[RouterAdvert]\n  p = r.prefixes[0]\n  print(\"${MATCH[IP6].hop_limit} ${MATCH[IP6].dst} ${r.hop_limit} ${r.managed} ${r.other_config} ${r.lifetime} ${r.mtu} ${r.src_lla} ${p.prefix} ${p.on_link} ${p.valid} ${p.preferred}\") }")
+  "a 0.000s: done Eth\nb 0.000s: 02:00:00:00:00:01 8\nb 0.000s: 00:00:00:00:00:00 0\nb 1.000s: done Eth#3" \
+    (two ~v6:true "/IP6(dst=2001:db8::2)/ICMP6 {\n  RouterSolicit()\n  RouterSolicit(src_lla=00:00:00:00:00:00) }" \
+         "on for=1s /IP6/ICMP6/RouterSolicit { print(\"${MATCH[RouterSolicit].src_lla} ${length(MATCH[RouterSolicit].options)}\") }")
+  "a 0.000s: done Eth\nb 0.000s: fe80::1 2001:db8::9 00:00:00:00:00:00 2001:db8::9 53\nb 0.000s: done Eth#2" \
+    (two ~v6:true "/IP6(dst=2001:db8::2)/ICMP6/Redirect(target=fe80::1, dst=2001:db8::9)/IP6(src=2001:db8::2, dst=2001:db8::9)/UDP(src=4000, dst=53)/Raw(\"hello!!!\")" \
+         "expect timeout=1s /IP6/ICMP6/Redirect/IP6/UDP {\n  r = MATCH[Redirect]\n  print(\"${r.target} ${r.dst} ${r.target_lla} ${MATCH[Redirect/IP6].dst} ${MATCH[UDP].dst}\") }")
+*)
+(* Record route: the slots asked for, the first filled if given, and what
+ * a received packet reads; too few slots: *)
+(*$= & ~printer:identity
+  "a 0.000s: done Eth\nb 0.000s: #78 3 [10.0.0.1] 16\nb 0.000s: #79 -1 [] 0\nb 1.000s: done Eth#3" \
+    (two "/IP(dst=10.0.0.2, rr_slots=3, record_route=[10.0.0.1])/UDP(src=1000, dst=9)/Raw(\"x\")\n/IP!(dst=10.0.0.2)/UDP(src=1000, dst=9)/Raw(\"y\")" \
+         "on for=1s /IP/UDP(dst == 9)/Raw { print(\"${MATCH[Raw].data} ${MATCH[IP].rr_slots} ${MATCH[IP].record_route} ${length(MATCH[IP].options)}\") }")
+  "b 0.000s: done Eth\na 0.000s: failed: line 1, column 1: A record_route of 2 addresses needs as many rr_slots, not 1 Eth" \
+    (two "/IP(dst=10.0.0.2, rr_slots=1, record_route=[10.0.0.1, 10.0.0.3])/UDP(src=1000, dst=9)/Raw(\"x\")" "")
 *)
 (* [policed ?limits ?stop_at ?stop text] is what the program in that text prints,
  * each line with the time to the millisecond, how it ends, then how many

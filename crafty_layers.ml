@@ -311,12 +311,24 @@ let ip_upper (ip : Ip.Pdu.t) =
     else if ip.proto = Ip.Proto.tcp then N.TCP
     else N.Raw
 
+(* The slots of the record route option, -1 without one, and the addresses
+ * recorded in them: *)
+let ip_record_route opts =
+    match List.find_map_opt (function
+              | Ip.Pdu.Opt.Rr (ptr, route) -> Some (ptr, route)
+              | _ -> None) opts with
+    | None -> -1, []
+    | Some (ptr, route) -> List.length route, List.take ((ptr - 4) / 4) route
+
 let ip_values (ip : Ip.Pdu.t) =
+    let rr_slots, record_route = ip_record_route ip.options in
     [ "src", V.Ip ip.src ; "dst", V.Ip ip.dst ; "proto", V.Int (ip.proto :> int) ;
       "tos", V.Int (ip.tos :> int) ; "ttl", V.Int ip.ttl ;
       "dont_frag", V.Bool ip.dont_frag ; "id", V.Int ip.id ;
       "more_frags", V.Bool ip.more_frags ; "frag_offset", V.Int ip.frag_offset ;
       "tot_len", V.Int ip.tot_len ; "options", bytes_value (Ip.Pdu.Opt.pack ip.options) ;
+      "record_route", V.Array (Array.of_list (List.map (fun a -> V.Ip a) record_route)) ;
+      "rr_slots", V.Int rr_slots ;
       "is_fragment", V.Bool (Ip.Pdu.is_fragment ip) ]
 
 (* What a fragment tells of the layer on top: the first is the start of it,
@@ -340,12 +352,38 @@ let unpack_ip _ bits =
 
 let ip_proto fields hints = int_of ~hints fields "IP" "proto" 0 0xff
 
-(* Bytes in crafty, that unpack to options that pack back to them: *)
+(* The options as bytes, that unpack to options that pack back to them, or a
+ * record route option of [rr_slots], -1 for none, the first filled with
+ * [record_route]: *)
 let ip_options fields =
-    let options = bytes_of fields "options" in
-    if Tools.bytelength options mod 4 <> 0 || Tools.bytelength options > 40 then
-        V.fail "The options of IP must be a multiple of 4 bytes, up to 40" ;
-    Ip.Pdu.Opt.unpack options
+    match fields "options" with
+    | Some _ ->
+        let options = bytes_of fields "options" in
+        if Tools.bytelength options mod 4 <> 0 || Tools.bytelength options > 40 then
+            V.fail "The options of IP must be a multiple of 4 bytes, up to 40" ;
+        Ip.Pdu.Opt.unpack options
+    | None ->
+        let route =
+            match fields "record_route" with
+            | None -> []
+            | Some (V.Array a) ->
+                Array.to_list a |> List.map (function
+                    | V.Ip a when not (Ip.Addr.is_v6 a) -> a
+                    | V.Ip a ->
+                        V.fail "A record_route has IPv4 addresses, not %s"
+                            (Ip.Addr.to_dotted_string a)
+                    | _ -> invalid_arg "Crafty_layers: record_route is not of addresses")
+            | Some _ -> invalid_arg "Crafty_layers: record_route is not an array" in
+        let n = List.length route in
+        match opt_int fields "rr_slots" (-1) 9 with
+        | Some -1 when n > 0 -> V.fail "A record_route needs rr_slots, not -1"
+        | Some -1 -> []
+        | None when fields "record_route" = None -> []
+        | slots ->
+            let slots = slots |? n in
+            if n > slots then
+                V.fail "A record_route of %d addresses needs as many rr_slots, not %d" n slots ;
+            Ip.Pdu.Opt.[ Rr (4 + 4 * n, route @ List.make (slots - n) Ip.Addr.zero) ]
 
 (* An IPv4 header as given around [payload], its id from [next_id] if not: *)
 let pack_ip next_id fields hints payload =
@@ -474,7 +512,8 @@ let pack_ip6 fields hints payload =
     if Tools.bytelength payload + 8 * List.length extensions > 0xffff then
         V.fail "Too long for an IP6 packet" ;
     let tc = int ~def:0 "traffic_class" 0xff in
-    Ip6.Pdu.make ~ttl:(int ~def:64 "hop_limit" 0xff) ~diff_serv:(tc lsr 2) ~extensions
+    Ip6.Pdu.make ~ttl:(int_of ~hints ~def:64 fields "IP6!" "hop_limit" 0 0xff)
+        ~diff_serv:(tc lsr 2) ~extensions
         ~ecn:(tc land 3) ~flow_label:(int ~def:0 "flow_label" 0xfffff)
         (Ip.Proto.o (ip6_proto_of fields hints))
         (ip_of ~v6:true fields "IP6" "src") (ip_of ~v6:true fields "IP6" "dst") payload |>
@@ -523,8 +562,12 @@ let ip6_node ctx =
                     sink (below.send (fun _ -> None) [ "proto", V.Int ip6_proto ])) ;
                 Hashtbl.add trxs proto t ;
                 t in
+        let hop_limit =
+            match opt_int fields "hop_limit" 0 0xff with
+            | None -> Option.map (int_value "hop_limit" 0 0xff) (List.assoc_opt "hop_limit" hints)
+            | h -> h in
         Ip6.TRX.tx ?tos:(Option.map Ip.ToS.o (opt_int fields "traffic_class" 0 0xff))
-                   ?ttl:(opt_int fields "hop_limit" 0 0xff) t payload) ;
+                   ?ttl:hop_limit t payload) ;
       receive ;
       stats = (fun () -> frag_stats counters) }
 
@@ -897,6 +940,9 @@ let icmp6_upper = function
     | 1 -> Only N.DestUnreachable
     | 2 -> Only N.PacketTooBig
     | 3 -> Only N.TimeExceeded
+    | 133 -> Only N.RouterSolicit
+    | 134 -> Only N.RouterAdvert
+    | 137 -> Only N.Redirect
     | _ -> Only N.Raw
 
 (* What is on top is what follows the checksum, and is told the type and
@@ -914,7 +960,8 @@ let unpack_icmp ~upper _ bits =
 
 (* The message on top tells the type and code, but for [Raw], under which
  * they are options; its own bits are what follows them. The checksum of
- * ICMPv6, which covers the IPv6 addresses too, is left to IP6: *)
+ * ICMPv6, which covers the IPv6 addresses too, is left to IP6, which is told
+ * the hop limit the message requires, if any: *)
 let icmp_node ~v6 _ =
     manual (fun fields hints payload ->
         let typ, code =
@@ -930,7 +977,9 @@ let icmp_node ~v6 _ =
         let msg chk =
             let%bitstring hdr = {| typ : 8 ; code : 8 ; chk : 16 |} in
             concat [ hdr ; payload ] in
-        if v6 then msg 0, [ "proto", V.Int (Ip.Proto.icmpv6 :> int) ]
+        if v6 then
+            msg 0, ("proto", V.Int (Ip.Proto.icmpv6 :> int)) ::
+                   List.filter (fun (n, _) -> n = "hop_limit") hints
         else msg (Tools.sum (msg 0)), [ "proto", V.Int (Ip.Proto.icmp :> int) ])
 
 (* The message on top is told by the type, [request] or [reply]: *)
@@ -1000,6 +1049,161 @@ let icmp_error_node typ ~(mtu : mtu_field) _ =
         let%bitstring hdr = {| mtu lsr 16 : 16 ; mtu land 0xffff : 16 |} in
         concat [ hdr ; payload ],
         [ "type", V.Int typ ; "code", V.Int code ])
+
+(* Neighbor discovery messages that reach programs: those of routers.
+ * Link-layer addresses read 00:00:00:00:00:00 without their option, and,
+ * given so, leave it out; an [mtu] -1 likewise. Given, [options] are all
+ * of them, but for the redirected packet, which is the layer on top. *)
+
+(* The message after the type, code and checksum, which [hints] tell: *)
+let unpack_ndp hints bits =
+    let hint n = match List.assoc_opt n hints with Some (V.Int i) -> i | _ -> -1 in
+    let%bitstring hdr = {| hint "type" : 8 ; hint "code" : 8 ; 0 : 16 |} in
+    match Icmp6.Pdu.unpack (concat [ hdr ; bits ]) with
+    | Ok m -> Some m.payload
+    | Error _ -> None
+
+let lla_value a =
+    V.Mac (Option.map_default (fun a -> Eth.Addr.o (bitstring_of_string a)) Eth.Addr.zero a)
+
+let source_lla = List.find_map_opt (function Icmp6.Opt.Source_lla a -> Some a | _ -> None)
+and target_lla = List.find_map_opt (function Icmp6.Opt.Target_lla a -> Some a | _ -> None)
+
+let ndp_options_value opts = bytes_value (Icmp6.Opt.pack opts)
+
+(* A prefix information option, its fields sorted: *)
+let prefix_info =
+    Type.Record [ "autonomous", Type.Bool ; "on_link", Type.Bool ;
+                  "preferred", Type.Int ; "prefix", Type.Cidr ; "valid", Type.Int ]
+
+let unpack_router_solicit hints bits =
+    match unpack_ndp hints bits with
+    | Some (Router_solicit opts) ->
+        unpacked [ "src_lla", lla_value (source_lla opts) ;
+                   "options", ndp_options_value opts ] bits
+    | _ -> None
+
+let unpack_router_advert hints bits =
+    match unpack_ndp hints bits with
+    | Some (Router_advert r) ->
+        let prefixes =
+            List.filter_map (function
+                | Icmp6.Opt.Prefix p ->
+                    Some (V.Record [| V.Bool p.autonomous ; V.Bool p.on_link ;
+                                      V.Int p.preferred ;
+                                      V.Cidr (Ip.Cidr.o (p.prefix, p.prefix_len)) ;
+                                      V.Int p.valid |])
+                | _ -> None) r.options in
+        unpacked [ "hop_limit", V.Int r.hop_limit ; "managed", V.Bool r.managed ;
+                   "other_config", V.Bool r.other_config ; "flags", V.Int r.flags ;
+                   "lifetime", V.Int r.lifetime ; "reachable", V.Int r.reachable ;
+                   "retrans", V.Int r.retrans ;
+                   "src_lla", lla_value (source_lla r.options) ;
+                   "mtu", V.Int (List.find_map_opt (function
+                                     | Icmp6.Opt.Mtu m -> Some m
+                                     | _ -> None) r.options |? -1) ;
+                   "prefixes", V.Array (Array.of_list prefixes) ;
+                   "options", ndp_options_value r.options ] bits
+    | _ -> None
+
+(* What is on top is the redirected packet, quoted: *)
+let unpack_redirect hints bits =
+    match unpack_ndp hints bits with
+    | Some (Redirect r) ->
+        let redirected, others =
+            List.partition (function Icmp6.Opt.Redirected _ -> true | _ -> false) r.options in
+        let payload =
+            match redirected with
+            | Icmp6.Opt.Redirected p :: _ -> (p :> bitstring)
+            | _ -> empty_bitstring in
+        unpacked [ "target", V.Ip r.target ; "dst", V.Ip r.dst ;
+                   "target_lla", lla_value (target_lla others) ;
+                   "options", ndp_options_value others ]
+                 ~upper:(if bitstring_length payload > 0 then Any N.IP6 else Nothing)
+                 ~payload bits
+    | _ -> None
+
+(* The options given as bytes, or else made from the fields: *)
+let ndp_options layer (fields : fields) of_fields =
+    match fields "options" with
+    | Some _ ->
+        let bits = bytes_of fields "options" in
+        if Tools.bytelength bits mod 8 <> 0 then
+            V.fail "The options of %s must be a multiple of 8 bytes" layer ;
+        Icmp6.Opt.unpack bits
+    | None -> of_fields ()
+
+(* The option of the link-layer address [name], [def] if not given: *)
+let lla_option (fields : fields) name ~def make =
+    match (match fields name with Some (V.Mac m) -> Some m | _ -> def) with
+    | Some m when not (Eth.Addr.eq m Eth.Addr.zero) ->
+        [ make (string_of_bitstring (m :> bitstring)) ]
+    | _ -> []
+
+(* Sent with the hop limit of 255 that receivers check: *)
+let ndp_node typ make ctx =
+    manual (fun fields _ payload ->
+        let m = Icmp6.Pdu.{ msg_type = Icmp6.MsgType.o (typ, 0) ;
+                            payload = make ctx fields payload } in
+        Tools.dropbytes 4 (Icmp6.Pdu.pack m),
+        [ "type", V.Int typ ; "code", V.Int 0 ; "hop_limit", V.Int 255 ])
+
+let router_solicit_node =
+    ndp_node 133 (fun ctx fields _ ->
+        Router_solicit (ndp_options "RouterSolicit" fields (fun () ->
+            lla_option fields "src_lla" ~def:(Some ctx.eth.mac) (fun a -> Icmp6.Opt.Source_lla a))))
+
+let router_advert_node =
+    ndp_node 134 (fun ctx fields _ ->
+        let int ~def name hi = int_of ~def fields "RouterAdvert" name 0 hi
+        and bool name = bool_of fields name ~def:false in
+        let options =
+            ndp_options "RouterAdvert" fields (fun () ->
+                lla_option fields "src_lla" ~def:(Some ctx.eth.mac)
+                    (fun a -> Icmp6.Opt.Source_lla a) @
+                (match opt_int fields "mtu" (-1) 0xffff_ffff with
+                | None | Some -1 -> []
+                | Some m -> [ Icmp6.Opt.Mtu m ]) @
+                (match fields "prefixes" with
+                | Some (V.Array ps) ->
+                    Array.to_list ps |> List.map (function
+                        | V.Record [| V.Bool autonomous ; V.Bool on_link ; preferred ;
+                                      V.Cidr c ; valid |] ->
+                            let prefix, prefix_len = (c :> Ip.Addr.t * int) in
+                            if not (Ip.Addr.is_v6 prefix) then
+                                V.fail "A prefix is of IPv6, not %s" (Ip.Cidr.to_string c) ;
+                            Icmp6.Opt.Prefix {
+                                prefix ; prefix_len ; on_link ; autonomous ; flags = 0 ;
+                                valid = int_value "valid" 0 0xffff_ffff valid ;
+                                preferred = int_value "preferred" 0 0xffff_ffff preferred }
+                        | _ -> invalid_arg "Crafty_layers: not a prefix")
+                | _ -> [])) in
+        Router_advert {
+            hop_limit = int ~def:64 "hop_limit" 0xff ;
+            managed = bool "managed" ; other_config = bool "other_config" ;
+            flags = int ~def:0 "flags" 0x3f ;
+            lifetime = int ~def:1800 "lifetime" 0xffff ;
+            reachable = int ~def:0 "reachable" 0xffff_ffff ;
+            retrans = int ~def:0 "retrans" 0xffff_ffff ; options })
+
+(* The redirected packet, from the layer on top, is cut to the 8 bytes its
+ * option counts in: *)
+let redirect_node =
+    ndp_node 137 (fun _ fields payload ->
+        let addr name =
+            match fields name with
+            | Some (V.Ip a) when Ip.Addr.is_v6 a -> a
+            | Some (V.Ip a) ->
+                V.fail "Redirect takes IPv6 addresses, not %s" (Ip.Addr.to_dotted_string a)
+            | _ -> V.fail "Redirect needs a %s" name in
+        let len = Tools.bytelength payload land (lnot 7) in
+        Redirect {
+            target = addr "target" ; dst = addr "dst" ;
+            options =
+                ndp_options "Redirect" fields (fun () ->
+                    lla_option fields "target_lla" ~def:None (fun a -> Icmp6.Opt.Target_lla a)) @
+                (if len = 0 then []
+                 else [ Icmp6.Opt.Redirected (Payload.o (Tools.takebytes len payload)) ]) })
 
 (* Quoted packets, which are often cut short: as much of them as there is,
  * with no stream, nor anything of the state of one. *)
@@ -1594,6 +1798,9 @@ let ip =
         field "tot_len" Type.Int ;
         field "options" Type.bytes ~set_in:both ~read_in:both
               ~driven_default:(V.Array [||]) ;
+        field "record_route" (Type.Array Type.Ip) ~set_in:both ~read_in:both
+              ~part_of:"options" ;
+        field "rr_slots" Type.Int ~set_in:both ~read_in:both ~part_of:"options" ;
         field "is_fragment" Type.Bool ~set_in:[] ~about:"whether %s is a fragment" ]
 
 let ip6 =
@@ -1720,12 +1927,41 @@ let time_exceeded6 =
     icmp_error ~icmp:icmp6 ~quote:N.IP6 N.TimeExceeded 3 ~mtu:`None
         [ "HOP_LIMIT_EXCEEDED", 0 ]
 
+let router_solicit =
+    layer N.RouterSolicit ~above:[ icmp6 ] ~terminal:true ~node:router_solicit_node
+          ~unpack:unpack_router_solicit [
+        field "src_lla" Type.Mac ~part_of:"options" ;
+        field "options" Type.bytes ]
+
+let router_advert =
+    layer N.RouterAdvert ~above:[ icmp6 ] ~terminal:true ~node:router_advert_node
+          ~unpack:unpack_router_advert [
+        field "hop_limit" Type.Int ;
+        field "managed" Type.Bool ;
+        field "other_config" Type.Bool ;
+        field "flags" Type.Int ;
+        field "lifetime" Type.Int ;
+        field "reachable" Type.Int ;
+        field "retrans" Type.Int ;
+        field "src_lla" Type.Mac ~part_of:"options" ;
+        field "mtu" Type.Int ~part_of:"options" ;
+        field "prefixes" (Type.Array prefix_info) ~part_of:"options" ;
+        field "options" Type.bytes ]
+
+let redirect =
+    layer N.Redirect ~above:[ icmp6 ] ~node:redirect_node ~unpack:unpack_redirect [
+        field "target" Type.Ip ;
+        field "dst" Type.Ip ;
+        field "target_lla" Type.Mac ~part_of:"options" ;
+        field "options" Type.bytes ]
+
 let quoted_ip =
     layer N.IP ~quoted:true ~above:[ dest_unreachable ; time_exceeded ]
         ~node:quoted_ip_node ~unpack:unpack_quoted_ip (quoted_fields ip)
 
 let quoted_ip6 =
-    layer N.IP6 ~quoted:true ~above:[ dest_unreachable6 ; packet_too_big ; time_exceeded6 ]
+    layer N.IP6 ~quoted:true
+        ~above:[ dest_unreachable6 ; packet_too_big ; time_exceeded6 ; redirect ]
         ~node:quoted_ip6_node ~unpack:unpack_quoted_ip6 (quoted_fields ip6)
 
 let quoted_udp =
@@ -1772,7 +2008,7 @@ let raw =
     layer N.Raw ~terminal:true
         ~above:[ eth ; ip ; ip6 ; tcp ; udp ; icmp ; icmp6 ; dest_unreachable ;
                  time_exceeded ; dest_unreachable6 ; packet_too_big ; time_exceeded6 ;
-                 quoted_ip ; quoted_ip6 ; quoted_udp ; quoted_tcp ;
+                 redirect ; quoted_ip ; quoted_ip6 ; quoted_udp ; quoted_tcp ;
                  http_request ; http_answer ; websocket ]
         ~node:raw_node ~unpack:unpack_raw
         ~default:"data" [ field "data" Type.bytes ]
@@ -1819,7 +2055,7 @@ let all =
       echo_message N.Reply 0 ; echo6 ; echo_message ~echo:echo6 N.Request 128 ;
       echo_message ~echo:echo6 N.Reply 129 ;
       dest_unreachable ; time_exceeded ; dest_unreachable6 ; packet_too_big ;
-      time_exceeded6 ; quoted_ip ; quoted_ip6 ; quoted_udp ; quoted_tcp ;
+      time_exceeded6 ; router_solicit ; router_advert ; redirect ; quoted_ip ; quoted_ip6 ; quoted_udp ; quoted_tcp ;
       dns ; dns_message N.Query ~query:true ; dns_message N.Answer ~query:false ;
       http ; http_request ; http_answer ; websocket ; raw ]
 

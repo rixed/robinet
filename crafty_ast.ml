@@ -38,12 +38,13 @@ module Layer_name =
 struct
     type t =
         | Eth | IP | IP6 | TCP | UDP | ICMP | ICMP6 | Echo | Request | Reply
-        | DestUnreachable | TimeExceeded | PacketTooBig | DNS | Query | Answer
-        | HTTP | HttpRequest | HttpAnswer | WebSocket | Raw
+        | DestUnreachable | TimeExceeded | PacketTooBig | RouterSolicit
+        | RouterAdvert | Redirect | DNS | Query | Answer | HTTP | HttpRequest | HttpAnswer | WebSocket | Raw
 
     let all =
         [ Eth ; IP ; IP6 ; TCP ; UDP ; ICMP ; ICMP6 ; Echo ; Request ; Reply ;
-          DestUnreachable ; TimeExceeded ; PacketTooBig ; DNS ; Query ; Answer ;
+          DestUnreachable ; TimeExceeded ; PacketTooBig ; RouterSolicit ;
+          RouterAdvert ; Redirect ; DNS ; Query ; Answer ;
           HTTP ; HttpRequest ; HttpAnswer ; WebSocket ; Raw ]
 
     let to_string = function
@@ -51,6 +52,8 @@ struct
         | ICMP -> "ICMP" | ICMP6 -> "ICMP6" | Echo -> "Echo" | Request -> "Request"
         | Reply -> "Reply" | DestUnreachable -> "DestUnreachable"
         | TimeExceeded -> "TimeExceeded" | PacketTooBig -> "PacketTooBig"
+        | RouterSolicit -> "RouterSolicit" | RouterAdvert -> "RouterAdvert"
+        | Redirect -> "Redirect"
         | DNS -> "DNS" | Query -> "Query" | Answer -> "Answer" | HTTP -> "HTTP"
         | HttpRequest -> "HttpRequest" | HttpAnswer -> "HttpAnswer"
         | WebSocket -> "WebSocket" | Raw -> "Raw"

@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 f28f0366b147af095f7baf0e4f71f48e) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 781f0db09631e10413934fcb5c78cc66) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -505,8 +505,9 @@ bytes of its data.
 
 Self-driven, it carries `IP` and `IP6`, and finds destinations with ARP and
 neighbor discovery. It answers both for an address of its own (`--ip`); the
-host's kernel answers for the interface's. Neighbor discovery never reaches the
-program. `Eth!` frames go out as they are.
+host's kernel answers for the interface's. Neighbor solicitations and
+advertisements never reach the program; the messages of routers do. `Eth!`
+frames go out as they are.
 
 #### `IP`: IPv4
 
@@ -523,6 +524,11 @@ program. `Eth!` frames go out as they are.
 -   `frag_offset`: int; set M; read M.
 -   `tot_len`: int; set M; read M. Default: computed.
 -   `options`: bytes; set M, S; read M, S.
+-   `rr_slots`: int; set M, S; read M, S. The slots of the record route option,
+    up to 9, or -1 without one.
+-   `record_route`: ip\[\]; set M, S; read M, S. The addresses recorded in it.
+    Given, they fill its first slots; `rr_slots` is then their number unless
+    given.
 -   `is_fragment`: bool; read M.
 
 Self-driven IP fragments to the MTU and reassembles. `tos`, `ttl`, `dont_frag`
@@ -596,8 +602,9 @@ retransmitted.
 #### `ICMP6`
 
 -   `type`, `code`: int; set M; read M. As those of `ICMP`. On top: `Echo` (128,
-    129), `DestUnreachable` (1), `PacketTooBig` (2), `TimeExceeded` (3), else
-    `Raw`. `IP6` computes the checksum.
+    129), `DestUnreachable` (1), `PacketTooBig` (2), `TimeExceeded` (3),
+    `RouterSolicit` (133), `RouterAdvert` (134), `Redirect` (137), else `Raw`.
+    `IP6` computes the checksum.
 
 #### `Echo` (on `ICMP` or `ICMP6`)
 
@@ -625,7 +632,41 @@ sequence numbers per stream.
 On top is the start of the packet the error is about: a quoted `IP` (`IP6` under
 `ICMP6`), or `Raw`.
 
-#### Quoted `IP`, `IP6`, `UDP` and `TCP` (on the errors)
+#### `RouterSolicit`, `RouterAdvert` (terminal) and `Redirect` (on `ICMP6`)
+
+`RouterSolicit`:
+
+-   `src_lla`: mac; set M; read M. Default: the interface's.
+
+`RouterAdvert`:
+
+-   `hop_limit`: int; set M; read M. Default 64.
+-   `managed`, `other_config`: bool; set M; read M. Default false.
+-   `flags`: int; set M; read M. The 6 other bits. Default 0.
+-   `lifetime`: int; set M; read M. Seconds. Default 1800.
+-   `reachable`, `retrans`: int; set M; read M. Milliseconds. Default 0.
+-   `src_lla`: mac; set M; read M. Default: the interface's.
+-   `mtu`: int; set M; read M. Default -1.
+-   `prefixes`: records; set M; read M. Default none. Each is
+    `{prefix: cidr, on_link: bool, autonomous: bool, valid: int, preferred: int}`.
+
+`Redirect`:
+
+-   `target`, `dst`: ip; set M; read M. Required.
+-   `target_lla`: mac; set M; read M. Default 00:00:00:00:00:00.
+
+All have `options`: bytes; set M; read M. Given, they are all the options, which
+the other fields of options cannot be given with. A link-layer address reads
+00:00:00:00:00:00 without its option, and given so leaves it out; an `mtu` -1
+likewise. They are sent with a hop limit of 255, which receivers check, unless
+`IP6` is given another. On top of `Redirect` is the start of the packet
+redirected, a quoted `IP6` or `Raw`, cut to a multiple of 8 bytes. `Eth` does
+not take what is sent to all routers (ff02::2) unless promiscuous.
+
+    p = {prefix: 2001:db8:1::/64, on_link: true, autonomous: true, valid: 86400, preferred: 14400}
+    /IP6(dst=ff02::1)/ICMP6/RouterAdvert(mtu=1400, prefixes=[p])
+
+#### Quoted `IP`, `IP6`, `UDP` and `TCP` (on the errors and `Redirect`)
 
 They have the fields of `IP`, `IP6`, `UDP` and `TCP` (but `is_fragment`), all
 readable and settable. They are no streams: a quoted TCP segment is no part of a
