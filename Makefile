@@ -40,6 +40,7 @@ LIB_SOURCES  = \
 	packet.ml \
 	synth.ml \
 	firewall.ml \
+	kernel_route.ml \
 	crafty_ast.ml \
 	crafty_value.ml \
 	crafty_layers.ml \
@@ -104,6 +105,7 @@ C_SOURCES = \
 	tap_wrap.c \
 	iface_wrap.c \
 	sockopt_wrap.c \
+	route_wrap.c \
 	condvar_wrap.c
 
 SOURCES = $(LIB_SOURCES) $(EXAMPLE_SOURCES) $(TEST_SOURCES) robinet.ml \

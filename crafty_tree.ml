@@ -96,6 +96,8 @@ type node =
       uses_port : string -> int -> bool ;
       (* Told the nodes of streams that go away, messages aside: *)
       removed : node -> unit ;
+      (* The kernel's routes, if they are to be followed: *)
+      router : L.router option ;
       ops : L.ops ;
       (* Registered on it, by order of registration: *)
       mutable patterns : pattern list }
@@ -176,7 +178,7 @@ let make_child parent (l : L.layer) key =
               received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
               closing = false ; driven = false ; eth = parent.eth ; ports = parent.ports ;
               local_port = parent.local_port ; uses_port = parent.uses_port ;
-              removed = parent.removed ;
+              removed = parent.removed ; router = parent.router ;
               ops = l.node { eth = parent.eth ;
                              key = (fun name -> key_fields l (current ()) name) ;
                              below_key = (fun name -> key_fields parent.layer parent.key name) ;
@@ -393,12 +395,28 @@ let encode n stack =
  * gives them (those may send it later, or never, or in several packets); and,
  * with [mark], what the interface will emit of it. Raises [Failed]. *)
 let send ?(mark=false) stack =
+    (* The destination of what the self-driven layers [driven] send: that of
+     * their IP layer, or else one that is manual and already in [bits]: *)
+    let routed_dst hints bits driven =
+        match List.find_opt (fun e -> e.node.layer == L.ip || e.node.layer == L.ip6) driven,
+              List.assoc_opt "proto" hints with
+        | Some e, _ ->
+            (match fields_of e "dst" with
+            | Some (Ip a) when L.follows_route a -> Some a
+            | _ -> None)
+        | None, Some (Int p) -> L.routed_dst p bits
+        | None, _ -> None in
     (* What the first self-driven layer is given, with the hints of the layer
      * above it, and the layers from it down: *)
     let rec loop hints bits = function
         | [] ->
             invalid_arg "Crafty_tree.send: empty stack"
         | e :: rest as driven ->
+            (* Before any layer acts on it, as TCP would start a connection: *)
+            if e.mode = L.Driven then
+                Option.may (fun route ->
+                    Option.may (L.check_route route) (routed_dst hints bits driven)
+                ) e.node.router ;
             tell e.node hints ;
             count_sent e.node bits ;
             (match e.mode with
@@ -809,7 +827,7 @@ let dynamic_ports = [ 49152, 65535 ]
  * some (inclusive and disjoint ranges, by layer name), and else from
  * {!dynamic_ports}; those it gives out of its layer's [ports] are told to
  * [on_foreign_port], with these ranges. The root tells which were used. *)
-let make_root ?(ports=[]) ?(on_removed=ignore)
+let make_root ?(ports=[]) ?(on_removed=ignore) ?router
               ?(on_foreign_port=fun _ _ _ _ -> ()) (eth : Eth.State.t) =
     let restricted name =
         match List.assoc_opt (String.uppercase_ascii name) ports with
@@ -830,8 +848,8 @@ let make_root ?(ports=[]) ?(on_removed=ignore)
           children = Hashtbl.create 10 ; users = 0 ; received = 0 ;
           received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
           closing = false ; driven = false ; eth ; ports ; local_port ; uses_port ;
-          removed = on_removed ;
-          ops = L.root.node { eth ; key = (fun _ -> None) ;
+          removed = on_removed ; router ;
+          ops = L.eth_node ?router { eth ; key = (fun _ -> None) ;
                               below_key = (fun _ -> None) ; below = None } ;
           patterns = [] } in
     eth.iface.recv <- receive root ;

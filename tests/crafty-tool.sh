@@ -323,4 +323,50 @@ check "cleaned up after being killed" 0 $? "Cleaned up after crafty_"
 "$CRAFTY" -i $HOST_IF --udp 40000-40010 --fw "$DIR/bad.cfty" > "$DIR/out" 2>&1
 check "a broken program changes nothing" 2 $? "Cannot apply +"
 
+# The kernel's routes: an address only a route reaches, the namespace not
+# answering ARP for it as it is not on the link:
+ip netns exec $NS sysctl -q net.ipv4.conf.all.arp_ignore=1
+ip netns exec $NS ip addr add 10.79.0.1/32 dev lo
+ip route add 10.79.0.0/24 via 10.77.0.2
+ip route add unreachable 10.80.0.0/24
+
+ping_prog() {
+    echo "catch { /IP(dst=$1)/ICMP/Echo { Request(\"x\")
+      expect timeout=500ms Reply { print(\"reply from \${MATCH[IP].src}\") } } }"
+}
+
+"$CRAFTY" --linger 0s -i $HOST_IF -e "$(ping_prog 10.79.0.1)" > "$DIR/out" 2>&1
+check "a route that is not the default one" 0 $? "reply from 10.79.0.1"
+
+"$CRAFTY" --linger 0s -i $HOST_IF --routing manual -e "$(ping_prog 10.79.0.1)" > "$DIR/out" 2>&1
+code=$?
+if grep -q "reply from" "$DIR/out" ; then code=99 ; fi
+check "manual routing ignores the routes" 0 $code
+
+# Without -i, which takes for on-link what has no route. Crafty then needs a
+# default route to pick its interface:
+ip route show default | grep -q . || { ip route add default via 10.77.0.2 ; ADDED_DEFAULT=1 ; }
+"$CRAFTY" --linger 0s -e "$(ping_prog 10.80.0.1)" > "$DIR/out" 2>&1
+check "a route that refuses, caught" 0 $? "Warning: Cannot send to 10.80.0.1"
+"$CRAFTY" --linger 0s -e '/IP(dst=10.80.0.1)/UDP(src=40000, dst=7)/Raw("x")' > "$DIR/out" 2>&1
+code=$?
+check "a route that refuses ends the program" 1 $code "Cannot send to 10.80.0.1"
+check "and warns" 1 $code "Warning: Cannot send to 10.80.0.1"
+[ -n "${ADDED_DEFAULT:-}" ] && ip route del default via 10.77.0.2
+
+ip route del 10.79.0.0/24
+( sleep 0.5 ; ip route add 10.79.0.0/24 via 10.77.0.2 ) &
+"$CRAFTY" --linger 0s -i $HOST_IF -e '/IP(dst=10.79.0.1)/ICMP/Echo {
+  Request("x")
+  wait dur=1s
+  Request("y")
+  catch { expect timeout=500ms Reply { print("reply from ${MATCH[IP].src}") } }
+}' > "$DIR/out" 2>&1
+code=$?
+wait $!
+check "a route that changes during the run" 0 $code "reply from 10.79.0.1"
+
+ip route del 10.79.0.0/24
+ip route del unreachable 10.80.0.0/24
+
 exit $FAILED

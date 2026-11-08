@@ -22,8 +22,8 @@
   and kernel settings, for what a simulation needs of them.
 
   Through the usual commands ([ip], [ethtool]...) rather than through
-  netlink: there is no netlink binding here, this is a handful of commands,
-  and they are what anybody would check the result with by hand in any case.
+  netlink: this is a handful of commands, and they are what anybody would
+  check the result with by hand in any case.
   Changing them wants root (or cap_net_admin), which is left to the commands
   to ask for: a capability given to robinet is not given to what it runs.
 *)

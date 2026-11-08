@@ -194,6 +194,14 @@ Options:
 - `-e PROG`: the program itself, rather than a file.
 - `-i IFACE`: the interface to send from and capture on, rather than that of
   the default route. Crafty needs root.
+- `--routing kernel|manual`: `kernel`, the default on Linux, asks the kernel for
+  the route of each packet, so route changes apply at once. Crafty only uses one
+  interface: what is routed through another, or refused, has no route. Each time
+  a destination loses its route, Crafty warns. With `-i`, routes are looked up through that interface, and what has
+  none there is taken as on-link, as with `ping -I`. Only the destination is
+  asked about, so rules on the source are ignored. `manual`, the only one
+  elsewhere, uses the interface's subnets and default gateways as they are at
+  start.
 - `--tcp LO-HI`, `--udp LO-HI` (repeatable): the ranges to pick source ports
   from, with the program's `PORTS` (see [Budget, ports and permissions](#budget-ports-and-permissions)).
   A program that sends TCP or UDP without a `src` needs them.
@@ -558,13 +566,15 @@ too: the bytes of its data.
 
 - `src`: mac; set M; read M, S. Default: the interface's.
 - `dst`: mac; set M; read M, S. Default: what the interface knows of the
-  destination (neighbors, gateway), without asking.
+  next hop of the route (neighbors, gateway), without asking.
 - `proto`: int; set M; read M, S. Default: the layer on top.
 - `ts`: time; read M, S. When the frame was captured; for what is
   reassembled, the frame that completed it. Unset in `LAST`.
 
-Self-driven, it carries `IP` and `IP6`, and finds destinations with ARP and
-neighbor discovery. It answers both for an address of its own (`--ip`); the
+Self-driven, it carries `IP` and `IP6`, and finds next hops with ARP and
+neighbor discovery. Sending a packet without a route is an error, as is `Eth!`
+without a `dst`; what a layer sends on its own, such as a TCP retransmission, is
+dropped. It answers both for an address of its own (`--ip`); the
 host's kernel answers for the interface's. Neighbor solicitations and
 advertisements never reach the program; the messages of routers do. `Eth!`
 frames go out as they are.

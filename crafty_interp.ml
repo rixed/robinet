@@ -1464,7 +1464,7 @@ let print_status oc = function
  * [mac] and [addresses] (with their prefix lengths), of link [speed]
  * (default 1Gbps), full duplex unless [full_duplex] is false, and of [mtu],
  * sending beyond its subnets to [gateways] (an IP gateway for its family, a
- * MAC one for both), answering ARP and neighbor solicitations for its
+ * MAC one for both), or wherever [router] says if given, answering ARP and neighbor solicitations for its
  * addresses unless [answer_requests] is false,
  * taking the frames for other addresses too if [promisc],
  * picking the local ports it is not given from the ports of [limits] (as
@@ -1479,7 +1479,7 @@ let print_status oc = function
  * simulation, once that device can be connected. *)
 let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         ?(promisc=false)
-        ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu
+        ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu ?router
         ?limits ?format ?report ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
         ?(on_warning=ignore) ?(on_closed=ignore) ?(rx_wire=true) (program : program) =
     let limits = limits |? program.limits in
@@ -1515,7 +1515,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
                         if lo = hi then string_of_int lo
                         else Printf.sprintf "%d-%d" lo hi) ranges)) }) in
     let tree =
-        Crafty_tree.make_root ?ports eth
+        Crafty_tree.make_root ?ports ?router eth
             ~on_removed:on_closed ~on_foreign_port in
     let started = ref None and stopped = ref false in
     Simulation.asap power (fun () ->
@@ -2993,6 +2993,151 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       (List.rev !frames) ;
   assert_equal Done (h.status ()) ;
   assert_bool "idle" (h.idle ())
+*)
+
+(* The kernel's routes decide, over the subnets and gateways of the adapter:
+ * a gateway even for an address on the subnet, a more specific route than the
+ * default one, an address on-link off the subnet, a broadcast, packets without
+ * a route or with one through another interface refused, and manual frames all
+ * the same: *)
+(*$R run
+  let sim = Simulation.make ~realtime:false "crafty-routed" in
+  let ip = Ip.Addr.of_string and mac = Eth.Addr.of_string in
+  let answer ?(kind=Kernel_route.Unicast) ?(ifname="a") ?gateway () =
+      Ok Kernel_route.{ kind ; ifname ; gateway = Option.map ip gateway } in
+  let lookup dst =
+      match Ip.Addr.to_string dst with
+      | "10.0.0.2" | "10.1.0.1" -> answer ~gateway:"10.0.0.253" ()
+      | "10.2.0.1" -> answer ()
+      | "10.0.0.255" -> answer ~kind:Kernel_route.Broadcast ()
+      | "10.0.0.1" -> answer ~kind:Kernel_route.Local ~ifname:"lo" ()
+      | "172.16.0.9" -> answer ~ifname:"b" ()
+      | "10.9.9.9" -> Error "No route: Network is unreachable"
+      | _ -> answer ~gateway:"10.0.0.254" () in
+  let unrouted = ref [] and frames = ref [] in
+  let router =
+      Crafty_layers.make_router ~ifname:"a" ~lookup
+          ~on_unrouted:(fun dst e -> unrouted := (Ip.Addr.to_string dst, e) :: !unrouted) in
+  let p = Result.get_ok (Crafty_interp.compile
+      "PORTS = {udp: [[5000, 5000]]}\n\
+       wait dur=1s\n\
+       /IP(dst=10.0.0.2)/UDP(dst=7)/Raw(\"on-subnet\")\n\
+       /IP(dst=10.1.0.1)/UDP(dst=7)/Raw(\"specific\")\n\
+       /IP(dst=10.2.0.1)/UDP(dst=7)/Raw(\"on-link\")\n\
+       catch { /IP(dst=10.9.9.9)/UDP(dst=7)/Raw(\"unrouted\") }\n\
+       catch { /IP(dst=10.0.0.1)/UDP(dst=7)/Raw(\"local\") }\n\
+       catch { /IP(dst=172.16.0.9)/UDP(dst=7)/Raw(\"elsewhere\") }\n\
+       wait dur=1s\n\
+       /IP(dst=10.0.0.255)/UDP(dst=7)/Raw(\"broadcast\")\n\
+       /Eth!/IP!(src=10.0.0.1, dst=10.1.0.1)/UDP!(src=5000, dst=7)/Raw(\"manual\")") in
+  let dev, h =
+      run ~parent:sim.SimTypes.root ~mac:(mac "02:00:00:00:00:01")
+          ~addresses:[ Ip.Cidr.of_string "10.0.0.1/24" ]
+          ~gateways:[ Eth.Gateway.Ip (ip "10.0.0.254") ]
+          ~answer_requests:false ~router p in
+  Tools.(dev --> sink (fun bits ->
+      let d = describe bits in
+      frames := d :: !frames ;
+      if String.ends_with d " ARP" then
+          match Eth.Pdu.unpack bits with
+          | Error _ -> ()
+          | Ok f ->
+              match Arp.Pdu.unpack (f.payload :> Bitstring.bitstring) with
+              | Error _ -> ()
+              | Ok a ->
+                  let from = mac "02:00:00:00:00:fd" in
+                  let reply =
+                      Arp.Pdu.make_reply Arp.HwType.eth Arp.HwProto.ip4
+                          (from :> Bitstring.bitstring) a.target_proto
+                          a.sender_hw a.sender_proto |> Arp.Pdu.pack in
+                  Simulation.delay sim.root.power (Clock.Interval.msec 1.) dev.Tools.write
+                      Eth.Pdu.(pack (make Eth.Proto.arp from f.src reply)))) ;
+  Simulation.run sim false ;
+  assert_equal ~printer:(String.concat "\n")
+      [ "02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP" ;
+        "02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP" ;
+        "02:00:00:00:00:01>02:00:00:00:00:FD IP 10.0.0.1>10.0.0.2 ttl=64 UDP 5000>7 \"on-subnet\"" ;
+        "02:00:00:00:00:01>02:00:00:00:00:FD IP 10.0.0.1>10.1.0.1 ttl=64 UDP 5000>7 \"specific\"" ;
+        "02:00:00:00:00:01>02:00:00:00:00:FD IP 10.0.0.1>10.2.0.1 ttl=64 UDP 5000>7 \"on-link\"" ;
+        "02:00:00:00:00:01>FF:FF:FF:FF:FF:FF IP 10.0.0.1>10.0.0.255 ttl=64 UDP 5000>7 \"broadcast\"" ;
+        "02:00:00:00:00:01>02:00:00:00:00:FD IP 10.0.0.1>10.1.0.1 ttl=64 UDP 5000>7 \"manual\"" ]
+      (List.rev !frames) ;
+  assert_equal ~printer:dump
+      [ "172.16.0.9", "its route goes through b, not a" ;
+        "10.0.0.1", "it is an address of this host" ;
+        "10.9.9.9", "No route: Network is unreachable" ] !unrouted ;
+  assert_equal Done (h.status ()) ;
+  assert_bool "idle" (h.idle ())
+*)
+
+(* What has no route ends the program at the statement that sends it, whatever
+ * its layers, and nothing leaves; what a layer sends on its own is dropped,
+ * which is told each time the route goes away, not at each packet: *)
+(*$inject
+  let routed_run text ~lookup =
+      let sim = Simulation.make ~realtime:false "crafty-unrouted" in
+      let unrouted = ref [] and frames = ref 0 in
+      let router =
+          Crafty_layers.make_router ~ifname:"a" ~lookup:(lookup sim)
+              ~on_unrouted:(fun dst e -> unrouted := (Ip.Addr.to_string dst, e) :: !unrouted) in
+      let dev, h =
+          run ~parent:sim.SimTypes.root ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
+              ~addresses:[ Ip.Cidr.of_string "10.0.0.1/24" ]
+              ~gateways:[] ~answer_requests:false ~router
+              (Result.get_ok (Crafty_interp.compile text)) in
+      Tools.(dev --> sink (fun _ -> incr frames)) ;
+      Simulation.run sim false ;
+      (match h.status () with
+      | Failed e -> IO.to_string print_error e
+      | _ -> "done"), List.rev !unrouted, !frames
+  let via ?(gateway="10.0.0.254") () =
+      Ok Kernel_route.{ kind = Unicast ; ifname = "a" ;
+                        gateway = Some (Ip.Addr.of_string gateway) }
+  let no_route = "No route: Network is unreachable"
+*)
+(*$R routed_run
+  let ports = "PORTS = {udp: [[5000, 5000]], tcp: [[5000, 5000]]}\n" in
+  let refused text =
+      let status, told, frames =
+          routed_run (ports ^ text) ~lookup:(fun _ _ -> Error no_route) in
+      assert_equal ~printer:identity
+          ("line 2, column 1: Cannot send to 10.9.9.9: "^ no_route) status ;
+      assert_equal [ "10.9.9.9", no_route ] told ;
+      assert_equal ~printer:string_of_int 0 frames in
+  refused "/IP(dst=10.9.9.9)/UDP(dst=7)/Raw(\"x\")" ;
+  refused "/IP(dst=10.9.9.9)/TCP(dst=80)/Raw(\"x\")" ;
+  refused "/IP!(src=10.0.0.1, dst=10.9.9.9)/UDP!(src=5000, dst=7)/Raw(\"x\")" ;
+  let status, told, frames =
+      routed_run (ports ^ "/Eth!/IP!(src=10.0.0.1, dst=10.9.9.9)/UDP!(src=5000, dst=7)/Raw(\"x\")")
+                 ~lookup:(fun _ _ -> Error no_route) in
+  assert_bool status (String.exists status "No route to 10.9.9.9") ;
+  assert_equal [ "10.9.9.9", no_route ] told ;
+  assert_equal ~printer:string_of_int 0 frames ;
+  (* Not when it is caught, the next packet being asked about again: *)
+  let status, told, _ =
+      routed_run (ports ^ "retry max=2 { /IP(dst=10.9.9.9)/UDP(dst=7)/Raw(\"x\") }")
+                 ~lookup:(fun _ _ -> Error no_route) in
+  assert_bool status (String.exists status "Cannot send to 10.9.9.9") ;
+  assert_equal [ "10.9.9.9", no_route ] told ;
+  (* A route gone after the SYN, which TCP then retransmits: *)
+  let gone = ref false in
+  let status, told, _ =
+      routed_run (ports ^ "/IP(dst=10.9.9.9)/TCP(dst=80) {\n  Raw(\"x\")\n  wait dur=5s\n}")
+          ~lookup:(fun sim ->
+              Simulation.delay sim.SimTypes.root.power (Clock.Interval.msec 500.)
+                  (fun () -> gone := true) () ;
+              fun _ -> if !gone then Error no_route else via ()) in
+  assert_equal ~printer:identity "done" status ;
+  assert_equal [ "10.9.9.9", no_route ] told ;
+  (* A route that flaps is told each time it goes away, or changes reason: *)
+  let answers = ref [ Error "a" ; Error "a" ; via () ; Error "a" ; Error "b" ] in
+  let told = ref [] in
+  let route =
+      Crafty_layers.make_router ~ifname:"a"
+          ~lookup:(fun _ -> let a = List.hd !answers in answers := List.tl !answers ; a)
+          ~on_unrouted:(fun _ e -> told := e :: !told) in
+  List.iter (fun _ -> ignore (route (Ip.Addr.of_string "10.9.9.9"))) !answers ;
+  assert_equal ~printer:dump [ "b" ; "a" ; "a" ] !told
 *)
 
 (* [filters text frame] is whether that frame matches the filter of that

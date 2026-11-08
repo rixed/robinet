@@ -101,6 +101,7 @@ let default_max_duration = Clock.Interval.min 10.
 
 let () =
     let ifname = ref "" and own_ip = ref None and ports = ref []
+    and routing = ref None
     and fw = ref false and print_packets = ref false
     and print_only = ref None and stats = ref false and cleanup = ref false
     and check = ref false and normalize = ref false and format = ref Human
@@ -172,6 +173,10 @@ let () =
     (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
     specs := Arg.align [
         "-i", Arg.Set_string ifname, "IFACE the interface to use (default: that of the default route)" ;
+        "--routing",
+            Arg.Symbol ([ "kernel" ; "manual" ], fun s -> routing := Some (s = "kernel")),
+            " ask the kernel for each packet's route (default, on Linux), or use the \
+              interface's subnets and default gateways as they are at start" ;
         "-e", Arg.String (fun s -> set_prog "-e" (lazy s)),
             "PROG the program, rather than from a file" ;
         "--ip", Arg.String (fun s -> own_ip := Some (Ip.Addr.of_dotted_string s)),
@@ -350,6 +355,20 @@ let () =
         denied_literals ~local:(known r.local_ips) ~remote:(known r.remote_ips) ~mac:None ;
         Printf.printf "%s: OK\n" prog_name ;
         exit 0) ;
+    let kernel_routing =
+        match !routing with
+        | Some true when not (Kernel_route.available ()) ->
+            die "--routing kernel works only on Linux."
+        | Some r -> r
+        | None -> Kernel_route.available () in
+    (* The interface chosen goes first: the kernel takes for on-link what has
+     * no route through it. Otherwise it is free to tell of no route, or of
+     * another interface. Link-local addresses mean nothing without one: *)
+    let oif_of =
+        let chosen = !ifname <> "" in
+        fun dst ->
+            if chosen || (Ip.Addr.is_v6 dst && Ip.Addr.is_link_local dst)
+            then !ifname else "" in
     if !ifname = "" then (
         match Host_config.default_ifname () with
         | Some i -> ifname := i
@@ -416,6 +435,7 @@ let () =
     if !Host_config.verbose then (
         info "Interface %s: %s %s-duplex, MTU %d." !ifname
             (EthSpeed.to_string speed) (if full_duplex then "full" else "half") mtu ;
+        info "Routing: %s." (if kernel_routing then "the kernel's" else "manual") ;
         info "Budget: %s." (if limits.budget = [] then "none" else
             String.concat ", " (List.map (fun (n, l) ->
                 n ^" "^ Crafty_value.(to_string (Crafty_typing.type_of_literal l) (of_literal l)))
@@ -529,9 +549,21 @@ let () =
      * returns: *)
     let handle = ref None in
     let idle () = Option.map_default (fun h -> h.Crafty_interp.idle ()) true !handle in
+    let on_unrouted dst reason =
+        if not !no_warning then
+            let text =
+                Printf.sprintf "Cannot send to %s: %s"
+                    (Ip.Addr.to_dotted_string dst) reason in
+            if format = Human then
+                Printf.eprintf "%s: Warning: %s\n%!" prog_name text
+            else emit "warning" [ "text", `String text ] in
+    let router =
+        if not kernel_routing then None else
+        Some (Crafty_layers.make_router ~ifname:!ifname ~on_unrouted
+                  ~lookup:(fun dst -> Kernel_route.lookup ~oif:(oif_of dst) dst)) in
     let dev, h =
         Crafty_interp.run ~parent:sim.root ~mac:iface.mac ~addresses
-            ~speed ~full_duplex ~mtu
+            ~speed ~full_duplex ~mtu ?router
             ~gateways:(List.map (fun gw -> Eth.Gateway.Ip gw) iface.gateways)
             (* The kernel answers for its own address: *)
             ~answer_requests:(!own_ip <> None) ~promisc

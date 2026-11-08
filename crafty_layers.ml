@@ -157,6 +157,14 @@ type ops =
        * or the counts of {!stream_stats}, which it then replaces: *)
       stats : unit -> (string * V.value) list }
 
+(** What follows a route: *)
+type next_hop = Resolve of Ip.Addr.t | To_mac of Eth.Addr.t
+
+(** The kernel's routes, which replace the subnets and gateways of the root's
+ * adapter for the frames the program builds. Asked for every packet: its next
+ * hop, or why it has none: *)
+type router = Ip.Addr.t -> (next_hop, string) result
+
 (** What a node is made with: *)
 type context =
     { eth : Eth.State.t ;
@@ -237,15 +245,88 @@ let with_length ~terminal u =
 let ip4 = (Eth.Proto.ip4 :> int)
 and ip6_proto = (Eth.Proto.ip6 :> int)
 
+(* The MAC of [ip] as far as [st] knows, as neighbors are not asked: *)
+let known_mac (st : Eth.State.t) ip =
+    match Tools.BitHash.find st.neighbors ip with
+    | Some mac -> mac
+    | None | exception Not_found ->
+        V.fail "The MAC address of %s is not known: Eth! needs a dst"
+            (Ip.Addr.to_dotted_string (Ip.Addr.of_bitstring ip))
+
+(* Neither a broadcast nor an IPv6 group follows a route: *)
+let follows_route a =
+    not (Bitstring.equals (Ip.Addr.to_bitstring a) Eth.TRX.broadcast_bits ||
+         (Ip.Addr.is_v6 a && Ip.Addr.is_multicast a))
+
+(* The destination of the IP packet [payload], if it follows a route: *)
+let routed_dst proto payload =
+    match Eth.Pdu.extract_dst_proto (Eth.Proto.o proto) payload with
+    | Ok dst when proto = ip4 || proto = ip6_proto ->
+        let a = Ip.Addr.of_bitstring dst in
+        if follows_route a then Some a else None
+    | _ -> None
+
+(* The MAC address of an IPv4 group (RFC 1112, 6.4): *)
+let ip4_multicast_mac a =
+    let b = Bitstring.string_of_bitstring (Ip.Addr.to_bitstring a) in
+    Eth.Addr.of_string (Printf.sprintf "01:00:5e:%02x:%02x:%02x"
+        (Char.code b.[1] land 0x7f) (Char.code b.[2]) (Char.code b.[3]))
+
+(* A router for the interface [ifname], asking [lookup], a question to the
+ * kernel. [on_unrouted] is told each time a destination loses its route or the
+ * reason changes, so that a route that flaps shows every time: *)
+let make_router ~ifname ~lookup ~on_unrouted =
+    let route dst =
+        match lookup dst with
+        | Error e -> Error e
+        | Ok (a : Kernel_route.answer) ->
+            match a.kind with
+            | Local -> Error "it is an address of this host"
+            | Unroutable -> Error "the kernel refuses to route it"
+            | _ when a.ifname <> ifname ->
+                Error (Printf.sprintf "its route goes through %s, not %s" a.ifname ifname)
+            | Broadcast -> Ok (To_mac Eth.Addr.broadcast)
+            | Multicast -> Ok (To_mac (ip4_multicast_mac dst))
+            | Unicast -> Ok (Resolve (a.gateway |? dst)) in
+    let unrouted = Hashtbl.create 3 in
+    fun dst ->
+        let r = route dst in
+        (match r with
+        | Ok _ -> Hashtbl.remove unrouted dst
+        | Error e ->
+            if Hashtbl.find_option unrouted dst <> Some e then (
+                Hashtbl.replace unrouted dst e ;
+                on_unrouted dst e)) ;
+        r
+
+(* Fails if [route] has nothing for [dst]: *)
+let check_route route dst =
+    match route dst with
+    | Ok _ -> ()
+    | Error e -> V.fail "Cannot send to %s: %s" (Ip.Addr.to_dotted_string dst) e
+
+(* Sends the IP packet [bits] along the route to [dst], which [Eth.TRX.tx]
+ * would otherwise find from the configuration of [st], or drops it if there is
+ * none: what a layer sends on its own (TCP retransmitting) survives a route
+ * that goes away for a while. *)
+let send_routed (st : Eth.State.t) route dst bits =
+    if Tools.bytelength bits > st.mtu then
+        Log.(log st.iface.widget.logger Warning (lazy (Printf.sprintf
+            "Dropping a frame larger than MTU (%d > %d)" (Tools.bytelength bits) st.mtu)))
+    else
+        match route dst with
+        | Error _ -> ()
+        | Ok (To_mac mac) ->
+            Eth.TRX.send st (Eth.TRX.proto_of bits) mac bits
+        | Ok (Resolve ip) ->
+            (match Eth.TRX.resolve st (bits, ignore) (Ip.Addr.to_bitstring ip) with
+            | Dst mac -> Eth.TRX.send st (Eth.TRX.proto_of bits) mac bits
+            | Postponed -> ())
+
 (* Where a frame of [proto] carrying [payload] goes, from what the interface
  * knows already, as neighbors are not asked: *)
 let next_mac (st : Eth.State.t) proto payload =
-    let known ip =
-        match Tools.BitHash.find st.neighbors ip with
-        | Some mac -> mac
-        | None | exception Not_found ->
-            V.fail "The MAC address of %s is not known: Eth! needs a dst"
-                (Ip.Addr.to_dotted_string (Ip.Addr.of_bitstring ip)) in
+    let known = known_mac st in
     match Eth.Pdu.extract_dst_proto (Eth.Proto.o proto) payload with
     | Ok dst when proto = ip4 || proto = ip6_proto ->
         let a = Ip.Addr.of_bitstring dst in
@@ -276,8 +357,9 @@ let unpack_eth _ bits =
 (* The root: an Ethernet interface, which a self-driven Eth sends IP and IP6
  * through, resolving with ARP and neighbor discovery. It does both itself,
  * and takes the frames for its addresses (and the multicast groups of its
- * IPv6 ones), or all of them if promiscuous: *)
-let eth_node ctx =
+ * IPv6 ones), or all of them if promiscuous. Next hops come from [router],
+ * or else from the configuration of the interface: *)
+let eth_node ?router ctx =
     let st = ctx.eth in
     let trx = Eth.TRX.make st in
     let receive _ (u : unpacked) =
@@ -295,11 +377,23 @@ let eth_node ctx =
         let dst =
             match fields "dst" with
             | Some (V.Mac m) -> m
-            | _ -> next_mac st proto payload in
+            | _ ->
+                match router, routed_dst proto payload with
+                | Some r, Some dst ->
+                    (match r dst with
+                    | Ok (To_mac m) -> m
+                    | Ok (Resolve ip) -> known_mac st (Ip.Addr.to_bitstring ip)
+                    | Error e ->
+                        V.fail "No route to %s, %s: Eth! needs a dst"
+                            (Ip.Addr.to_dotted_string dst) e)
+                | _ -> next_mac st proto payload in
         Eth.Pdu.(pack (make (Eth.Proto.o proto) src dst payload)), []) with
       send = (fun _ hints payload ->
         match List.assoc_opt "proto" hints with
-        | Some (V.Int p) when p = ip4 || p = ip6_proto -> Tools.tx trx payload
+        | Some (V.Int p) when p = ip4 || p = ip6_proto ->
+            (match router, routed_dst p payload with
+            | Some r, Some dst -> send_routed st r dst payload
+            | _ -> Tools.tx trx payload)
         | _ -> V.fail "A self-driven Eth carries only IP and IP6: use Eth!") ;
       receive ;
       busy_for = Eth.Iface.tx_busy_for st.iface }
@@ -1769,7 +1863,7 @@ let quoted_fields (l : layer) =
                       read_in = [ Manual ] ; discriminant = false ; pick = None })
 
 let eth =
-    layer N.Eth ~driven:true ~node:eth_node ~unpack:unpack_eth [
+    layer N.Eth ~driven:true ~node:(fun ctx -> eth_node ctx) ~unpack:unpack_eth [
         field "src" Type.Mac ~read_in:both ;
         field "dst" Type.Mac ~read_in:both ;
         field "proto" Type.Int ~read_in:both ~discriminant:true
