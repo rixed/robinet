@@ -601,7 +601,7 @@ Self-driven IP6 fragments to the MTU and reassembles, as `IP`.
 - `sack_ok`: bool; set M; read M. Whether SACK is permitted.
 
 The fields of the options cannot be given with `options`. A missing `ts_val` or
-`ts_ecr` is 0. Self-driven, `mss` and `wscale` are what the connection
+`ts_ecr` is 0. Given -1, as they read without their option, they leave it out. Self-driven, `mss` and `wscale` are what the connection
 offers (-1 offers no window scaling, which caps its window at 64KiB); a `TCP!`
 over it does not send them.
 

@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 0cd2e36f326c44f2b52156fb59772843) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 f28f0366b147af095f7baf0e4f71f48e) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -568,9 +568,10 @@ Self-driven IP6 fragments to the MTU and reassembles, as `IP`.
 -   `sack_ok`: bool; set M; read M. Whether SACK is permitted.
 
 The fields of the options cannot be given with `options`. A missing `ts_val` or
-`ts_ecr` is 0. Self-driven, `mss` and `wscale` are what the connection offers
-(-1 offers no window scaling, which caps its window at 64KiB); a `TCP!` over it
-does not send them.
+`ts_ecr` is 0. Given -1, as they read without their option, they leave it out.
+Self-driven, `mss` and `wscale` are what the connection offers (-1 offers no
+window scaling, which caps its window at 64KiB); a `TCP!` over it does not send
+them.
 
 Self-driven, the first message sent connects, and what follows waits for the
 connection. A TCP stream created by a pattern accepts the connection instead.

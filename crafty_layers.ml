@@ -585,7 +585,8 @@ let tcp_option_values opts =
       "ts_val", ts fst ; "ts_ecr", ts snd ]
 
 (* The options of a segment as given, either as bytes, or by their fields,
- * which go in the order of Linux: *)
+ * which go in the order of Linux; a field -1, as it reads when the option is
+ * missing, is as not given: *)
 let tcp_options (fields : fields) =
     let open Tcp.Pdu.Opt in
     match fields "options" with
@@ -595,19 +596,19 @@ let tcp_options (fields : fields) =
             V.fail "The options of TCP must be a multiple of 4 bytes, up to 40" ;
         unpack options
     | None ->
+        let opt name hi =
+            match opt_int fields name (-1) hi with Some -1 -> None | v -> v in
         let ts =
-            match opt_int fields "ts_val" 0 0xffff_ffff,
-                  opt_int fields "ts_ecr" 0 0xffff_ffff with
+            match opt "ts_val" 0xffff_ffff, opt "ts_ecr" 0xffff_ffff with
             | None, None -> None
             | v, e -> Some (Int32.of_int (v |? 0), Int32.of_int (e |? 0)) in
-        Option.map_default (fun m -> [ Mss m ]) [] (opt_int fields "mss" 0 0xffff) @
+        Option.map_default (fun m -> [ Mss m ]) [] (opt "mss" 0xffff) @
         (match bool_of fields "sack_ok" ~def:false, ts with
         | true, Some (v, e) -> [ Sack_permitted ; Timestamps (v, e) ]
         | false, Some (v, e) -> [ Nop ; Nop ; Timestamps (v, e) ]
         | true, None -> [ Nop ; Nop ; Sack_permitted ]
         | false, None -> []) @
-        Option.map_default (fun s -> [ Nop ; Wscale s ]) []
-            (opt_int fields "wscale" 0 0xff)
+        Option.map_default (fun s -> [ Nop ; Wscale s ]) [] (opt "wscale" 0xff)
 
 (* Only the ports and the sequence number are sure to be quoted; the other
  * fields read 0 when cut off: *)

@@ -821,7 +821,9 @@ let push t b env depth overlay (layers : T.layer list) =
                     Crafty_tree.acquire node ;
                     b.cleanups <- (fun () -> Crafty_tree.release node) :: b.cleanups) ;
                 node in
-        if l.mode = Crafty_layers.Driven then node.ops.drive () ;
+        if l.mode = Crafty_layers.Driven then (
+            node.driven <- true ;
+            node.ops.drive ()) ;
         Crafty_tree.{ node ; mode = l.mode ; options } :: stack
     ) base layers
 
@@ -854,7 +856,7 @@ let match_value packet = packet_value (Crafty_tree.complete packet)
  * Returns what unregisters them: *)
 (* Each case is alternative patterns and what to do of a packet that matches
  * one; a packet goes to one case at most: *)
-let register t b env (cases : (T.pattern list * _) list) ~failed =
+let register t b env (cases : (T.pattern list * _) list) ~failed ~missed =
     let alternative (p : T.pattern) =
         let over = List.rev (List.take (List.length env.stack - p.depth) env.stack) in
         let layers =
@@ -879,9 +881,20 @@ let register t b env (cases : (T.pattern list * _) list) ~failed =
         List.map (fun (e : Crafty_tree.entry) -> e.mode) (List.drop (i + 1) env.stack),
         Crafty_tree.{ player = e.node.layer ; pmode = e.mode ; test = None } :: layers in
     let cases = List.map (fun (ps, matched) -> List.map alternative ps, matched) cases in
-    Crafty_tree.register cases ~failed ~hold:(fun n ->
+    Crafty_tree.register cases ~failed ~missed ~hold:(fun n ->
         Crafty_tree.acquire n ;
         b.cleanups <- (fun () -> Crafty_tree.release n) :: b.cleanups)
+
+(* The error of a pattern that nothing matched within [timeout], telling the
+ * layer it [missed] (see {!Crafty_tree.pattern}), if any: *)
+let nothing_matched loc timeout missed =
+    let hint =
+        match !missed with
+        | None -> ""
+        | Some (l : Crafty_layers.layer) ->
+            let n = Crafty_layers.N.to_string l.name in
+            Printf.sprintf " (%s! would have: that %s stream is not self-driven)" n n in
+    error loc "Nothing matched within %s%s" (Interval.to_short_string timeout) hint
 
 (* Runs that block within [parent], then [k], unless it fails or breaks
  * first; returns the block. Its environment is what [enter] makes of [env]
@@ -1018,7 +1031,7 @@ and exec t b env (s : T.stmt) k =
     | T.Expect { timeout ; cases } ->
         guard (fun () -> timeout_of eval "expect" timeout) |>
         Option.may (fun timeout ->
-            let armed = ref true and unregister = ref ignore in
+            let armed = ref true and unregister = ref ignore and missed = ref None in
             let disarm () = armed := false ; !unregister () in
             let fire f = if !armed && b.live then (disarm () ; f ()) in
             unregister :=
@@ -1030,13 +1043,13 @@ and exec t b env (s : T.stmt) k =
                             ignore (run_block t b inner c.body ~fail:b.fail
                                         ~break_:b.break_ (fun _ -> k env)))) cases)
                     ~failed:(fun where message -> fire (fun () ->
-                        b.fail Crafty_parser.{ where ; message })) ;
+                        b.fail Crafty_parser.{ where ; message }))
+                    ~missed:(fun l -> missed := Some l) ;
             b.cleanups <- disarm :: b.cleanups ;
             Option.may (fun timeout ->
                 Simulation.delay t.power timeout (fun () -> fire (fun () ->
                     ignore (guard (fun () ->
-                        error s.stmt_loc "Nothing matched within %s"
-                            (Interval.to_short_string timeout))))) ()) timeout)
+                        nothing_matched s.stmt_loc timeout missed)))) ()) timeout)
     | T.On { for_ ; linger ; timeout ; max ; cases } ->
         let duration what = Option.map (fun (e : T.expr) ->
             match eval e with
@@ -1100,7 +1113,8 @@ and spawn t b env body for_ =
  * fails [b] after [timeout] without a match. Over once disarmed and its
  * running blocks are done: *)
 and on t b env loc cases ~for_ ~linger ~timeout max =
-    let armed = ref true and over = ref false and unregister = ref ignore in
+    let armed = ref true and over = ref false and unregister = ref ignore
+    and missed = ref None in
     let holds = for_ <> None || Interval.compare linger Interval.zero > 0 in
     let matches = ref 0 in
     let now () = Simulation.now t.power.sim in
@@ -1158,7 +1172,8 @@ and on t b env loc cases ~for_ ~linger ~timeout max =
             ~failed:(fun where message ->
                 if !armed && b.live then (
                     disarm () ;
-                    b.fail Crafty_parser.{ where ; message })) ;
+                    b.fail Crafty_parser.{ where ; message }))
+            ~missed:(fun l -> missed := Some l) ;
     b.cleanups <- disarm :: b.cleanups ;
     let end_ () = disarm () ; check_over () in
     (match for_ with
@@ -1175,9 +1190,7 @@ and on t b env loc cases ~for_ ~linger ~timeout max =
                     Simulation.at t.power until idle ()
                 else (
                     disarm () ;
-                    ignore (guard b (fun () ->
-                        error loc "Nothing matched within %s"
-                            (Interval.to_short_string timeout)))) in
+                    ignore (guard b (fun () -> nothing_matched loc timeout missed))) in
         Simulation.delay t.power timeout idle ()) timeout
 
 and repeat t b env var count items every for_ body body_loc k =
@@ -2651,6 +2664,19 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "a 0.000s: done Eth\nb 0.000s: 3735928559 0 true\nb 0.000s: 3735928559 2 false\nb 0.000s: abcdefghijkl\nb 1.000s: done Eth#3" \
     (two ~v6:true "/IP6!(dst=2001:db8::2, proto=17, frag_id=0xdeadbeef, more_frags=true)/Raw(#0fa00007001400006162636465666768)\n/IP6!(dst=2001:db8::2, proto=17, frag_id=0xdeadbeef, frag_offset=2)/Raw(\"ijkl\")" \
          "on for=1s /IP6!(is_fragment) { print(\"${MATCH[IP6].frag_id} ${MATCH[IP6].frag_offset} ${MATCH[IP6].more_frags}\") }\non for=1s /IP6/UDP(dst == 7) { print(MATCH[Raw].data) }")
+*)
+(* Manual TCP options: -1 leaves one out, as it reads when missing; the
+ * answer to a manual SYN, missed by a self-driven pattern, which the timeout
+ * tells; no such hint for a self-driven stream: *)
+(*$= & ~printer:identity
+  "a 0.000s: 1000 -1 -1 false 4\na 0.000s: done Eth#1" \
+    (with_host ~setup:tcp_echo ~sent:true "s = /IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, mss=1000, wscale=-1, ts_val=-1, ts_ecr=-1)/Raw()\nprint(\"${s[TCP].mss} ${s[TCP].wscale} ${s[TCP].ts_val} ${s[TCP].sack_ok} ${length(s[TCP].options)}\")")
+  "a 1.000s: failed: line 2, column 1: Nothing matched within 1s (TCP! would have: that TCP stream is not self-driven) Eth#2" \
+    (with_host ~setup:tcp_echo "/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN)/Raw()\nexpect timeout=1s /IP/TCP(src == 7) {}")
+  "a 1.000s: failed: line 2, column 1: Nothing matched within 1s (TCP! would have: that TCP stream is not self-driven) Eth#2" \
+    (with_host ~setup:tcp_echo "/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN)/Raw()\non for=2s timeout=1s /IP/TCP(src == 7) {}")
+  "a 1.000s: failed: line 3, column 3: Nothing matched within 1s Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Raw#1}}}" \
+    (with_host ~setup:tcp_echo "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Raw(\"hi\")\n  expect timeout=1s /IP/TCP(src == 7)/Raw(data == \"no\") {} }")
 *)
 (* [policed ?limits ?stop_at ?stop text] is what the program in that text prints,
  * each line with the time to the millisecond, how it ends, then how many

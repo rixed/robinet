@@ -84,6 +84,9 @@ type node =
       mutable sent_bytes : int ;
       (* Unused, it is finishing what it has to before going away: *)
       mutable closing : bool ;
+      (* Whether it ever sent or listened self-driven, without which what it
+       * receives is seen manual only: *)
+      mutable driven : bool ;
       eth : Eth.State.t ;
       (* The ranges of local ports to pick from, by layer name: *)
       ports : string -> (int * int) list ;
@@ -110,7 +113,10 @@ and pattern =
       (* Told a packet that completed it: *)
       matched : packet -> unit ;
       (* Told an error of one of its conditions: *)
-      failed : A.location -> string -> unit }
+      failed : A.location -> string -> unit ;
+      (* Told the layer of a node never self-driven that a packet would have
+       * passed, had the layer of the pattern been manual: *)
+      missed : L.layer -> unit }
 
 (* Matches a layer of a packet seen in that mode, if its condition, given
  * the packet up to that layer, holds (raising [Runtime_error] if it
@@ -168,7 +174,7 @@ let make_child parent (l : L.layer) key =
     let c = { layer = l ; key ; parent = Some parent ;
               children = Hashtbl.create 3 ; users = 0 ; received = 0 ;
               received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
-              closing = false ; eth = parent.eth ; ports = parent.ports ;
+              closing = false ; driven = false ; eth = parent.eth ; ports = parent.ports ;
               local_port = parent.local_port ; uses_port = parent.uses_port ;
               removed = parent.removed ;
               ops = l.node { eth = parent.eth ;
@@ -176,6 +182,7 @@ let make_child parent (l : L.layer) key =
                              below_key = (fun name -> key_fields parent.layer parent.key name) ;
                              below = Some { parent.ops with
                                  send = (fun fields hints bits ->
+                                     parent.driven <- true ;
                                      count_sent parent bits ;
                                      parent.ops.send fields hints bits) } } ;
               patterns = [] } in
@@ -367,6 +374,7 @@ let send ?(mark=false) stack =
             count_sent e.node bits ;
             (match e.mode with
             | L.Driven ->
+                e.node.driven <- true ;
                 let emitted =
                     if mark then (
                         let m = Mark.make () in
@@ -486,15 +494,15 @@ let next_seq = ref 0
  * layers of its stack below it, and layers starting with that of the node,
  * which it holds until the function returned unregisters them all. A packet
  * is told to at most one of them, which tells the [matched] of its case. *)
-let register cases ~hold ~failed =
+let register cases ~hold ~failed ~missed =
     incr next_seq ;
     let ps =
         List.concat_map (fun (alternatives, matched) ->
             List.map (fun (node, below, layers) ->
-                let p = { seq = !next_seq ; layers ; below ; hold ; matched ; failed } in
+                let p = { seq = !next_seq ; layers ; below ; hold ; matched ; failed ; missed } in
                 acquire node ;
                 (match layers with
-                | { pmode = L.Driven ; _ } :: _ -> node.ops.drive ()
+                | { pmode = L.Driven ; _ } :: _ -> node.driven <- true ; node.ops.drive ()
                 | _ -> ()) ;
                 node.patterns <- node.patterns @ [ p ] ;
                 node, p) alternatives) cases in
@@ -575,6 +583,18 @@ let check w packet modes (pending : pending list) =
                 meet w p (Condition_error (where, message)) ; None)
         | _ -> None) pending
 
+(* Tells the patterns of [pending] whose next layer is self-driven that the
+ * top of [packet], seen in [modes] but not self-driven, would have passed it
+ * as a manual one: *)
+let note_missed w packet modes (pending : pending list) =
+    if not (List.mem L.Driven modes) then
+        List.iter (fun (p, pls) ->
+            match pls with
+            | ({ pmode = L.Driven ; _ } as pl) :: _ when not (met w p) ->
+                if (try passes packet modes { pl with pmode = L.Manual }
+                    with Runtime_error _ -> false) then p.missed pl.player
+            | _ -> ()) pending
+
 (* Of the layers that can be on top of [packet] (the one its header names,
  * if it names one), those with nodes on [node], the node of its top if any,
  * or that a pending pattern goes on with: *)
@@ -623,7 +643,7 @@ and up_to w node seen packet pending (ul : L.layer) =
                 List.iter (fun ((p : pattern), _) -> p.hold c) makers ;
                 if List.exists (fun (_, pls) ->
                        match pls with pl :: _ -> pl.pmode = L.Driven | [] -> false) makers
-                then c.ops.listen () ;
+                then (c.driven <- true ; c.ops.listen ()) ;
                 enter w c seen packet uu pending
             | _ ->
                 let pending = check w above L.both pending in
@@ -651,6 +671,7 @@ and enter w node seen packet u pending =
             w.rounds <- w.rounds + 1 ;
             w.round <- w.rounds) ;
         let packet = (node.layer, u) :: packet in
+        if not node.driven then note_missed w packet modes pending ;
         up w (Some node) (modes :: seen) packet (check w packet modes pending)
     ) (node.ops.receive modes u) ;
     w.round <- round
@@ -779,7 +800,7 @@ let make_root ?(ports=[]) ?(on_removed=ignore)
         { layer = L.root ; key = [] ; parent = None ;
           children = Hashtbl.create 10 ; users = 0 ; received = 0 ;
           received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
-          closing = false ; eth ; ports ; local_port ; uses_port ;
+          closing = false ; driven = false ; eth ; ports ; local_port ; uses_port ;
           removed = on_removed ;
           ops = L.root.node { eth ; key = (fun _ -> None) ;
                               below_key = (fun _ -> None) ; below = None } ;
