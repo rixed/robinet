@@ -1911,6 +1911,49 @@ let make_from_addrs
     assert_bool "no default route" (h1.eth_state.gateways = [])
  *)
 
+(* A host sends IPv6 with the advertised hop limit, so that of 1 does not get
+ * through a router; 0 keeps the one it has, and a reboot forgets it. *)
+(*$R
+    let a = Ip.Addr.of_string and c = Ip.Cidr.of_string in
+    let sim = Simulation.make ~realtime:false "router-ra-hop-limit" in
+    let r =
+        make_from_addrs ~parent:sim.root
+            [| [ c "2001:db8:1::fe/64", None ], Eth.Addr.random () ;
+               [ c "2001:db8:2::fe/64", None ], Eth.Addr.random () |] "r" in
+    let host n mac =
+        let h = Host.make ~parent:sim.root ~slaac:true ~mac:(Eth.Addr.of_string mac)
+                          ("h" ^ string_of_int n) in
+        let st = Eth.Cable.State.make ~parent:sim.root
+                                      ~name:("c" ^ string_of_int n) () in
+        Eth.Cable.plug st (h.trx.widget, 0) (r.widget, n - 1) ;
+        h in
+    let h1 = host 1 "02:00:00:00:00:01" and _h2 = host 2 "02:00:00:00:00:02" in
+    let advertise_hop_limit n =
+        r.ifaces.(0).cur_hop_limit <- n ;
+        start_router_adverts r 0 ;
+        Simulation.delay sim.root.power (Clock.Interval.sec 2.) ignore () ;
+        Simulation.run sim false in
+    let replies = ref 0 in
+    Hashtbl.add h1.echo_waiters 7 (fun _ -> incr replies) ;
+    let answered () =
+        replies := 0 ;
+        h1.trx.ping ~id:7 ~seq:1 (Host.Ip (a "2001:db8:2::ff:fe00:2")) ;
+        Simulation.run sim false ;
+        !replies = 1 in
+    Array.iter (fun i -> i.advertise <- true) r.ifaces ;
+    Simulation.run sim false ;
+    assert_bool "the default hop limit gets through" (answered ()) ;
+    advertise_hop_limit 1 ;
+    assert_bool "a hop limit of 1 does not" (not (answered ())) ;
+    advertise_hop_limit 0 ;
+    assert_bool "0 keeps the hop limit" (not (answered ())) ;
+    advertise_hop_limit 64 ;
+    assert_bool "a larger one gets through again" (answered ()) ;
+    advertise_hop_limit 1 ;
+    Simulation.power_down h1.trx.widget.power ;
+    assert_equal None h1.ra_hop_limit
+ *)
+
 (* The interfaces are not the admin host's, so it is the router that clears
  * what their adapters learnt when the box is switched off. *)
 (*$R make

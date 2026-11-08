@@ -163,8 +163,9 @@ and t = {
     mutable ra_gateway : Ip.Addr.t option ;
     mutable ra_deadline : Clock.Time.t ;
     mutable got_ra : bool ;
-    (* The IPv6 MTU an advertisement gave, if any: *)
+    (* The IPv6 MTU and hop limit advertisements gave, if any: *)
     mutable ra_mtu : int option ;
+    mutable ra_hop_limit : int option ;
     (* Path MTU discovery (see [path_mtu_rx]): whether IPv4 packets are sent
        with DF set and IPv4 errors acted on, or, if [None], whether the host
        has IPv6; how many seconds a learnt path MTU holds, if not forever; the
@@ -323,7 +324,8 @@ let ip_trx t proto local remote =
     and logger = t.trx.widget.logger in
     let trx, set_mtu =
         if Ip.Addr.is_v6 local then
-            let ip = Ip6.TRX.create power ~mtu local remote proto logger in
+            let ip = Ip6.TRX.create power ~mtu ?ttl:t.ra_hop_limit
+                                    local remote proto logger in
             Ip6.TRX.trx_of ip, Ip6.TRX.set_mtu ip
         else
             let ip = Ip.TRX.create power ~mtu ~dont_frag:(pmtud t)
@@ -575,10 +577,11 @@ let forever = 0xffff_ffff
    the configured ones, and an address in each autonomous /64 prefix, of that
    length if the prefix is on-link, each until its lifetime runs out unless
    another advertisement renews it. A router lifetime of 0 withdraws the
-   route at once. An MTU from 1280 to the adapter's is taken (RFC 4861,
-   6.3.4) for the connections opened from then on. *)
-let slaac_rx t ~router lifetime options =
+   route at once. An MTU from 1280 to the adapter's and a non-zero hop limit
+   are taken (RFC 4861, 6.3.4) for the connections opened from then on. *)
+let slaac_rx t ~router ~hop_limit lifetime options =
     t.got_ra <- true ;
+    if hop_limit <> 0 then t.ra_hop_limit <- Some hop_limit ;
     let from_gw = Option.map_default (fun gw -> Ip.Addr.compare gw router = 0)
                                      false t.ra_gateway in
     if lifetime = 0 then (
@@ -642,9 +645,9 @@ let icmp6_rx t ~local ~remote ~ttl bits =
                                 (q.payload :> bitstring)
                 | _ -> ())
             | {| _ |} -> ())
-        | Ok Icmp6.Pdu.{ payload = Router_advert { lifetime ; options ; _ } ; _ }
+        | Ok Icmp6.Pdu.{ payload = Router_advert { hop_limit ; lifetime ; options ; _ } ; _ }
           when t.slaac && ttl = 255 && Ip.Addr.is_link_local remote ->
-            slaac_rx t ~router:remote lifetime options
+            slaac_rx t ~router:remote ~hop_limit lifetime options
         | _ -> ()
 
 exception AlreadyConnected
@@ -1336,9 +1339,9 @@ let ip_recv t bits =
     let seen = ref [] in
     let at secs f = Simulation.delay sim.root.power (Clock.Interval.sec secs) f () in
     let see () = seen := is_mine h addr :: !seen in
-    slaac_rx h ~router 0 [ prefix 5 ] ;
+    slaac_rx h ~router ~hop_limit:0 0 [ prefix 5 ] ;
     at 3. see ;
-    at 4. (fun () -> slaac_rx h ~router 0 [ prefix 5 ]) ;
+    at 4. (fun () -> slaac_rx h ~router ~hop_limit:0 0 [ prefix 5 ]) ;
     at 8. see ;
     at 10. see ;
     Simulation.run sim false ;
@@ -1396,6 +1399,7 @@ let reset t =
     BitHash.clear t.slaac_deadlines ;
     t.got_ra <- false ;
     t.ra_mtu <- None ;
+    t.ra_hop_limit <- None ;
     Hashtbl.clear t.pmtus ;
     t.leased_netmask <- None ;
     t.leased_nameserver <- None ;
@@ -1670,6 +1674,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(addresses=[])
         ra_deadline   = Clock.Time.zero ;
         got_ra        = false ;
         ra_mtu        = None ;
+        ra_hop_limit  = None ;
         pmtud ; pmtu_timeout ; min_pmtu ;
         mtu_plateaus  = List.sort_unique Int.compare mtu_plateaus ;
         pmtus         = Hashtbl.create 3 ;
