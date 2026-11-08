@@ -275,7 +275,8 @@ let () =
         exit 0) ;
     let program = compile () in
     let cli_permissions =
-        Crafty_typing.{ local_ips = !local_ips ; remote_ips = !remote_ips ;
+        let rules = Option.map (List.map (fun (v, c) -> v, Crafty_typing.Addresses c)) in
+        Crafty_typing.{ local_ips = rules !local_ips ; remote_ips = rules !remote_ips ;
                         mac_spoofing = !mac_spoofing ; exfiltration = !exfiltration ;
                         promiscuous = !promiscuous } in
     (* Unless allowed, nothing received is sent: *)
@@ -334,19 +335,19 @@ let () =
             | Error e ->
                 Printf.eprintf "-p: %s\n" (IO.to_string Crafty_interp.print_error e) ;
                 exit 2) !print_only in
-    let denied_literals (p : Crafty_typing.permissions) ~mac =
-        match Crafty_typing.denied_literals ~local:p.local_ips
-                  ~remote:p.remote_ips ~mac program.body with
+    let denied_literals ~local ~remote ~mac =
+        match Crafty_typing.denied_literals ~local ~remote ~mac program.body with
         | [] -> ()
         | es -> fail es in
     if !check then (
-        (* Without the interface, the local rules are checked only when they
-         * do not end with its addresses: *)
-        let p = program.limits.permissions in
-        let r = Crafty_typing.resolve_permissions ~program:p ~cli:cli_permissions
-                                                  ~local:[] in
-        denied_literals { r with local_ips = if p.local_ips = None then None
-                                              else r.local_ips } ~mac:None ;
+        (* Without the interface, rules about its addresses are not checked: *)
+        let r = Crafty_typing.resolve_permissions ~program:program.limits.permissions
+                                                  ~cli:cli_permissions in
+        let known rs =
+            let rs = Option.default [] rs in
+            if List.exists (fun (_, a) -> a = Crafty_typing.Own_ip || a = Own_ips) rs then None
+            else Some (Crafty_typing.address_rules ~own:[] rs) in
+        denied_literals ~local:(known r.local_ips) ~remote:(known r.remote_ips) ~mac:None ;
         Printf.printf "%s: OK\n" prog_name ;
         exit 0) ;
     if !ifname = "" then (
@@ -394,17 +395,18 @@ let () =
             if iface.addresses = [] then
                 die "Interface %s has no IP address." !ifname ;
             iface.addresses in
-    (* The local addresses accepted unless said otherwise: *)
     let limits =
-        let local =
-            List.map (fun c -> fst (c : Ip.Cidr.t :> Ip.Addr.t * int)) addresses in
         { limits with permissions =
             Crafty_typing.resolve_permissions ~program:program.limits.permissions
-                                              ~cli:cli_permissions ~local } in
+                                              ~cli:cli_permissions } in
     let permissions = limits.permissions in
-    let rules = Option.default [] and flag = Option.default false in
+    let rules =
+        let own = List.map (fun c -> fst (c : Ip.Cidr.t :> Ip.Addr.t * int)) addresses in
+        Crafty_typing.address_rules ~own % Option.default []
+    and flag = Option.default false in
     let promisc = flag permissions.promiscuous in
-    denied_literals permissions
+    denied_literals ~local:(Some (rules permissions.local_ips))
+        ~remote:(Some (rules permissions.remote_ips))
         ~mac:(if flag permissions.mac_spoofing then None else Some iface.mac) ;
     let speed, full_duplex =
         let speed', full_duplex' = Host_config.link !ifname in

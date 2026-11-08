@@ -619,6 +619,12 @@ let budget_var = new_var "BUDGET" budget_type
 let ports_var = new_var "PORTS" ports_type
 let permissions_var = new_var "PERMISSIONS" permissions_type
 
+(* The addresses of the program, IPv4 ones first: *)
+let own_ips_var = new_var "OWN_IPS" Type.(Array Ip)
+
+(* The first of them, void without any: *)
+let own_ip_var = new_var "OWN_IP" Type.Ip
+
 (* The last packet sent by any block, void until one is: *)
 let last_var = new_var "LAST" packet_type
 
@@ -634,11 +640,26 @@ and ports = { tcp : (int * int) list ; udp : (int * int) list }
 
 (* The fields of [PERMISSIONS], if set: *)
 and permissions =
-    { local_ips : Firewall.address_rule list option ;
-      remote_ips : Firewall.address_rule list option ;
+    { local_ips : rule list option ;
+      remote_ips : rule list option ;
       mac_spoofing : bool option ;
       exfiltration : bool option ;
       promiscuous : bool option }
+
+(* The addresses a rule is about, which for [Own_ip] and [Own_ips] the program
+ * learns only once it runs: *)
+and rule = Firewall.verdict * rule_addresses
+
+and rule_addresses = Addresses of Ip.Cidr.t | Own_ip | Own_ips
+
+(** Those rules, given the addresses of the program, the first being its
+ * [Own_ip]: *)
+let address_rules ~own =
+    List.concat_map (fun (v, a) ->
+        match a with
+        | Addresses c -> [ v, c ]
+        | Own_ip -> List.map (fun ip -> v, Ip.Cidr.single ip) (List.take 1 own)
+        | Own_ips -> List.map (fun ip -> v, Ip.Cidr.single ip) own)
 
 let no_permissions =
     { local_ips = None ; remote_ips = None ; mac_spoofing = None ;
@@ -705,7 +726,7 @@ let port_ranges name _typ (e : A.expr) =
         merge_ranges
     | _ -> error e.loc "PORTS.%s is an array of ports and ranges [first, last]" name
 
-type permission = Rules of Firewall.address_rule list | Flag of bool
+type permission = Rules of rule list | Flag of bool
 
 let permission_literal name typ (e : A.expr) =
     match typ, e.desc with
@@ -713,14 +734,16 @@ let permission_literal name typ (e : A.expr) =
     | Type.Bool, _ -> error e.loc "PERMISSIONS.%s must be true or false" name
     | _, A.Array rs ->
         Rules (List.map (fun (r : A.expr) ->
-            let cidr (e : A.expr) =
+            let addresses (e : A.expr) =
                 match e.desc with
-                | A.Lit (A.Cidr c) -> c
-                | A.Lit (A.Ip ip) -> Ip.Cidr.single ip
-                | _ -> error e.loc "A rule is about a literal CIDR or IP address" in
+                | A.Lit (A.Cidr c) -> Addresses c
+                | A.Lit (A.Ip ip) -> Addresses (Ip.Cidr.single ip)
+                | A.Var "OWN_IP" -> Own_ip
+                | A.Var "OWN_IPS" -> Own_ips
+                | _ -> error e.loc "A rule is about a literal CIDR or IP address, OWN_IP or OWN_IPS" in
             match r.desc with
-            | A.Construct ("Accept", Some c) -> Firewall.Accept, cidr c
-            | A.Construct ("Deny", Some c) -> Firewall.Deny, cidr c
+            | A.Construct ("Accept", Some c) -> Firewall.Accept, addresses c
+            | A.Construct ("Deny", Some c) -> Firewall.Deny, addresses c
             | _ -> error r.loc "A rule is Accept(CIDR) or Deny(CIDR)") rs)
     | _ -> error e.loc "PERMISSIONS.%s is an array of rules" name
 
@@ -821,35 +844,45 @@ let combine ~program:a ~cli:b =
 *)
 
 (** The permissions a program runs with, all set: the [cli]'s rules before the
- * [program]'s, or before the defaults where it sets none: accepting the
- * [local] addresses, and any remote one; the [cli]'s flags over the
- * [program]'s, false by default. *)
-let resolve_permissions ~program ~cli ~local =
+ * [program]'s, or before the defaults where it sets none: accepting its own
+ * addresses, and any remote one; the [cli]'s flags over the [program]'s, false
+ * by default. *)
+let resolve_permissions ~program ~cli =
     let rules cli prog default = Some ((cli |? []) @ (prog |? default))
     and flag cli prog = Some (cli |? (prog |? false)) in
-    { local_ips =
-        rules cli.local_ips program.local_ips
-              (List.map (fun ip -> Firewall.Accept, Ip.Cidr.single ip) local) ;
+    { local_ips = rules cli.local_ips program.local_ips [ Firewall.Accept, Own_ips ] ;
       remote_ips = rules cli.remote_ips program.remote_ips
-                         Firewall.accept_all_addresses ;
+                         (List.map (fun (v, c) -> v, Addresses c)
+                                   Firewall.accept_all_addresses) ;
       mac_spoofing = flag cli.mac_spoofing program.mac_spoofing ;
       exfiltration = flag cli.exfiltration program.exfiltration ;
       promiscuous = flag cli.promiscuous program.promiscuous }
 
 (*$T resolve_permissions
-  let cidr = Firewall.cidr_of_string in \
-  resolve_permissions ~local:[ Ip.Addr.of_string "10.0.0.1" ] \
+  let cidr s = Addresses (Firewall.cidr_of_string s) in \
+  resolve_permissions \
     ~program:{ no_permissions with remote_ips = Some [ Firewall.Accept, cidr "10.0.0.0/8" ] ; \
                                    mac_spoofing = Some true ; exfiltration = Some true } \
     ~cli:{ no_permissions with remote_ips = Some [ Firewall.Deny, cidr "10.0.0.1" ] ; \
                                local_ips = Some [ Firewall.Deny, cidr "10.0.0.2" ] ; \
                                exfiltration = Some false } = \
-    { local_ips = Some [ Firewall.Deny, cidr "10.0.0.2" ; Firewall.Accept, cidr "10.0.0.1" ] ; \
+    { local_ips = Some [ Firewall.Deny, cidr "10.0.0.2" ; Firewall.Accept, Own_ips ] ; \
       remote_ips = Some [ Firewall.Deny, cidr "10.0.0.1" ; Firewall.Accept, cidr "10.0.0.0/8" ] ; \
       mac_spoofing = Some true ; exfiltration = Some false ; promiscuous = Some false }
-  resolve_permissions ~local:[] ~program:no_permissions ~cli:no_permissions = \
-    { local_ips = Some [] ; remote_ips = Some Firewall.accept_all_addresses ; \
+  let cidr s = Addresses (Firewall.cidr_of_string s) in \
+  resolve_permissions ~program:no_permissions ~cli:no_permissions = \
+    { local_ips = Some [ Firewall.Accept, Own_ips ] ; \
+      remote_ips = Some [ Firewall.Accept, cidr "0.0.0.0/0" ; Firewall.Accept, cidr "::/0" ] ; \
       mac_spoofing = Some false ; exfiltration = Some false ; promiscuous = Some false }
+  address_rules ~own:[ Ip.Addr.of_string "10.0.0.1" ; Ip.Addr.of_string "::1" ] \
+    [ Firewall.Deny, Addresses (Firewall.cidr_of_string "10.0.0.0/8") ; Firewall.Accept, Own_ips ] = \
+    [ Firewall.Deny, Firewall.cidr_of_string "10.0.0.0/8" ; \
+      Firewall.Accept, Ip.Cidr.single (Ip.Addr.of_string "10.0.0.1") ; \
+      Firewall.Accept, Ip.Cidr.single (Ip.Addr.of_string "::1") ]
+  address_rules ~own:[ Ip.Addr.of_string "10.0.0.1" ; Ip.Addr.of_string "::1" ] \
+    [ Firewall.Accept, Own_ip ] = \
+    [ Firewall.Accept, Ip.Cidr.single (Ip.Addr.of_string "10.0.0.1") ]
+  address_rules ~own:[] [ Firewall.Accept, Own_ip ] = []
 *)
 
 let lookup_var env loc name =
@@ -2885,7 +2918,7 @@ let check ?(warnings=ref []) (program : A.program) =
     (* Until no variable is widened, which types grow until they have all
      * the constructors of the program: *)
     let rec typed () =
-        let env = { vars = [ budget_var ; ports_var ; permissions_var ; last_var ] ;
+        let env = { vars = [ budget_var ; ports_var ; permissions_var ; own_ip_var ; own_ips_var ; last_var ] ;
                     declared_here = [] ;
                     poisoned = [] ; stack = [] ;
                     stack_text = [] ; loops = [] ; layer_ctx = None ;

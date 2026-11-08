@@ -243,7 +243,7 @@ permissions deny, 130 when interrupted.
 - Comments run from a `#` to the end of the line. A `#` followed by a
   hexadecimal digit is a byte literal instead.
 - Names of layers, fields, functions and keywords are case insensitive.
-  Constants, `MATCH` and `LAST` are upper case. All but field names are
+  Constants, `MATCH`, `LAST`, `OWN_IP` and `OWN_IPS` are upper case. All but field names are
   reserved. Variables and constructors are case sensitive.
 
 ### Types and literals
@@ -316,7 +316,9 @@ print(case result Got { "${I} layers" } else { "${result}" })
 - `x := expr` assigns it, and `x += expr` (also `-=`, `*=`, etc.) updates it.
 - Predefined: `MATCH` (in the block of an `expect` or `on`), `LAST`
   (the last packet sent, once a block has sent one), `I`, the counter of
-  a `repeat` or the item of a `foreach`, and `BUDGET` and `PORTS`.
+  a `repeat` or the item of a `foreach`, `BUDGET`, `PORTS` and `PERMISSIONS`, and
+  `OWN_IPS`, the addresses of the interface (or `--ip`'s), IPv4 ones first, and
+  `OWN_IP`, the first of them.
 - `LAST` is the packet as given, not as it left: reading a field that only
   the wire knows (`LAST[Eth].ts`, or `IP.id`, `UDP.checksum`... under a
   self-driven `IP`) is an error. `p = MESSAGE` captures the packet as it
@@ -324,12 +326,14 @@ print(case result Got { "${I} layers" } else { "${result}" })
 
 ### Budget, ports and permissions
 
-A program may declare them, once each, at its top level, with literals only:
+A program may declare them, once each, at its top level, with literals,
+`OWN_IP` and `OWN_IPS` only:
 
 ```
 BUDGET = {max_duration: 30s, max_syns: 30}
 PORTS = {tcp: [[40000, 40100]], udp: [[5000, 5000]]}
-PERMISSIONS = {remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
+PERMISSIONS = {local_ips: [Accept(OWN_IP), Accept(10.20.4.1)],  # spoofs 10.20.4.1
+               remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
 ```
 
 - `BUDGET`'s fields are the budget options of crafty, named alike.
@@ -337,9 +341,10 @@ PERMISSIONS = {remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
   no port.
 - crafty runs with what both the program and the command line allow.
 - `PERMISSIONS`:
-  - `local_ips`, `remote_ips`: rules `Accept(cidr)` or `Deny(cidr)`; the first
-    that matches an address decides, and none matching denies. Unset,
-    `local_ips` accepts the interface's addresses (or `--ip`'s) and `remote_ips` any.
+  - `local_ips`, `remote_ips`: rules `Accept(x)` or `Deny(x)`, `x` being a
+    CIDR, `OWN_IP` or `OWN_IPS`; the first that matches an address decides, and none matching denies. Unset, `local_ips` is
+    `[Accept(OWN_IPS)]` and `remote_ips` accepts any. Sending from an address
+    takes `local_ips` accepting it.
   - `mac_spoofing`: allows sending from another MAC than the interface's.
   - `exfiltration`: allows sending a payload  made of the payload of a received
     packet.

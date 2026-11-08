@@ -582,6 +582,7 @@ let rec eval output (env : env) (e : T.expr) =
     | T.Var v ->
         (match !(lookup env v) with
         | Void when v.id = T.last_var.id -> error e.loc "LAST is not set: no packet was sent yet"
+        | Void when v.id = T.own_ip_var.id -> error e.loc "OWN_IP is not set: the program has no address"
         | x -> x)
     | T.Packet_field { layer ; field } ->
         let (l : Crafty_layers.layer), (u : Crafty_layers.unpacked) =
@@ -1353,8 +1354,9 @@ let matches output tree (ps : filter) frame =
  * [print] and [print_err], giving what it reports to [report] (else printing
  * its summary), and calling [on_exit] with its final status (possibly before
  * returning). *)
-(* The values of BUDGET, PORTS and PERMISSIONS, void where not set: *)
-let self_values (l : T.limits) =
+(* The values of BUDGET, PORTS and PERMISSIONS, void where not set, for a
+ * program of addresses [own]: *)
+let self_values ~own (l : T.limits) =
     let record typ get =
         match typ with
         | A.Type.Record fs -> Record (Array.of_list (List.map (fun (n, _) -> get n) fs))
@@ -1373,7 +1375,7 @@ let self_values (l : T.limits) =
             Option.map_default (fun rs ->
                 Array (Array.of_list (List.map (fun (v, c) ->
                     Variant ((if v = Firewall.Accept then "Accept" else "Deny"),
-                             Cidr c)) rs))) Void
+                             Cidr c)) (T.address_rules ~own rs)))) Void
         and flag = Option.map_default (fun b -> Bool b) Void in
         match n with
         | "local_ips" -> rules p.local_ips
@@ -1396,11 +1398,18 @@ let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
           fail = (fun e -> cancel root ; exit (Failed e)) ;
           break_ = (fun ~continue:_ _ -> assert false) ; busy = 0 ; holding = 0 ;
           stmts_done = [] ; ending = [] ; finish = None } in
-    let budget, ports, permissions = self_values limits in
+    let own =
+        List.map (fun (a : Eth.State.my_address) -> Ip.Addr.of_bitstring a.addr)
+                 tree.Crafty_tree.eth.my_addresses |>
+        List.stable_sort (fun a b -> Bool.compare (Ip.Addr.is_v6 a) (Ip.Addr.is_v6 b)) in
+    let budget, ports, permissions = self_values ~own limits in
+    let own_ip = match own with [] -> Void | a :: _ -> Ip a in
     let vars =
         { vars = Env.empty ; stack = [] ; tree ; packet = [] } |>
-        fun env -> bind (bind (bind (bind env T.budget_var budget) T.ports_var ports)
-                              T.permissions_var permissions)
+        fun env -> bind (bind (bind (bind (bind (bind env T.budget_var budget) T.ports_var ports)
+                                          T.permissions_var permissions)
+                                    T.own_ip_var own_ip)
+                              T.own_ips_var (Array (Array.of_list (List.map (fun a -> Ip a) own))))
                         T.last_var Void in
     ignore (run_block t root vars program
                 ~fail:root.fail ~break_:root.break_
@@ -2792,7 +2801,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
  * the gateway 02:00:00:00:00:fe. It is stopped at [stop_at] seconds, or with
  * [stop] as soon as it is run. *)
 (*$inject
-  let policed ?max_packets ?max_packet_rate ?max_syns ?max_syn_rate ?stop_at ?(stop=false) text =
+  let policed ?max_packets ?max_packet_rate ?max_syns ?max_syn_rate ?stop_at ?(stop=false)
+              ?(addresses=[ "10.0.0.1/24" ]) text =
       match Crafty_interp.compile text with
       | Error es -> String.concat "\n" (List.map (IO.to_string print_error) es)
       | Ok p ->
@@ -2802,7 +2812,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
               out := Printf.sprintf "%.3fs: %s" (Clock.Time.to_secs (Simulation.now sim)) s :: !out in
           let dev, h =
               run ~parent:sim.SimTypes.root ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
-                  ~addresses:[ Ip.Cidr.of_string "10.0.0.1/24" ]
+                  ~addresses:(List.map Ip.Cidr.of_string addresses)
                   ~gateways:[ Eth.Gateway.Mac (Eth.Addr.of_string "02:00:00:00:00:fe") ]
                   ~print:line ~print_err:line
                   ~on_warning:(fun e -> line ("warning "^ IO.to_string print_error e))
@@ -2872,9 +2882,25 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (policed "PERMISSIONS = {promiscuous: true}\nprint(PERMISSIONS.promiscuous)")
   "0.000s: failed: line 1, column 7: mac_spoofing is not set, by the program or the command line\n0 frames" \
     (policed "print(PERMISSIONS.mac_spoofing)")
+  "0.000s: [10.0.0.1] 10.0.0.1\n0.000s: done\n0 frames" \
+    (policed "print(\"${OWN_IPS} ${OWN_IPS[0]}\")")
+  "0.000s: [Deny 10.0.0.66/32, Accept 10.0.0.1/32, Accept 10.20.4.1/32]\n0.000s: done\n0 frames" \
+    (policed "PERMISSIONS = {local_ips: [Deny(10.0.0.66), Accept(OWN_IPS), Accept(10.20.4.1)]}\n\
+              print(PERMISSIONS.local_ips)")
+  "0.000s: done\n1 frames" \
+    (policed "/IP(src=OWN_IPS[0], dst=1.2.3.4)/UDP(src=1000, dst=7)/Raw(\"x\")")
+  "line 1, column 12: OWN_IPS is a reserved name" (policed "OWN_IPS = 1")
+  "0.000s: 10.0.0.1 [10.0.0.1, 2001:db8::1]\n0.000s: done\n0 frames" \
+    (policed ~addresses:[ "2001:db8::1/64" ; "10.0.0.1/24" ] "print(\"${OWN_IP} ${OWN_IPS}\")")
+  "0.000s: [Accept 10.0.0.1/32, Accept 10.20.4.1/32]\n0.000s: done\n0 frames" \
+    (policed ~addresses:[ "2001:db8::1/64" ; "10.0.0.1/24" ] \
+       "PERMISSIONS = {local_ips: [Accept(OWN_IP), Accept(10.20.4.1)]}\nprint(PERMISSIONS.local_ips)")
+  "0.000s: failed: line 1, column 7: OWN_IP is not set: the program has no address\n0 frames" \
+    (policed ~addresses:[] "print(OWN_IP)")
+  "line 1, column 11: OWN_IP is a reserved name" (policed "OWN_IP = 1")
   "line 1, column 28: A rule is Accept(CIDR) or Deny(CIDR)" \
     (policed "PERMISSIONS = {local_ips: [Ok(10.0.0.0/8)]}")
-  "line 1, column 36: A rule is about a literal CIDR or IP address" \
+  "line 1, column 36: A rule is about a literal CIDR or IP address, OWN_IP or OWN_IPS" \
     (policed "PERMISSIONS = {remote_ips: [Accept(\"x\")]}")
   "line 1, column 30: PERMISSIONS.exfiltration must be true or false" \
     (policed "PERMISSIONS = {exfiltration: 1}")

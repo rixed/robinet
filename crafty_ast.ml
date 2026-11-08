@@ -342,7 +342,7 @@ let functions =
 let self_declared = [ "BUDGET" ; "PORTS" ; "PERMISSIONS" ]
 
 (** Variables that the language defines, upper case as are the constants. *)
-let predefined = [ "MATCH" ; "LAST" ] @ self_declared
+let predefined = [ "MATCH" ; "LAST" ; "OWN_IP" ; "OWN_IPS" ] @ self_declared
 
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
