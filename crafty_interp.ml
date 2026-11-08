@@ -578,6 +578,13 @@ let rec eval output (env : env) (e : T.expr) =
     let eval = eval output env in
     match e.desc with
     | T.Lit l -> of_literal l
+    | T.Memo m ->
+        (match m.cached with
+        | Some v -> v
+        | None ->
+            let v = eval m.value in
+            m.cached <- Some v ;
+            v)
     | T.String parts ->
         String (String.concat "" (List.map (function
             | T.Text s -> s
@@ -1641,6 +1648,41 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
               String.concat "\n" (List.rev !out)
 *)
 
+(* What is cached gives the same, each time; what fails fails each time, and
+ * only if reached; and a variable set from a constant has its own value: *)
+(*$= runs & ~printer:identity
+  "0s: #0101\n0s: #0101\n0s: done" \
+    (runs "repeat count=2 { print(\"${#01 * 2}\") }")
+  "0s: 0\n0s: 1\n0s: done" \
+    (runs "repeat count=2 { catch { x = #01 * -1\n  print(\"no\") }\n  print(I) }")
+  "0s: 0\n0s: 1\n0s: done" \
+    (runs "repeat count=2 { if I > 5 { print(\"${#01 * -1}\") }\n  print(I) }")
+  "0s: [2, 2]\n0s: [3, 2]\n0s: done" \
+    (runs "repeat count=2 { a = [1, 2]\n  a[0] := a[0] + I + 1\n  print(a) }")
+  "0s: [1970-01-01T00:00:00Z]\n1s: [1970-01-01T00:00:01Z]\n1s: done" \
+    (runs "repeat count=2 every=1s { print(\"${[now()]}\") }")
+*)
+(* A constant is computed once reached, and an arm not taken is not: *)
+(*$R runs
+  let program =
+      Crafty_parser.parse "repeat count=2 { if I > 5 { x = #00 * 3 } else { x = #00 * 4 } }" |>
+      Result.get_ok |> Crafty_typing.check |> Result.get_ok in
+  let cached () =
+      let found = ref [] in
+      let rec look (e : T.expr) =
+          (match e.desc with
+          | T.Memo m -> found := Option.is_some m.cached :: !found
+          | _ -> ()) ;
+          List.iter look (T.sub_exprs e) in
+      T.iter_stmts (fun s -> List.iter look (T.stmt_exprs s)) program ;
+      List.sort Bool.compare !found in
+  assert_equal [ false ; false ] (cached ()) ;
+  let sim = Simulation.make ~realtime:false "crafty" in
+  let tree = Crafty_tree.make_root (crafty_eth sim) in
+  ignore (run_on_tree sim.root.power tree ~print:ignore ~print_err:ignore program) ;
+  Simulation.run sim false ;
+  assert_equal [ false ; true ] (cached ())
+*)
 (*$= runs & ~printer:identity
   "0s: hello 3\nerr 0s: oops\n0s: done" \
     (runs "print(\"hello ${1 + 2}\")\nprint_err(\"oops\")")

@@ -54,7 +54,7 @@ type builtin =
     | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
     | Print | Print_err | Format | Assert | Stats | Summary | Report
 
-type expr = { loc : A.location ; typ : Type.t ; desc : desc }
+type expr = { loc : A.location ; typ : Type.t ; mutable desc : desc }
 
 and desc =
     | Lit of A.literal
@@ -93,6 +93,9 @@ and desc =
     (* The branch of the arm of the constructor of [subject]'s value, else
      * [else_], which is [None] when the arms are for every constructor: *)
     | Case of { subject : expr ; arms : arm list ; else_ : block option }
+    (* A constant within a loop (see [cache_constants]), and its value once
+     * it was computed: *)
+    | Memo of { value : expr ; mutable cached : Crafty_value.value option }
 
 and part = Text of string | Interp of expr
 
@@ -2647,7 +2650,8 @@ and expr_declarations e =
         expr_declarations subject @
         List.concat_map (fun a -> (match a.held with Some v -> [ v ] | None -> []) @ declarations a.branch) arms @
         Option.map_default declarations [] else_
-    | Field (e, _) | Unop (_, e) | Convert e | Select { packet = e ; _ } ->
+    | Field (e, _) | Unop (_, e) | Convert e | Select { packet = e ; _ }
+    | Memo { value = e ; _ } ->
         expr_declarations e
     | Index (a, b) | Binop (_, a, b) -> expr_declarations a @ expr_declarations b
     | Slice (a, from, to_) ->
@@ -2686,7 +2690,8 @@ let stmt_exprs s =
 (* The expressions directly within [e], not within its blocks: *)
 let sub_exprs e =
     match e.desc with
-    | Field (e, _) | Unop (_, e) | Convert e | Select { packet = e ; _ } -> [ e ]
+    | Field (e, _) | Unop (_, e) | Convert e | Select { packet = e ; _ }
+    | Memo { value = e ; _ } -> [ e ]
     | Index (a, b) | Binop (_, a, b) -> [ a ; b ]
     | Slice (a, from, to_) -> a :: List.filter_map identity [ from ; to_ ]
     | Call (_, es) | Record es | Array es -> es
@@ -2714,6 +2719,15 @@ let expr_blocks e =
     | If { then_ ; else_ ; _ } -> [ then_ ; else_ ]
     | Case { arms ; else_ ; _ } ->
         List.map (fun a -> a.branch) arms @ Option.map_default (fun b -> [ b ]) [] else_
+    | _ -> []
+
+(* The conditions of the patterns of [s]: *)
+let stmt_conds s =
+    match s.stmt with
+    | Expect { cases ; _ } | On { cases ; _ } ->
+        List.concat_map (fun (c : case) ->
+            List.concat_map (fun p ->
+                List.filter_map (fun pl -> pl.cond) p.pat_layers) c.patterns) cases
     | _ -> []
 
 (** Calls [f] on every statement of [b], outer ones first, including those
@@ -2907,6 +2921,100 @@ let exfiltrations (b : block) =
     (denied "/Eth!(src=02:00:00:00:00:99, dst=ff:ff:ff:ff:ff:ff)/Raw()")
 *)
 
+(* Whether that builtin always gives the same result for the same arguments
+ * during a run, and does nothing else; what the network tells is not: *)
+let is_pure = function
+    | Exp | Ln | Log | Log2
+    | To_int | To_float | To_bool | To_byte | To_interval | To_time
+    | To_string | To_bytes | Word _ | Checksum | To_ip | To_mac | To_cidr
+    | Is_ip4 | Is_ip6 | Split
+    | Make_array | Length | Concat | Append | Prepend
+    | Make_map | Has | Keys | Values | Remove
+    | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
+    | Format | Getenv | Arg | Nargs -> true
+    | Rand | Randbytes | Now | Resolve | Hostname
+    | Print | Print_err | Assert | Stats | Summary | Report -> false
+
+(* Whether [e] is made of literals and pure builtins only: *)
+let rec is_constant e =
+    match e.desc with
+    | Lit _ -> true
+    | Call (b, _) when not (is_pure b) -> false
+    | String _ | Field _ | Index _ | Slice _ | Call _ | Unop _ | Binop _
+    | Record _ | Array _ | Map _ | Convert _ | Construct _ | Memo _ ->
+        List.for_all is_constant (sub_exprs e)
+    | Var _ | Packet_field _ | Select _ | Encode _ | Block _ | If _ | Case _ ->
+        false
+
+(* Has each constant that is not a scalar, within a loop, computed the first
+ * time it is reached, then kept until the program ends; which sharing allows
+ * as no value is ever changed in place, and which leaves an arm not taken
+ * uncomputed and an error raised where it would be. Outside loops, what is
+ * computed once is not kept. *)
+let cache_constants (b : block) =
+    let rec in_block looping b =
+        List.iter (fun s ->
+            List.iter (in_expr looping) (stmt_exprs s) ;
+            (* Evaluated for each packet: *)
+            List.iter (in_expr true) (stmt_conds s) ;
+            let looping' =
+                match s.stmt with
+                | Repeat _ | Retry _ | On _ -> true
+                | _ -> looping in
+            List.iter (in_block looping') (stmt_blocks s)) b
+    and in_expr looping e =
+        let scalar =
+            match e.typ with
+            | Type.Array _ | Record _ | Map _ | String -> false
+            | _ -> true in
+        match e.desc with
+        | Memo _ -> ()
+        | _ when looping && not scalar && is_constant e ->
+            e.desc <- Memo { value = { e with desc = e.desc } ; cached = None }
+        | _ ->
+            List.iter (in_expr looping) (sub_exprs e) ;
+            List.iter (in_block looping) (expr_blocks e) in
+    in_block false b
+
+(* [memos text] is how many constants of that program are cached. *)
+(*$inject
+  let memos text =
+      match check (Result.get_ok (Crafty_parser.parse text)) with
+      | Error _ -> -1
+      | Ok b ->
+          let n = ref 0 in
+          let rec count e =
+              (match e.desc with Memo _ -> incr n | _ -> ()) ;
+              List.iter count (sub_exprs e) in
+          iter_stmts (fun s -> List.iter count (stmt_exprs s @ stmt_conds s)) b ;
+          !n
+*)
+(*$= memos & ~printer:string_of_int
+  0 (memos "x = #00 * 3")
+  0 (memos "if 1 > 0 { x = #00 * 3 }")
+  1 (memos "repeat count=2 { x = #00 * 3 }")
+  1 (memos "retry { x = #00 * 3 }")
+  1 (memos "on for=1s /IP { x = #00 * 3 }")
+  0 (memos "expect timeout=1s /IP { x = #00 * 3 }")
+  1 (memos "repeat count=2 { expect timeout=1s /IP { x = #00 * 3 } }")
+  1 (memos "repeat count=2 { spawn { x = #00 * 3 } }")
+  2 (memos "repeat count=2 { if I > 1 { x = #00 * 3 } else { x = #00 * 4 } }")
+  1 (memos "repeat count=2 { x = length(concat([1], [2] * 3)) + I }")
+  1 (memos "repeat count=2 { x = concat([1], [2] * 3) }")
+  0 (memos "repeat count=2 { x = 1 + 2 }")
+  0 (memos "repeat count=2 { x = randbytes(3) }")
+  1 (memos "repeat count=2 { x = #00 * int(arg(1, default=\"3\")) }")
+  1 (memos "repeat count=2 { x = #00 * int(getenv(\"SIZE\", default=\"3\")) }")
+  1 (memos "repeat count=2 { x = [0] * nargs() }")
+  0 (memos "repeat count=2 { x = hostname(1.2.3.4) }")
+  0 (memos "repeat count=2 { x = [now()] }")
+  0 (memos "y = 3\nrepeat count=2 { x = [y] * 3 }")
+  0 (memos "repeat count=2 { x = [I] * 3 }")
+  1 (memos "repeat count=2 { x = #00 * I }")
+  1 (memos "expect timeout=1s /IP/UDP/Raw(data == #00 * 3) {}")
+  1 (memos "repeat count=2 { /IP(dst=1.2.3.4)/UDP(src=1, dst=2)/Raw(#00 * 3) }")
+*)
+
 (** The typed program, or the errors, in the order of the source; and in
  * [warnings], what makes sense but is likely not what was meant. [BUDGET]
  * and [PORTS] are what {!limits} reads. *)
@@ -2948,7 +3056,7 @@ let check ?(warnings=ref []) (program : A.program) =
     ) env.unknown ;
     warnings := in_order !(env.warnings) ;
     let errors = !self_errors @ !(env.errors) in
-    if errors = [] then Ok p else Error (in_order errors)
+    if errors = [] then (cache_constants p ; Ok p) else Error (in_order errors)
 
 (** What [program] declares of itself, or what is wrong with it. *)
 let limits (program : A.program) =
