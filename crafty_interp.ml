@@ -1355,6 +1355,7 @@ let self_values (l : T.limits) =
         | "local_ips" -> rules p.local_ips
         | "remote_ips" -> rules p.remote_ips
         | "mac_spoofing" -> flag p.mac_spoofing
+        | "promiscuous" -> flag p.promiscuous
         | _ -> flag p.exfiltration)
 
 let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
@@ -2784,6 +2785,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "0.000s: [Deny 10.0.0.1/32, Accept 10.0.0.0/8] true\n0.000s: done\n0 frames" \
     (policed "PERMISSIONS = {remote_ips: [Deny(10.0.0.1), Accept(10.0.0.0/8)], exfiltration: true}\n\
               print(\"${PERMISSIONS.remote_ips} ${PERMISSIONS.exfiltration}\")")
+  "0.000s: true\n0.000s: done\n0 frames" \
+    (policed "PERMISSIONS = {promiscuous: true}\nprint(PERMISSIONS.promiscuous)")
   "0.000s: failed: line 1, column 7: mac_spoofing is not set, by the program or the command line\n0 frames" \
     (policed "print(PERMISSIONS.mac_spoofing)")
   "line 1, column 28: A rule is Accept(CIDR) or Deny(CIDR)" \

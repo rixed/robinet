@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 781f0db09631e10413934fcb5c78cc66) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 a09416016f4268f3d8a7819550a58d83) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -170,8 +170,8 @@ Options:
     budget. When neither `--max-duration` nor `BUDGET.max_duration` is set, a
     run stops after 10m.
 -   `--local-ip accept|deny:CIDR`, `--remote-ip accept|deny:CIDR` (repeatable),
-    `--mac-spoofing BOOL`, `--exfiltration BOOL`: permissions, over the
-    program's (see [Budget, ports and
+    `--mac-spoofing BOOL`, `--exfiltration BOOL`, `--promiscuous BOOL`:
+    permissions, over the program's (see [Budget, ports and
     permissions](#budget-ports-and-permissions)).
 -   `--reference`: prints the reference manual.
 -   `--examples`: prints many examples of use.
@@ -294,6 +294,7 @@ A program may declare them, once each, at its top level, with literals only:
     -   `mac_spoofing`: allows sending from another MAC than the interface's.
     -   `exfiltration`: allows sending a payload made of the payload of a
         received packet.
+    -   `promiscuous`: receives the frames for other addresses too.
     -   A sent packet denied by the above rules stops the program. A received
         one that is denied is dropped. Received ICMP errors are judged by the
         packet they quote, not by the router that sent it.
@@ -661,7 +662,7 @@ the other fields of options cannot be given with. A link-layer address reads
 likewise. They are sent with a hop limit of 255, which receivers check, unless
 `IP6` is given another. On top of `Redirect` is the start of the packet
 redirected, a quoted `IP6` or `Raw`, cut to a multiple of 8 bytes. `Eth` does
-not take what is sent to all routers (ff02::2) unless promiscuous.
+not take what is sent to all routers (ff02::2) unless `PERMISSIONS.promiscuous`.
 
     p = {prefix: 2001:db8:1::/64, on_link: true, autonomous: true, valid: 86400, preferred: 14400}
     /IP6(dst=ff02::1)/ICMP6/RouterAdvert(mtu=1400, prefixes=[p])

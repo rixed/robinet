@@ -609,7 +609,7 @@ let rule_type = Type.Variant [ "Accept", Type.Cidr ; "Deny", Type.Cidr ]
 
 let permissions_type =
     record_type Type.[ "local_ips", Array rule_type ; "remote_ips", Array rule_type ;
-                       "mac_spoofing", Bool ; "exfiltration", Bool ]
+                       "mac_spoofing", Bool ; "exfiltration", Bool ; "promiscuous", Bool ]
 
 (* Bound to their values in the program as it runs: *)
 let budget_var = new_var "BUDGET" budget_type
@@ -634,11 +634,12 @@ and permissions =
     { local_ips : Firewall.address_rule list option ;
       remote_ips : Firewall.address_rule list option ;
       mac_spoofing : bool option ;
-      exfiltration : bool option }
+      exfiltration : bool option ;
+      promiscuous : bool option }
 
 let no_permissions =
     { local_ips = None ; remote_ips = None ; mac_spoofing = None ;
-      exfiltration = None }
+      exfiltration = None ; promiscuous = None }
 
 let no_limits = { budget = [] ; ports = None ; permissions = no_permissions }
 
@@ -753,7 +754,8 @@ let limits_of errors decls =
                             local_ips = rules "local_ips" ;
                             remote_ips = rules "remote_ips" ;
                             mac_spoofing = flag "mac_spoofing" ;
-                            exfiltration = flag "exfiltration" } }
+                            exfiltration = flag "exfiltration" ;
+                            promiscuous = flag "promiscuous" } }
                     else (
                         let ranges = literal_fields n [ "tcp", Type.Void ; "udp", Type.Void ]
                                                     port_ranges e in
@@ -828,7 +830,8 @@ let resolve_permissions ~program ~cli ~local =
       remote_ips = rules cli.remote_ips program.remote_ips
                          Firewall.accept_all_addresses ;
       mac_spoofing = flag cli.mac_spoofing program.mac_spoofing ;
-      exfiltration = flag cli.exfiltration program.exfiltration }
+      exfiltration = flag cli.exfiltration program.exfiltration ;
+      promiscuous = flag cli.promiscuous program.promiscuous }
 
 (*$T resolve_permissions
   let cidr = Firewall.cidr_of_string in \
@@ -840,10 +843,10 @@ let resolve_permissions ~program ~cli ~local =
                                exfiltration = Some false } = \
     { local_ips = Some [ Firewall.Deny, cidr "10.0.0.2" ; Firewall.Accept, cidr "10.0.0.1" ] ; \
       remote_ips = Some [ Firewall.Deny, cidr "10.0.0.1" ; Firewall.Accept, cidr "10.0.0.0/8" ] ; \
-      mac_spoofing = Some true ; exfiltration = Some false }
+      mac_spoofing = Some true ; exfiltration = Some false ; promiscuous = Some false }
   resolve_permissions ~local:[] ~program:no_permissions ~cli:no_permissions = \
     { local_ips = Some [] ; remote_ips = Some Firewall.accept_all_addresses ; \
-      mac_spoofing = Some false ; exfiltration = Some false }
+      mac_spoofing = Some false ; exfiltration = Some false ; promiscuous = Some false }
 *)
 
 let lookup_var env loc name =

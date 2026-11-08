@@ -195,7 +195,7 @@ Options:
   budget. When neither `--max-duration` nor `BUDGET.max_duration` is set, a
   run stops after 10m.
 - `--local-ip accept|deny:CIDR`, `--remote-ip accept|deny:CIDR` (repeatable),
-  `--mac-spoofing BOOL`, `--exfiltration BOOL`: permissions, over the
+  `--mac-spoofing BOOL`, `--exfiltration BOOL`, `--promiscuous BOOL`: permissions, over the
   program's (see [Budget, ports and permissions](#budget-ports-and-permissions)).
 - `--reference`: prints the reference manual.
 - `--examples`: prints many examples of use.
@@ -322,6 +322,7 @@ PERMISSIONS = {remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
   - `mac_spoofing`: allows sending from another MAC than the interface's.
   - `exfiltration`: allows sending a payload  made of the payload of a received
     packet.
+  - `promiscuous`: receives the frames for other addresses too.
   - A sent packet denied by the above rules stops the program. A received one
     that is denied is dropped. Received ICMP errors are judged by the packet
     they quote, not by the router that sent it.
@@ -692,7 +693,7 @@ reads 00:00:00:00:00:00 without its option, and given so leaves it out; an
 check, unless `IP6` is given another. On top of `Redirect` is the start of
 the packet redirected, a quoted `IP6` or `Raw`, cut to a multiple of 8
 bytes. `Eth` does not take what is sent to all routers (ff02::2) unless
-promiscuous.
+`PERMISSIONS.promiscuous`.
 
 ```
 p = {prefix: 2001:db8:1::/64, on_link: true, autonomous: true, valid: 86400, preferred: 14400}

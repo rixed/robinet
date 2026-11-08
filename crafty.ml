@@ -101,7 +101,7 @@ let default_max_duration = Clock.Interval.min 10.
 
 let () =
     let ifname = ref "" and own_ip = ref None and ports = ref []
-    and fw = ref false and promisc = ref false and print_packets = ref false
+    and fw = ref false and print_packets = ref false
     and print_only = ref None and stats = ref false and cleanup = ref false
     and check = ref false and normalize = ref false and format = ref Human
     and warn_error = ref false and no_warning = ref false
@@ -113,7 +113,7 @@ let () =
     and max_throughput = ref None and max_syns = ref None and max_syn_rate = ref None
     and speed = ref None and full_duplex = ref None and mtu = ref None
     and local_ips = ref None and remote_ips = ref None
-    and mac_spoofing = ref None and exfiltration = ref None in
+    and mac_spoofing = ref None and exfiltration = ref None and promiscuous = ref None in
     let interval r = Arg.String (fun s ->
         try r := Clock.Interval.of_string s
         with Invalid_argument _ -> die "Not a duration: %S" s) in
@@ -181,8 +181,6 @@ let () =
         "--udp", port_range Host_config.Udp,
             "LO[-HI] UDP ports the program uses (repeatable)" ;
         "--fw", Arg.Set fw, " keep the kernel off the ports of --tcp and --udp" ;
-        "--promisc", Arg.Set promisc,
-            " receive the frames for other addresses too (promiscuous mode)" ;
         "--speed",
             Arg.Symbol (Array.to_list EthSpeed.names, fun s ->
                 speed := Array.find_opt (fun x -> EthSpeed.to_string x = s) EthSpeed.all),
@@ -209,6 +207,8 @@ let () =
             "BOOL allow sending from another MAC than the interface's, whatever the program says" ;
         "--exfiltration", some_bool exfiltration,
             "BOOL allow sending what was received, whatever the program says" ;
+        "--promiscuous", some_bool promiscuous,
+            "BOOL receive the frames for other addresses too, whatever the program says" ;
         "--linger", interval linger,
             "DURATION once done, stop after that long without traffic (default 2s)" ;
         "-p", print_packets_spec,
@@ -276,7 +276,8 @@ let () =
     let program = compile () in
     let cli_permissions =
         Crafty_typing.{ local_ips = !local_ips ; remote_ips = !remote_ips ;
-                        mac_spoofing = !mac_spoofing ; exfiltration = !exfiltration } in
+                        mac_spoofing = !mac_spoofing ; exfiltration = !exfiltration ;
+                        promiscuous = !promiscuous } in
     (* Unless allowed, nothing received is sent: *)
     if not (!exfiltration |? (program.limits.permissions.exfiltration |? false)) then (
         match Crafty_typing.exfiltrations program.body with
@@ -402,6 +403,7 @@ let () =
                                               ~cli:cli_permissions ~local } in
     let permissions = limits.permissions in
     let rules = Option.default [] and flag = Option.default false in
+    let promisc = flag permissions.promiscuous in
     denied_literals permissions
         ~mac:(if flag permissions.mac_spoofing then None else Some iface.mac) ;
     let speed, full_duplex =
@@ -424,9 +426,9 @@ let () =
             String.concat ", " (List.map Firewall.string_of_rule
                                     (Firewall.of_address_rules (rules rs))) in
         info "Permissions: local IPs %s; remote IPs %s; MAC spoofing %b; \
-              exfiltration %b."
+              exfiltration %b; promiscuous %b."
             (rules permissions.local_ips) (rules permissions.remote_ips)
-            (flag permissions.mac_spoofing) (flag permissions.exfiltration)) ;
+            (flag permissions.mac_spoofing) (flag permissions.exfiltration) promisc) ;
     let configure = !fw || !own_ip <> None in
     if configure && Unix.geteuid () <> 0 then
         die "Configuring interface %s is for root; Have you tried under sudo?"
@@ -459,7 +461,7 @@ let () =
     let sim = Simulation.make "crafty" in
     let open_iface ?blocking ~direction ~filter () =
         Pcap.open_iface ~widget:(Widget.make ~parent:sim.root !ifname)
-            ~promisc:!promisc ~direction ~caplen:(Pcap.caplen_of_mtu mtu)
+            ~promisc ~direction ~caplen:(Pcap.caplen_of_mtu mtu)
             ?blocking ~filter !ifname in
     (* Blocking, so that crafty sends no faster than the kernel takes: *)
     let injector =
@@ -530,7 +532,7 @@ let () =
             ~speed ~full_duplex ~mtu
             ~gateways:(List.map (fun gw -> Eth.Gateway.Ip gw) iface.gateways)
             (* The kernel answers for its own address: *)
-            ~answer_requests:(!own_ip <> None) ~promisc:!promisc
+            ~answer_requests:(!own_ip <> None) ~promisc
             ~limits
             ~format ~report
             ~print:(fun s ->
