@@ -388,10 +388,10 @@ let encode n stack =
 
 (** Sends a packet down that stack, from its top (a terminal layer): each
  * manual layer packs what is above it, until a self-driven one takes it, or
- * the root, which emits it as it is. Returns the packet: what was packed,
- * decoded, on top of the self-driven layers as their stack gives them (those
- * may send it later, or never, or in several packets); and, with [mark], what
- * the interface will emit of it. Raises [Failed]. *)
+ * the root, which emits it as it is. Returns the packet, decoded only if
+ * forced: what was packed, on top of the self-driven layers as their stack
+ * gives them (those may send it later, or never, or in several packets); and,
+ * with [mark], what the interface will emit of it. Raises [Failed]. *)
 let send ?(mark=false) stack =
     (* What the first self-driven layer is given, with the hints of the layer
      * above it, and the layers from it down: *)
@@ -434,19 +434,20 @@ let send ?(mark=false) stack =
             (match e.node.layer.unpack up_hints bits with
             | Some u -> decode_up ((e.node.layer, u) :: acc) u.up_hints u.payload above
             | None -> List.rev_map (fun e -> assumed e []) above @ assumed e [] :: acc) in
-    (* The top first. A self-driven layer below (IP) fills in the checksum
-     * of the one it carries, if zero: *)
-    let decoded =
-        match driven, List.rev (decode_up [] [] bits packed) with
-        | { node = { parent = Some _ ; _ } ; _ } :: _, (l, u) :: above ->
-            let values =
-                List.map (function
-                    | "checksum", Int 0 -> "checksum", Void
-                    | v -> v) u.values in
-            List.rev ((l, { u with values }) :: above)
-        | _, bottom_first -> List.rev bottom_first in
-    decoded @
-    List.mapi (fun i e -> assumed e (if i = 0 then hints else [])) driven,
+    lazy (
+        (* The top first. A self-driven layer below (IP) fills in the checksum
+         * of the one it carries, if zero: *)
+        let decoded =
+            match driven, List.rev (decode_up [] [] bits packed) with
+            | { node = { parent = Some _ ; _ } ; _ } :: _, (l, u) :: above ->
+                let values =
+                    List.map (function
+                        | "checksum", Int 0 -> "checksum", Void
+                        | v -> v) u.values in
+                List.rev ((l, { u with values }) :: above)
+            | _, bottom_first -> List.rev bottom_first in
+        decoded @
+        List.mapi (fun i e -> assumed e (if i = 0 then hints else [])) driven),
     emitted
 
 (* The entries of that stack that what is sent goes through: down to the
@@ -965,9 +966,10 @@ let to_string n = IO.to_string print n
                options = [ 1, Crafty_value.Mac Eth.Addr.broadcast ;
                            2, Crafty_value.Int 0x88b5 ] } ] in
   assert_equal ~printer:identity "Eth" (to_string root) ;
+  assert_bool "nothing decoded yet" (not (Lazy.is_val sent)) ;
   assert_equal ~printer:identity
       "Eth(src=02:00:00:00:00:01, dst=FF:FF:FF:FF:FF:FF, proto=34997, ts=1970-01-01T00:00:00Z)/Raw(data=#6869)"
-      (IO.to_string print_packet sent) ;
+      (IO.to_string print_packet (Lazy.force sent)) ;
   let frame = Eth.Pdu.(pack (make (Eth.Proto.o 0x88b5) (Eth.Addr.of_string "02:00:00:00:00:01")
                           Eth.Addr.broadcast (Bitstring.bitstring_of_string "hi"))) in
   assert_bool "the frame emitted" (match emitted with

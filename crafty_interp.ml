@@ -82,7 +82,9 @@ type env =
       tree : Crafty_tree.node ;
       (* In a condition, the packet being matched up to its layer, the top
        * first: *)
-      packet : Crafty_tree.packet }
+      packet : Crafty_tree.packet ;
+      (* The value of [LAST], as most sends are never read back: *)
+      last : value Lazy.t ref }
 
 let lookup (env : env) (v : T.var) =
     try Lazy.force (Env.find v.id env.vars)
@@ -580,9 +582,12 @@ let rec eval output (env : env) (e : T.expr) =
         String (String.concat "" (List.map (function
             | T.Text s -> s
             | T.Interp e -> to_string e.typ (eval e)) parts))
+    | T.Var v when v.id = T.last_var.id ->
+        (match Lazy.force !(env.last) with
+        | Void -> error e.loc "LAST is not set: no packet was sent yet"
+        | x -> x)
     | T.Var v ->
         (match !(lookup env v) with
-        | Void when v.id = T.last_var.id -> error e.loc "LAST is not set: no packet was sent yet"
         | Void when v.id = T.own_ip_var.id -> error e.loc "OWN_IP is not set: the program has no address"
         | x -> x)
     | T.Packet_field { layer ; field } ->
@@ -1030,7 +1035,7 @@ and exec t b env (s : T.stmt) k =
                 stack, Crafty_tree.send ~mark:(capture <> None) stack
             with Failed msg -> error s.stmt_loc "%s" msg) |>
         Option.may (fun (stack, (packet, emitted)) ->
-            lookup env T.last_var := packet_value packet ;
+            env.last := lazy (packet_value (Lazy.force packet)) ;
             (* The first capture makes its variable, which the next ones
              * update: *)
             let set env v x =
@@ -1346,7 +1351,7 @@ let matches output tree (ps : filter) frame =
             Crafty_tree.{
                 player = pl.pl_layer ; pmode = pl.pl_mode ;
                 test = Option.map (fun c packet ->
-                    match eval output { vars = Env.empty ; stack = [] ; tree ; packet } c with
+                    match eval output { vars = Env.empty ; stack = [] ; tree ; packet ; last = ref (Lazy.from_val Void) } c with
                     | Bool b -> b
                     | _ -> assert false) pl.cond }) p.pat_layers in
     Crafty_tree.matches tree layers frame) ps
@@ -1407,12 +1412,11 @@ let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
     let budget, ports, permissions = self_values ~own limits in
     let own_ip = match own with [] -> Void | a :: _ -> Ip a in
     let vars =
-        { vars = Env.empty ; stack = [] ; tree ; packet = [] } |>
-        fun env -> bind (bind (bind (bind (bind (bind env T.budget_var budget) T.ports_var ports)
-                                          T.permissions_var permissions)
-                                    T.own_ip_var own_ip)
-                              T.own_ips_var (Array (Array.of_list (List.map (fun a -> Ip a) own))))
-                        T.last_var Void in
+        { vars = Env.empty ; stack = [] ; tree ; packet = [] ; last = ref (Lazy.from_val Void) } |>
+        fun env -> bind (bind (bind (bind (bind env T.budget_var budget) T.ports_var ports)
+                                    T.permissions_var permissions)
+                              T.own_ip_var own_ip)
+                        T.own_ips_var (Array (Array.of_list (List.map (fun a -> Ip a) own))) in
     ignore (run_block t root vars program
                 ~fail:root.fail ~break_:root.break_
                 (fun _ -> cancel root ; exit Done)) ;
