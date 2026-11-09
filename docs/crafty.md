@@ -437,8 +437,8 @@ what their engine computes (checksums).
   enclosing blocks are over.  `linger` (default 0) instructs that enclosing
   block to wait further.
 - `spawn for=d { ... }`: runs the block alongside the enclosing one, which goes
-  on. With `for`, the enclosing block waits for it, cancelling it after `d`;
-  without, it ends with the statements of the enclosing block.
+  on. With `for`, the enclosing block waits for at the end, cancelling it after
+  `d`; without, it ends with the statements of the enclosing block.
 - `{ ... }`: a block. Ends once its statements are done, its `linger`s
   waited and its `on`s and `spawn`s with a `for` ended.
   Leaving a block, normally or on an error, cancels what it still had
@@ -954,6 +954,21 @@ sees each segment of the connection.
   }
 }
 ```
+
+### A sustained send
+
+```
+# 10s of data, as fast as the connection takes it:
+/IP(dst=192.0.2.10)/TCP(dst=7) {
+  repeat for=10s { Raw(randbytes(1000)) }
+  wait 1s             # for what is still buffered or in flight
+  s = stats()
+  print("${s.bytes_acked} bytes acked, ${s.retrans} retransmitted, srtt ${s.srtt}, cwnd ${s.cwnd}")
+}
+```
+
+A write waits while TCP's send buffer is full, so the connection sets the rate;
+`every=10ms` would set it to 100 writes per second instead.
 
 ### Raw frames
 
