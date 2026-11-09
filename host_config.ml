@@ -31,13 +31,19 @@ open Batteries
 module EthSpeed = SimTypes.EthSpeed
 
 exception Command_failed of string * string
+exception Not_installed of string list
 
 let () =
     Printexc.register_printer (function
         | Command_failed (cmd, how) ->
-            Some (Printf.sprintf "%S %s.\n\
-                                  Changing the configuration of the host is \
-                                  for root; Have you tried under sudo?" cmd how)
+            Some (Printf.sprintf "%S %s.%s" cmd how
+                (if Unix.geteuid () = 0 then "" else
+                 "\nChanging the configuration of the host is for root; \
+                  Have you tried under sudo?"))
+        | Not_installed progs ->
+            Some (Printf.sprintf "Not found in the PATH, /usr/sbin or /sbin: \
+                                  %s. Please install it."
+                (String.concat ", " progs))
         | _ -> None)
 
 (* Shells do not need to be told about a name or a keyword, and a line of them
@@ -62,15 +68,33 @@ let command_line prog args = String.concat " " (List.map quote (prog :: args))
  * may lack them, although what is there can read the configuration. Commands
  * are run by that path, as a shell may prefer its own version of them
  * otherwise (busybox's sysctl, which cannot clear a setting). *)
-let find_prog prog =
-    if String.contains prog '/' then prog else
+let find_prog_opt prog =
+    if String.contains prog '/' then Some prog else
     let path = try String.split_on_char ':' (Sys.getenv "PATH") with Not_found -> [] in
     let executable d =
         d <> "" &&
         try Unix.access (Filename.concat d prog) [ Unix.X_OK ] ; true
         with Unix.Unix_error _ -> false in
-    try Filename.concat (List.find executable (path @ [ "/usr/sbin" ; "/sbin" ])) prog
-    with Not_found -> prog
+    List.find_opt executable (path @ [ "/usr/sbin" ; "/sbin" ]) |>
+    Option.map (fun d -> Filename.concat d prog)
+
+let find_prog prog =
+    match find_prog_opt prog with
+    | Some p -> p
+    | None -> raise (Not_installed [ prog ])
+
+(** Fail with {!Not_installed} unless all of [progs] can be found, so that a
+ * missing one is known before anything is changed. *)
+let require progs =
+    match List.filter (fun p -> find_prog_opt p = None) progs with
+    | [] -> ()
+    | missing -> raise (Not_installed missing)
+
+(*$T require
+  require [ "sh" ] ; true
+  try require [ "sh" ; "no-such-tool" ] ; false \
+  with Not_installed [ "no-such-tool" ] -> true
+ *)
 
 (** Whether {!run_line} prints the commands it runs, and how: *)
 let verbose = ref false
@@ -319,7 +343,7 @@ let link_of_ethtool out =
  * a link, nor without ethtool. *)
 let link ifname =
     try link_of_ethtool (output ~quiet:true "ethtool" [ ifname ])
-    with Failure _ -> None, None
+    with Failure _ | Not_installed _ -> None, None
 
 (** {2 Ports} *)
 

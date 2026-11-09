@@ -459,6 +459,16 @@ let () =
     if configure && Unix.geteuid () <> 0 then
         die "Configuring interface %s is for root; Have you tried under sudo?"
             !ifname ;
+    let forward_drop =
+        Option.map_default (fun ip -> Host_config.ip_forward ~v6:(Ip.Addr.is_v6 ip) ())
+                           false !own_ip in
+    if configure then (
+        try
+            Host_config.require (
+                "ethtool" ::
+                (if !fw then [ "nft" ; "sysctl" ]
+                 else if forward_drop then [ "nft" ] else []))
+        with e -> die "%s" (Printexc.to_string e)) ;
     (* Configuring the host: *)
     let changes =
         if not configure then None else (
@@ -471,10 +481,10 @@ let () =
                 if !fw then (
                     Host_config.firewall t ~ifname:!ifname ~ports () ;
                     Host_config.reserve_ports t ports) ;
-                Option.may (fun ip ->
-                    if Host_config.ip_forward ~v6:(Ip.Addr.is_v6 ip) () then
+                if forward_drop then
+                    Option.may (fun ip ->
                         Host_config.firewall t ~ifname:!ifname ~forward_drop:ip ()
-                ) !own_ip
+                    ) !own_ip
             with e ->
                 Printf.eprintf "Cannot configure %s: %s\n" !ifname
                     (Printexc.to_string e) ;
