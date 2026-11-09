@@ -1,3 +1,4 @@
+VERSION = 2.0.0
 PKG_NAME = robinet
 
 MAKEFLAGS += -j5
@@ -174,7 +175,7 @@ EXTRA_TESTS = tests/stress.opt
 
 include make.common
 
-.PHONY: examples run vendor coastline upgrade
+.PHONY: examples run vendor coastline upgrade docker-crafty
 
 all: robinet crafty robinet.top examples $(EXTRA_TESTS)
 
@@ -326,6 +327,28 @@ crafty: crafty.opt
 	   echo "You should run:" ;\
 	   echo "sudo setcap cap_net_raw,cap_net_admin=eip $@" ;\
 	 fi
+
+MULTIARCH_BUILDER=multi-arch-builder
+
+docker-buildx-builder.ok:
+	@docker run --privileged --rm tonistiigi/binfmt --install all
+	@if ! docker buildx inspect $(MULTIARCH_BUILDER) >/dev/null 2>&1; then \
+	  docker buildx create --use --name $(MULTIARCH_BUILDER) ;\
+	fi
+	@touch '$@'
+
+LIBPCAP_VERSION=1.10.7
+DOCKER_REGISTRY ?= ghcr.io/rixed
+
+libpcap.tar.gz:
+	curl -L -o $@ 'https://github.com/the-tcpdump-group/libpcap/archive/refs/tags/libpcap-$(LIBPCAP_VERSION).tar.gz'
+
+docker-crafty: Dockerfile-crafty docker-buildx-builder.ok libpcap.tar.gz
+	docker buildx build --builder=$(MULTIARCH_BUILDER) \
+	  --platform linux/amd64,linux/arm64 \
+	  --progress=plain -t $(DOCKER_REGISTRY)/crafty:$(VERSION) \
+	  --build-arg CACHE_BUSTER=$(shell date +%s) \
+	  --push -f $< ./ ;\
 
 doc-spec: docs/simulation.html
 

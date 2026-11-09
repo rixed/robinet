@@ -1,0 +1,94 @@
+# vim: spell spelllang=en ft=dockerfile
+# This part of the dockerfile build a statically linked robinet
+FROM alpine:3.24.4 AS builder
+
+RUN apk add --no-cache \
+    autoconf \
+    bash \
+    bison \
+    build-base \
+    flex \
+    git \
+    linux-headers \
+    m4 \
+    musl-dev \
+    opam \
+    patch \
+    perl \
+    pkgconf \
+    rsync \
+    zlib-dev \
+    zlib-static
+
+RUN apk add --no-cache \
+    openssl-dev \
+    openssl-libs-static
+
+# Install custom static libpcap
+
+COPY libpcap.tar.gz /tmp
+RUN cd /root && tar zxf /tmp/libpcap.tar.gz && rm /tmp/libpcap.tar.gz
+RUN cd /root/libpcap-libpcap-* && \
+    sed -i -e 's/PIC_OPT=-fpic/PIC_OPT=-fPIC/' aclocal.m4 && \
+    ./autogen.sh && \
+    ./configure --prefix=/usr/local \
+                --disable-largefile --disable-protochain --disable-shared \
+                --disable-usb --disable-bluetooth --disable-dbus \
+                --disable-rdma --without-libnl && \
+    make -j3 && make install
+RUN rm -rf /root/libpcap-libpcap-*
+
+RUN opam init --bare --no-setup --disable-sandboxing
+RUN opam switch create --yes --assume-depexts static \
+      ocaml-variants.4.14.5+options ocaml-option-flambda ocaml-option-musl ocaml-option-static
+
+# Set opam environment once and for all
+ENV OPAM_SWITCH_PREFIX=/root/.opam/static
+ENV CAML_LD_LIBRARY_PATH=/root/.opam/static/lib/stublibs:/root/.opam/static/lib/ocaml/stublibs:/root/.opam/static/lib/ocaml
+ENV OCAML_TOPLEVEL_PATH=/root/.opam/static/lib/toplevel
+ENV MANPATH=:/root/.opam/static/man
+ENV PATH=/root/.opam/static/bin:/root/.gem/ruby/2.5.0/bin/:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV OPAMROOTISOK=1
+
+RUN opam repo add --set-default ocalme \
+      https://github.com/rixed/ocalme-opam-repository.git && \
+    opam repo priority ocalme 1
+
+# From now on, we want a current opam view of available packages (esp for the ocalme repo):
+ARG CACHE_BUSTER=1
+RUN opam update
+
+#
+# Preinstall some packages to save some time
+#
+
+RUN opam install --yes --assume-depexts batteries bitstring cppo ocamlfind parsercombinator ppx_bitstring ppx_deriving ppx_deriving_yojson sha yojson
+
+#
+# Robinet
+# Given the amount of changes going on ATM, let's use the master branch:
+#
+
+RUN mkdir -p /root/robinet
+COPY ./ /root/robinet
+RUN opam pin add --yes --kind=path --inplace /root/robinet
+
+WORKDIR /root/robinet
+RUN make -j3 NDEBUG=1 \
+         OCAMLOPTFLAGS="\
+           -compact \
+           -ccopt -static \
+           -ccopt -no-pie \
+           -ccopt -Wl,--gc-sections \
+           -ccopt -Wl,--exclude-libs,ALL \
+           -ccopt -Wl,-O1 \
+           -ccopt -Wl,--sort-common \
+           -ccopt -Wl,--as-needed" \
+         crafty
+
+# This part of the dockerfile to build just the binary
+FROM scratch
+COPY --from=builder /root/robinet/crafty /crafty
+WORKDIR /
+ENTRYPOINT ["/crafty"]
+LABEL maintainer="rixed-github@happyleptic.org"
