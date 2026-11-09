@@ -55,11 +55,10 @@ RUN opam repo add --set-default ocalme \
     opam repo priority ocalme 1
 
 # From now on, we want a current opam view of available packages (esp for the ocalme repo):
-ARG CACHE_BUSTER=1
 RUN opam update
 
 #
-# Preinstall some packages to save some time
+# Preinstall the deps to save some time
 #
 
 RUN opam install --yes --assume-depexts batteries bitstring cppo ocamlfind parsercombinator ppx_bitstring ppx_deriving ppx_deriving_yojson sha yojson
@@ -71,10 +70,8 @@ RUN opam install --yes --assume-depexts batteries bitstring cppo ocamlfind parse
 
 RUN mkdir -p /root/robinet
 COPY ./ /root/robinet
-RUN opam pin add --yes --kind=path --inplace /root/robinet
 
-WORKDIR /root/robinet
-RUN make -j3 NDEBUG=1 \
+RUN make -C /root/robinet -j3 NDEBUG=1 \
          OCAMLOPTFLAGS="\
            -compact \
            -ccopt -static \
@@ -84,11 +81,9 @@ RUN make -j3 NDEBUG=1 \
            -ccopt -Wl,-O1 \
            -ccopt -Wl,--sort-common \
            -ccopt -Wl,--as-needed" \
-         crafty
+         robinet crafty
 
 # This part of the dockerfile to build just the binary
 FROM scratch
+COPY --from=builder /root/robinet/robinet /robinet
 COPY --from=builder /root/robinet/crafty /crafty
-WORKDIR /
-ENTRYPOINT ["/crafty"]
-LABEL maintainer="rixed-github@happyleptic.org"

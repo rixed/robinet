@@ -55,3 +55,8 @@ See [the doc](https://github.com/rixed/robinet/blob/master/docs/openapi.yaml).
 Description of a simulation can be written in a JSON file.
 See [the doc](https://github.com/rixed/robinet/blob/master/docs/simulation.md),
 and the examples such as [this one](https://github.com/rixed/robinet/blob/master/examples/transatlantic.json).
+
+6. Looking for pre-compiled binaries?
+
+- robinet: [amd64](https://raw.githubusercontent.com/rixed/robinet/artifacts/linux_amd64/robinet), [arm64](https://raw.githubusercontent.com/rixed/robinet/artifacts/linux_arm64/robinet)
+- crafty: [amd64](https://raw.githubusercontent.com/rixed/robinet/artifacts/linux_amd64/crafty), [arm64](https://raw.githubusercontent.com/rixed/robinet/artifacts/linux_arm64/crafty)

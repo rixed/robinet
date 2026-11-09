@@ -1,5 +1,5 @@
-VERSION = 2.0.0
 PKG_NAME = robinet
+VERSION = 2.0.0
 
 MAKEFLAGS += -j5
 
@@ -175,7 +175,7 @@ EXTRA_TESTS = tests/stress.opt
 
 include make.common
 
-.PHONY: examples run vendor coastline upgrade docker-crafty
+.PHONY: examples run vendor coastline upgrade artifacts
 
 all: robinet crafty robinet.top examples $(EXTRA_TESTS)
 
@@ -338,17 +338,28 @@ docker-buildx-builder.ok:
 	@touch '$@'
 
 LIBPCAP_VERSION=1.10.7
-DOCKER_REGISTRY ?= ghcr.io/rixed
 
 libpcap.tar.gz:
 	curl -L -o $@ 'https://github.com/the-tcpdump-group/libpcap/archive/refs/tags/libpcap-$(LIBPCAP_VERSION).tar.gz'
 
-docker-crafty: Dockerfile-crafty docker-buildx-builder.ok libpcap.tar.gz
+ARTIFACTS_DIR = /tmp/$(PKG_NAME)-artifacts
+BINS = robinet crafty
+ARCHS = linux_amd64 linux_arm64
+PLATFORMS := $(shell echo $(ARCHS) | sed -e 's,_,/,g' -e 's/ /,/g')
+ARTIFACTS = $(foreach arch,$(ARCHS),$(addprefix $(arch)/,$(BINS)))
+
+$(ARTIFACTS) &: Dockerfile docker-buildx-builder.ok libpcap.tar.gz
 	docker buildx build --builder=$(MULTIARCH_BUILDER) \
-	  --platform linux/amd64,linux/arm64 \
-	  --progress=plain -t $(DOCKER_REGISTRY)/crafty:$(VERSION) \
-	  --build-arg CACHE_BUSTER=$(shell date +%s) \
-	  --push -f $< ./ ;\
+	  --platform $(PLATFORMS) --progress=plain \
+	  --output type=local,dest=dist -f $< .
+
+artifacts: $(ARTIFACTS)
+	git worktree add $(ARTIFACTS_DIR) artifacts
+	cp -r dist/* $(ARTIFACTS_DIR)
+	git -C $(ARTIFACTS_DIR) add $(^:dist/%=%)
+	git -C $(ARTIFACTS_DIR) commit -m "Update artifacts $(date -u +%Y%m%d-%H%M%S)"
+	git -C $(ARTIFACTS_DIR) push origin artifacts
+	git worktree remove $(ARTIFACTS_DIR)
 
 doc-spec: docs/simulation.html
 
