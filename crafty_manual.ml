@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 f4b73a7c97a139d9842a28ce5b291dfa) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 1090e39697db3a205a72e4966e16a22e) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -643,9 +643,9 @@ connection. Errors print them as `IP?`, `IP6?`, `UDP?`, `TCP?`.
     }
 
 `MATCH[TimeExceeded/IP]` is the quoted packet, `MATCH[/IP]` the error's. A quote
-is often cut 8 bytes after the IP header: absent fields will read 0. Sent, a
-quoted `IP` or `IP6` needs a `src` and a `dst`; lengths and checksums are
-managed.
+is often cut 8 bytes after the IP header: absent fields will read 0. A quoted
+first fragment has its `UDP` or `TCP` on top; a later one, `Raw`. Sent, a quoted
+`IP` or `IP6` needs a `src` and a `dst`; lengths and checksums are managed.
 
     /IP6(dst=2001:db8::2)/UDP(src=4000, dst=9)/Raw("anyone?")
     expect timeout=1s /IP6/ICMP6/DestUnreachable(code == PORT_UNREACHABLE6)/IP6/UDP(src == 4000) {

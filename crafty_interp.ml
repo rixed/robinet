@@ -2581,6 +2581,15 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (two ~arp:true ~v6:true "/IP6(dst=2001:db8::2)/ICMP6/Echo(id=7) { Request(seq=1)\n  expect timeout=1s ../TimeExceeded { print(\"from ${MATCH[/IP6].src}\") } }" \
          "expect timeout=1s /IP6/ICMP6/Echo/Request {\n  /IP6!(src=2001:db8::9, dst=MATCH[IP6].src)/ICMP6/TimeExceeded/IP6(src=MATCH[IP6].src, dst=MATCH[IP6].dst, proto=58, hop_limit=1)/Raw(#8000000000070001) }")
 *)
+(* Quoted fragments: the first one's protocol is decoded, the others' not: *)
+(*$= & ~printer:identity
+  "a 0.000s: udp 33434 #70726f6265\na 0.000s: later #0fa0\nb 0.000s: done Eth#1\na 1.000s: done Eth#2" \
+    (two ~arp:true "{ on for=1s /IP/ICMP/TimeExceeded/IP/UDP(src == 4000) {\n    print(\"udp ${MATCH[UDP].dst} ${MATCH[Raw].data}\") }\n  on for=1s /IP/ICMP/TimeExceeded/IP(frag_offset > 0)/Raw {\n    print(\"later ${MATCH[Raw].data}\") }\n  /IP(dst=10.0.0.2)/UDP(src=4000, dst=33434)/Raw(\"probe\") }" \
+         "expect timeout=1s /IP/UDP(dst == 33434)/Raw {\n  /IP(dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, more_frags=true)/UDP(src=MATCH[UDP].src, dst=MATCH[UDP].dst, length=1000)/Raw(MATCH[Raw].data)\n  /IP(dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, proto=17, frag_offset=1)/Raw(#0fa0) }")
+  "a 0.000s: udp 33434 #70726f6265\na 0.000s: later #0fa0\nb 0.000s: done Eth#2\na 1.000s: done Eth#3" \
+    (two ~arp:true ~v6:true "{ on for=1s /IP6/ICMP6/TimeExceeded/IP6/UDP(src == 4000) {\n    print(\"udp ${MATCH[UDP].dst} ${MATCH[Raw].data}\") }\n  on for=1s /IP6/ICMP6/TimeExceeded/IP6(frag_offset > 0)/Raw {\n    print(\"later ${MATCH[Raw].data}\") }\n  /IP6(dst=2001:db8::2)/UDP(src=4000, dst=33434)/Raw(\"probe\") }" \
+         "expect timeout=1s /IP6/UDP(dst == 33434)/Raw {\n  /IP6(dst=MATCH[IP6].src)/ICMP6/TimeExceeded/IP6(src=MATCH[IP6].src, dst=MATCH[IP6].dst, more_frags=true)/UDP(src=MATCH[UDP].src, dst=MATCH[UDP].dst, length=1000)/Raw(MATCH[Raw].data)\n  /IP6(dst=MATCH[IP6].src)/ICMP6/TimeExceeded/IP6(src=MATCH[IP6].src, dst=MATCH[IP6].dst, proto=17, frag_offset=1)/Raw(#0fa0) }")
+*)
 (* DNS: a name resolved by a host's server then pinged; and between two
  * programs, the server's query also seen as bytes: *)
 (*$= & ~printer:identity

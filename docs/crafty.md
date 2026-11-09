@@ -680,6 +680,7 @@ on for=5s /IP/ICMP/TimeExceeded/IP(dst == target)/UDP(dst == 33434) {
 
 `MATCH[TimeExceeded/IP]` is the quoted packet, `MATCH[/IP]` the error's.
 A quote is often cut 8 bytes after the IP header: absent fields will read 0.
+A quoted first fragment has its `UDP` or `TCP` on top; a later one, `Raw`.
 Sent, a quoted `IP` or `IP6` needs a `src` and a `dst`; lengths and checksums
 are managed.
 

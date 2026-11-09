@@ -1302,12 +1302,17 @@ let redirect_node =
 (* Quoted packets, which are often cut short: as much of them as there is,
  * with no stream, nor anything of the state of one. *)
 
-(* Of the protocols on top, those that can be quoted: *)
+(* Of the protocols on top, those that can be quoted; a first fragment quotes
+ * the start of its protocol as any quote does: *)
 let unpack_quoted_ip _ bits =
     match Ip.Pdu.unpack bits with
     | Error _ -> None
     | Ok ip ->
-        let upper = match ip_upper ip with N.ICMP -> N.Raw | u -> u in
+        let upper =
+            if ip.frag_offset > 0 then N.Raw else
+            match ip_upper { ip with more_frags = false } with
+            | N.ICMP -> N.Raw
+            | u -> u in
         unpacked (ip_values ip) ~upper:(Only upper)
                  ~payload:(ip.payload :> bitstring) bits
 
@@ -1332,7 +1337,11 @@ let unpack_quoted_ip6 _ bits =
                       ecn = tc land 3 ; flow_label ; src = Ip.Addr.of_bitstring src ;
                       dst = Ip.Addr.of_bitstring dst ; extensions ;
                       payload = Payload.o payload } in
-        let upper = match ip6_upper ip with N.ICMP6 -> N.Raw | u -> u in
+        let upper =
+            if Ip6.Pdu.is_later_fragment ip then N.Raw else
+            match ip6_upper { ip with extensions = [] } with
+            | N.ICMP6 -> N.Raw
+            | u -> u in
         unpacked (ip6_values ip) ~upper:(Only upper) ~payload bits
     | {| _ |} -> None
 
