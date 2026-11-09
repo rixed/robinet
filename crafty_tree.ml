@@ -522,6 +522,10 @@ let streams root =
         ) acc (children n) in
     List.rev (loop [] root)
 
+(** Resets the streams of the tree of [root] (TCP connections) at once: *)
+let reset_streams root =
+    List.iter (fun n -> n.ops.reset ()) (streams root)
+
 (** {!stats} with the type of each value. *)
 let typed_stats n =
     let types = L.stream_stats @ n.layer.stats in

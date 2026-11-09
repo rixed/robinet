@@ -1581,8 +1581,8 @@ let run (t : t) wait =
   assert_bool "the next tick waits" (not (Events.is_empty t.events))
  *)
 
-(** Run [f] with those signals stopping every simulation, then put the previous
- * handlers back.
+(** Run [f] with those signals stopping every simulation, or calling
+ * [on_signal] from a thread of its own, then put the previous handlers back.
  *
  * A signal is acted upon, and [with_trapped] returns once [f] has, within
  * [sleep] seconds: a thread wakes that often while [f] runs (see below), so
@@ -1590,8 +1590,10 @@ let run (t : t) wait =
  *
  * Signals are delivered to the process, not to a simulation: there is no such
  * thing as interrupting one of them and leaving the others running, so the
- * handler stops the lot -- including any simulation started while [f] runs. *)
-let with_trapped ?(sleep=0.3) signals f =
+ * default handler stops the lot -- including any simulation started while [f] runs. *)
+let with_trapped ?(sleep=0.3) ?(on_signal=fun () ->
+                      Printf.printf "Quitting...\n%!" ;
+                      stop_all ()) signals f =
     let prev_sigs =
         List.map (fun s ->
             let open Sys in
@@ -1607,9 +1609,7 @@ let with_trapped ?(sleep=0.3) signals f =
                  * only appears to own and gives it back twice. So the handler
                  * does the one thing that needs no lock at all: it starts a
                  * thread, which then queues for them like anybody else. *)
-                ignore (Thread.create (fun () ->
-                    Printf.printf "Quitting...\n%!" ;
-                    stop_all ()) ())))
+                ignore (Thread.create on_signal ())))
         ) signals in
     (* Somewhere for that handler to run. A signal handler is OCaml code, and
      * OCaml code runs where the program next polls; a program whose every

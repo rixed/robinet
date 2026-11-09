@@ -198,6 +198,16 @@ let set_rate t b rate =
     b.last <- now t ;
     b.tokens <- rate |? 0.
 
+(** Lifts every limit, for all that follows to pass: *)
+let lift_limits t =
+    t.max_packets <- None ;
+    t.max_volume <- None ;
+    t.max_duration <- None ;
+    t.max_syns <- None ;
+    List.iter (fun b -> set_rate t b None) [ t.packet_rate ; t.throughput ; t.syn_rate ] ;
+    t.dropping <- [] ;
+    arm t
+
 (* The limit that drops this frame of [len] bytes, if any; otherwise its
  * tokens are taken: *)
 let limit_for t len syn =

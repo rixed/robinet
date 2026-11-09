@@ -137,6 +137,8 @@ type ops =
       (* The node is no longer used: once what it has to finish is (TCP
        * closing), the continuation removes it: *)
       close : (unit -> unit) -> unit ;
+      (* Gives up on its stream at once, telling the peer (TCP: a RST): *)
+      reset : unit -> unit ;
       (* How long what is sent now would wait in this node before it
        * leaves it, for senders to pace themselves on: *)
       busy_for : unit -> Clock.Interval.t ;
@@ -226,7 +228,7 @@ let pass u = [ u, both ]
  * mode: *)
 let manual pack =
     { pack ; send = not_driven ; receive = (fun _ u -> pass u) ;
-      listen = ignore ; drive = ignore ; close = (fun k -> k ()) ;
+      listen = ignore ; drive = ignore ; close = (fun k -> k ()) ; reset = ignore ;
       busy_for = Tools.never_busy ;
       buffered = false ; on_ready = ignore ; holding = (fun () -> false) ;
       messages = false ;
@@ -816,7 +818,7 @@ type tcp_state = Idle | Listening | Stream of tcp_stream
  * given, and the connection then accounts for it. The connection's data is
  * seen in self-driven mode, as it comes in order, and each segment in manual
  * mode. Once the node is unused, the connection is closed after what was
- * written, and the node removed once both ends are closed (or after 2
+ * written, and the node removed once both ends are closed (or reset after 2
  * minutes): *)
 let tcp_node ctx =
     let st = ctx.eth and below = Option.get ctx.below in
@@ -824,7 +826,7 @@ let tcp_node ctx =
     let port name = Tcp.Port.o (int_of ctx.key "TCP" name 0 0xffff) in
     let state = ref Idle in
     (* What the connection hands while a segment is received, and whether it
-     * tells its end (an empty chunk, once a FIN or a RST came in order): *)
+     * tells its end (an empty chunk, once a FIN came in order, or a RST): *)
     let received = ref [] and ended = ref false in
     (* The sequence number of manual segments without a connection: *)
     let manual_seq = ref (Random.bits () lsl 2 land 0xffff_ffff) in
@@ -875,7 +877,7 @@ let tcp_node ctx =
         | _ -> 40 in
     let new_stream ?(mss=st.mtu - hdr_len) ?wscale () =
         (match !state with
-        | Stream s -> Tcp.TRX.abort s.trx ; removed s
+        | Stream s -> Tcp.TRX.reset s.trx ; Tcp.TRX.abort s.trx ; removed s
         | _ -> ()) ;
         let t = Tcp.TRX.make power ~sync_recv:true ~mss ?wscale (port "src") (port "dst") logger in
         Tools.(t.tcp_trx.trx.out --> sink (below.send ctx.below_key [ "proto", V.Int tcp_proto ])) ;
@@ -986,8 +988,18 @@ let tcp_node ctx =
             try_close s ;
             Simulation.delay power (Clock.Interval.min 2.) (fun () ->
                 if Option.is_some s.on_closed then (
+                    Tcp.TRX.reset s.trx ;
                     Tcp.TRX.abort s.trx ;
                     Option.may (fun k -> s.on_closed <- None ; k ()) s.on_closed)) ()) ;
+      reset = (fun () ->
+        match !state with
+        | Idle | Listening -> ()
+        | Stream s ->
+            Tcp.TRX.reset s.trx ;
+            Tcp.TRX.abort s.trx ;
+            s.pending <- [] ;
+            removed s ;
+            wake ()) ;
       busy_for ; buffered = true ; messages = false ;
       on_ready = (fun k -> waiters := k :: !waiters) ;
       holding = (fun () ->

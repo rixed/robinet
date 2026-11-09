@@ -878,6 +878,8 @@ let resolve_permissions ~program ~cli =
     { local_ips = Some [ Firewall.Accept, Own_ips ] ; \
       remote_ips = Some [ Firewall.Accept, cidr "0.0.0.0/0" ; Firewall.Accept, cidr "::/0" ] ; \
       mac_spoofing = Some false ; exfiltration = Some false ; promiscuous = Some false }
+*)
+(*$T address_rules
   address_rules ~own:[ Ip.Addr.of_string "10.0.0.1" ; Ip.Addr.of_string "::1" ] \
     [ Firewall.Deny, Addresses (Firewall.cidr_of_string "10.0.0.0/8") ; Firewall.Accept, Own_ips ] = \
     [ Firewall.Deny, Firewall.cidr_of_string "10.0.0.0/8" ; \

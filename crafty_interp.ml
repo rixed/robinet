@@ -1358,6 +1358,8 @@ type handle =
       matches : filter -> Bitstring.bitstring -> bool ;
       (* The streams still open: *)
       open_streams : unit -> Crafty_tree.node list ;
+      (* Resets them, telling their peers (TCP: a RST): *)
+      reset_streams : unit -> unit ;
       (* Whether a layer of that name used that local port: *)
       uses_port : string -> int -> bool ;
       (* Whether [BUDGET.max_ram] was outgrown, by the heap as of now or by an
@@ -1487,6 +1489,7 @@ let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
           emitted = emitted t ;
           matches = matches t.output tree ;
           open_streams = open_streams tree ;
+          reset_streams = (fun () -> Crafty_tree.reset_streams tree) ;
           uses_port = tree.uses_port ;
           over_ram = check_ram } in
     on_start h ;
@@ -1609,6 +1612,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       emitted = (fun frame -> Option.may (fun (h : handle) -> h.emitted frame) !started) ;
       matches = matches (output_of power ?format ?report ~print ~print_err ()) tree ;
       open_streams = open_streams tree ;
+      reset_streams = (fun () -> Crafty_tree.reset_streams tree) ;
       uses_port = tree.uses_port ;
       over_ram = (fun () ->
         Option.map_default (fun (h : handle) -> h.over_ram ()) false !started) }
@@ -1735,6 +1739,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 *)
 (* A constant is computed once reached, and an arm not taken is not: *)
 (*$R runs
+  ignore runs ;
   let program =
       Crafty_parser.parse "repeat count=2 { if I > 5 { x = #00 * 3 } else { x = #00 * 4 } }" |>
       Result.get_ok |> Crafty_typing.check |> Result.get_ok in
@@ -2894,6 +2899,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "on for=1s /IP(encode(/IP!(dst=10.0.0.2)/Raw(\"x\")) == #00) { }")
   "0s: failed: line 2, column 7: Too long for a UDP datagram" \
     (runs "/IP!(dst=10.0.0.2) {\n  x = encode(UDP(src=1, dst=2)/Raw(randbytes(70000))) }")
+*)
+(*$= two & ~printer:identity
   "b 0.000s: 7 30128 20 abcdefghijkl\na 0.000s: #75b0 #75b0\na 0.000s: done Eth#1\nb 0.000s: 8 30128 20 abcdefghijkl\nb 1.000s: done Eth#4" \
     (two ~sent:true "/IP!(dst=10.0.0.2, id=7, proto=17) {\n  d = encode(UDP(src=4000, dst=7)/Raw(\"abcdefghijkl\"))\n  ../IP!(frag_offset=1)/Raw(d[8:])\n  ../IP!(more_frags=true)/Raw(d[:8])\n  p = ../IP!(id=8)/UDP(src=4000, dst=7)/Raw(\"abcdefghijkl\")\n  print(\"${d[6:8]} ${be16(p[UDP].checksum)}\") }" \
          "on for=1s /IP/UDP(dst == 7) { print(\"${MATCH[IP].id} ${MATCH[UDP].checksum} ${MATCH[UDP].length} ${string(MATCH[Raw].data)}\") }")
@@ -3324,4 +3331,47 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "false" (filters "/IP/TCP | /IP/UDP(dst == 7)" (reply "x"))
   "line 1, column 11: The pattern must be absolute (start with /)" \
     (filters "/IP/TCP | UDP" (reply "x"))
+*)
+(* A program stopped while a host's server sends it all it can: its streams
+ * reset, the server stops at once: *)
+(*$R
+  let sim = Simulation.make ~realtime:false "crafty-bulk" in
+  let ea = crafty_peer sim 1 in
+  let h = Host.make ~parent:sim.SimTypes.root ~static_ip:(address 2) ~netmask "host" in
+  let now () = Clock.Time.to_secs (Simulation.now sim) in
+  let rst_at = ref None and last_data = ref 0. in
+  let tcp_of bits =
+      match Eth.Pdu.unpack bits with
+      | Ok e when e.proto = Arp.HwProto.ip4 ->
+          (match Ip.Pdu.unpack (e.payload :> bitstring) with
+          | Ok ip when ip.proto = Ip.Proto.tcp ->
+              Result.to_option (Tcp.Pdu.unpack (ip.payload :> bitstring))
+          | _ -> None)
+      | _ -> None in
+  plug sim ~log:(fun dir bits ->
+      Option.may (fun (tcp : Tcp.Pdu.t) ->
+          if dir = ">" && tcp.flags.rst && !rst_at = None then rst_at := Some (now ())
+          else if dir = "<" && Payload.length tcp.payload > 0 then last_data := now ()
+      ) (tcp_of bits)) ea.Eth.State.iface.widget h.Host.trx.Host.widget ;
+  Simulation.run_startup sim ;
+  let power = h.Host.trx.Host.widget.power in
+  h.Host.trx.Host.tcp_server_start (Tcp.Port.o 9) (fun cnx ->
+      let recv = ref ignore in
+      let flow = Host.tcp_flow cnx ~recv:(fun b -> !recv b) ~closed:ignore in
+      recv := Host.talk power Host.{ sent = 0 ; received = 0 }
+          (Host.Random { min_size = 65536 ; max_size = 65536 ; interval = 0.01 })
+          ~alive:(fun () -> true) ~counted:ignore flow) ;
+  let hd =
+      run_on_tree power (Crafty_tree.make_root ea) ~print:ignore ~print_err:ignore
+          (compile "/IP(dst=10.0.0.2)/TCP(src=4000, dst=9) {\n  Raw(\"go\")\n  on for=10s Raw {} }") in
+  Simulation.delay power (Clock.Interval.sec 0.5) (fun () ->
+      hd.stop () ;
+      hd.reset_streams ()) () ;
+  Simulation.run sim false ;
+  match !rst_at with
+  | None -> assert_failure "no RST"
+  | Some t ->
+      (* What the host's interface had queued still goes: *)
+      assert_bool (Printf.sprintf "RST at %.4fs, data until %.4fs" t !last_data)
+          (!last_data > 0.4 && !last_data < t +. 0.005)
 *)

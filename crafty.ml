@@ -563,6 +563,14 @@ let () =
      * returns: *)
     let handle = ref None in
     let idle () = Option.map_default (fun h -> h.Crafty_interp.idle ()) true !handle in
+    (* Whether to be done with lingering, and whether the streams still open
+     * were reset, which lifts the limits of the policer for the RSTs to go
+     * out: *)
+    let hurry = ref false and reset = ref false and lift_limits = ref ignore in
+    let reset_streams () =
+        reset := true ;
+        !lift_limits () ;
+        Option.may (fun h -> h.Crafty_interp.reset_streams ()) !handle in
     let on_unrouted dst reason =
         if not !no_warning then
             let text =
@@ -603,11 +611,13 @@ let () =
                 status := s ;
                 (* Streams that are closing, and frames on their way, go on
                  * for as long as packets keep going out or coming in, until
-                 * none did for [linger]; checked from the next tick, once
-                 * the kernel has sent all that was injected, and once the
-                 * clock has caught up with the wall clock, which dates what
-                 * is captured, and which blocking injections leave it
-                 * behind: *)
+                 * none did for [linger] (or none at all once stopped). Then
+                 * the streams still open are reset, for their peers not to
+                 * keep sending, and crafty stops; checked from the next
+                 * tick, once the kernel has sent all that was injected, and
+                 * once the clock has caught up with the wall clock, which
+                 * dates what is captured, and which blocking injections
+                 * leave it behind: *)
                 let linger = Clock.Interval.to_secs !linger
                 and tick = Clock.Interval.msec 100. in
                 (* From a thread of its own, as stopping takes the lock this
@@ -620,10 +630,12 @@ let () =
                             if pkts' <> pkts then secs () +. linger else deadline in
                         if Pcap.unsent injector.handler = 0 &&
                            Clock.Interval.compare sim.late tick < 0 &&
-                           (idle () || secs () >= deadline) then stop ()
+                           (idle () || !reset || !hurry || secs () >= deadline) then (
+                            if idle () || !reset then stop ()
+                            else (reset_streams () ; check pkts' deadline))
                         else check pkts' deadline) () in
-                if s = Crafty_interp.Stopped then stop ()
-                else check (!pkts_out + !pkts_in) (secs () +. linger))
+                if s = Crafty_interp.Stopped then reset_streams () ;
+                check (!pkts_out + !pkts_in) (secs () +. linger))
             program in
     handle := Some h ;
     (* For a program that waits, which the interpreter does not look at. From a
@@ -649,6 +661,7 @@ let () =
                     info "Limit reached: %s." (Policer.string_of_limit l) ;
                     h.stop ()))
             "policer" in
+    lift_limits := (fun () -> Policer.lift_limits policer) ;
     (* The first packet sent that the permissions deny, which stops the
      * program, and how many of those were sent and received: *)
     let denied = ref None and denied_out = ref 0 and denied_in = ref 0 in
@@ -747,8 +760,16 @@ let () =
             incr wire_pkts ; wire_bytes := !wire_bytes + Tools.bytelength bits ;
             h.emitted bits
         ) else after.out.write bits)) ;
-    Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ] (fun () ->
-        Simulation.run sim true) ;
+    (* A first signal stops the program, or its lingering, and a second one
+     * crafty: *)
+    let interrupted = ref false in
+    Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ]
+        ~on_signal:(fun () ->
+            if !interrupted then Simulation.stop sim ()
+            else (
+                interrupted := true ;
+                Simulation.asap sim.root.power (fun () -> hurry := true ; h.stop ()) ()))
+        (fun () -> Simulation.run sim true) ;
     let not_captured = Pcap.dropped pcap.handler in
     Option.may Host_config.undo changes ;
     List.iter (fun n -> tally n ; print_stats "open" n) (h.open_streams ()) ;
@@ -769,6 +790,7 @@ let () =
         | Crafty_interp.Done, _ -> "OK", 0
         | Failed e, _ -> "failed: "^ IO.to_string Crafty_interp.print_error e, 1
         | Stopped, Some l -> "stopped: "^ Policer.string_of_limit l, 3
+        | Stopped, None when !interrupted -> "interrupted", 130
         | Stopped, None when h.over_ram () -> "stopped: max-ram", 3
         | Stopped, None -> "stopped", 3
         | Running, _ -> "interrupted", 130 in

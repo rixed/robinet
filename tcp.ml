@@ -985,11 +985,6 @@ struct
                         t.rcvd_fin <- true ;
                         t.closed <- true ;
                         deliver t empty_bitstring (* signal the close *) (* FIXME: which is not very easy to use when the TRX is piped into another one. An Err would suit better *)
-                    ) else if tcp.Pdu.flags.Pdu.rst && not t.rcvd_fin then (
-                        Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: received a RST"))) ;
-                        (* Nothing is sent after it, not even a FIN: *)
-                        abort t ;
-                        deliver t empty_bitstring (* signal the close *)
                     )
                 ) else (
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp:...obsolete packet")))
@@ -1197,6 +1192,19 @@ struct
                                              ~rst:true ~win_size:0 empty_bitstring)
                 ) else
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: ignoring recvd packet while cnx is not established")))
+            ) else if tcp.Pdu.flags.Pdu.rst then (
+                (* Valid anywhere in the window, whatever came before it, and
+                 * after the peer's FIN too, but not once over (RFC 793): *)
+                let offset = Int32.to_int ((tcp.Pdu.seq_num :> int32) -/ ((Option.get t.rcvd_isn) :> int32)) in
+                if t.over_at = None && offset >= t.rcvd_pld &&
+                   offset < t.rcvd_pld + max 1 (rcv_wnd t) then (
+                    Log.(log t.logger Debug (lazy "Tcp: received a RST")) ;
+                    let told = t.rcvd_fin in
+                    (* Nothing is sent after it, not even a FIN: *)
+                    abort t ;
+                    if not told then deliver t empty_bitstring (* signal the close *)
+                ) else
+                    Log.(log t.logger Debug (lazy "Tcp: ignoring a RST out of the window"))
             ) else inqueue_pkt t tcp)
 
     (* Persist timer: with nothing in flight, no ack would tell that the peer's
@@ -1304,6 +1312,14 @@ struct
             t.to_send_len <- t.to_send_len + bytelength bits ;
             try_really_tx t
         )
+
+    (* Gives up on the cnx, telling the peer with a RST, unless it is over
+     * or was never established: *)
+    let reset t =
+        if t.over_at = None && is_established t then (
+            Log.(log t.logger Debug (lazy "Tcp: Resetting the cnx")) ;
+            emit_one t ~rst:true empty_bitstring ;
+            abort t)
 
     (* A full send buffer drains as acks come back, so in about an RTT; and
      * what does leave it then waits for what is below. *)
@@ -1599,9 +1615,9 @@ end
 (*$R sent_manually
     (* [a] connects to [b], over 10ms each way, then runs [steps] 1ms apart.
      * Each step is given [a] and a function to emit a segment to [b] beside
-     * [a]. Returns [a], [b], what [b] received and whether it saw the end of
-     * the stream. *)
-    let exchange ?isn steps =
+     * [a]; [b] writes [b_data] once connected. Returns [a], [b], what [b]
+     * received and whether it saw the end of the stream. *)
+    let exchange ?isn ?(b_data="") steps =
         let sim = Simulation.make ~realtime:false "manual" in
         let power = sim.root.power and logger = Log.make () in
         let a = make power ?isn (Port.o 1) (Port.o 2) logger
@@ -1611,6 +1627,9 @@ end
         and to_a = later a.tcp_trx.trx.out.write in
         a.tcp_trx.trx.out --> sink to_b ;
         b.tcp_trx.trx.out --> sink to_a ;
+        if b_data <> "" then
+            b.cnx_established_cont <- Some (fun _ ->
+                b.tcp_trx.trx.ins.write (bitstring_of_string b_data)) ;
         let rcvd = ref "" and eof = ref false in
         b.tcp_trx.trx.ins --> sink (fun bits ->
             if bitstring_is_empty bits then eof := true
@@ -1643,6 +1662,22 @@ end
     assert_bool "RST received" eof ;
     assert_bool "aborted by the RST" (a.closed && not a.rto_armed) ;
     assert_bool "the peer aborted, with no FIN to send" (b.closed && b.sent_fin) ;
+    (* A RST aborts the peer after a FIN, or ahead of what was received but
+     * within the window, and the peer then sends nothing more: *)
+    let rst_ahead a emit =
+        emit (Pdu.make ~src_port:a.src ~dst_port:a.dst ~rst:true
+                  ~seq_num:(SeqNum.o (Int32.add (next_seq_num a :> int32) 5l))
+                  empty_bitstring) in
+    let b_data = String.make 100_000 'x' in
+    List.iter (fun (msg, steps) ->
+        let _, b, _, eof = exchange ~b_data steps in
+        assert_bool (msg ^": told") eof ;
+        assert_bool (msg ^": aborted") (b.closed && b.over_at <> None) ;
+        assert_bool (msg ^": stopped sending")
+            (b.to_send = [] && b.counters.bytes_out < String.length b_data) ;
+        assert_equal ~printer:string_of_int ~msg:(msg ^": no timeout") 0 b.counters.rto_expired
+    ) [ "RST after FIN", [ write "bye" ; manual ~fin:true "" ; (fun a _ -> reset a) ] ;
+        "RST ahead", [ write "hello" ; rst_ahead ] ] ;
     (* Sequence numbers wrap around: *)
     let _, _, rcvd, _ =
         exchange ~isn:(SeqNum.o 0xFFFFFFF8l) [ write "hello " ; manual "manual " ; write "world" ] in
