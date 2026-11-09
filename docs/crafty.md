@@ -327,8 +327,8 @@ PERMISSIONS = {local_ips: [Accept(OWN_IP), Accept(10.20.4.1)],  # spoofs 10.20.4
     `[Accept(OWN_IPS)]` and `remote_ips` accepts any. Sending from an address
     takes `local_ips` accepting it.
   - `mac_spoofing`: allows sending from another MAC than the interface's.
-  - `exfiltration`: allows sending a payload  made of the payload of a received
-    packet.
+  - `exfiltration`: allows sending a payload made of the payload of a received
+    packet or of `getenv`.
   - `promiscuous`: receives the frames for other addresses too, unless
     `local_ips` denies them.
   - A sent packet denied by the above rules stops the program. A received one

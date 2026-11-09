@@ -2786,9 +2786,10 @@ let is_payload (l : L.layer) (f : L.field) =
     | Type.Bool | Type.Byte | Type.Int | Type.Float -> false
     | _ -> true
 
-(** Where [b] sets a payload with what it received, as errors: the payload
- * fields of what [MATCH] matched taint what they are copied, assigned or
- * computed into, whichever the order of the statements. *)
+(** Where [b] sets a payload with what it received or read from the
+ * environment, as errors: the payload fields of what [MATCH] matched and
+ * [getenv] taint what they are copied, assigned or computed into, whichever
+ * the order of the statements. *)
 let exfiltrations (b : block) =
     (* The variables that hold received packets or their layers, and those
      * that hold what their payloads made: *)
@@ -2805,11 +2806,12 @@ let exfiltrations (b : block) =
         | Select { packet ; _ } | Index (packet, _) | Slice (packet, _, _) ->
             is_packet packet
         | _ -> false in
-    (* Whether [e] is made of what a received packet carried, which a packet
-     * read whole is: *)
+    (* Whether [e] is made of the environment or of what a received packet
+     * carried, which a packet read whole is: *)
     let rec taints e =
         match e.desc with
         | Var v -> Hashtbl.mem tainted v.id
+        | Call (Getenv, _) -> true
         | Field (r, i) when is_packet r ->
             (match r.typ with
             | Type.Record fs ->
@@ -2859,8 +2861,9 @@ let exfiltrations (b : block) =
             List.iter (fun l ->
                 List.iter (fun (i, e) ->
                     if is_payload l.layer l.layer.L.fields.(i) && taints e then
-                        errors := (e.loc, "This payload is made of what was received, \
-                                           which PERMISSIONS.exfiltration does not allow") ::
+                        errors := (e.loc, "This payload is made of what was received or \
+                                           of the environment, which \
+                                           PERMISSIONS.exfiltration does not allow") ::
                                   !errors) l.options) layers
         | _ -> ()) b ;
     in_order !errors
@@ -2895,6 +2898,25 @@ let exfiltrations (b : block) =
   "2:23" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { Query(\"a\")\nexpect Answer { Query(MATCH[Answer].answers[0].name) } }")
   "2:33" (exfiltrated "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { HttpRequest(\"/\")\nexpect HttpAnswer { HttpRequest(MATCH[HttpAnswer].headers[0].value) } }")
   "" (exfiltrated "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { HttpRequest(\"/\")\nexpect HttpAnswer { HttpRequest(\"/${MATCH[HttpAnswer].code}\") } }")
+  "1:35" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(getenv(\"X\")) }")
+  "1:35" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(getenv(\"X\", default=\"d\")) }")
+  "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nx = getenv(\"X\")\ny = \"<${x}>\"\nRaw(y) }")
+  "2:22" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nrepeat count=2 { Raw(#00 * int(getenv(\"X\"))) } }")
+  "1:35" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(arg(0, default=getenv(\"X\"))) }")
+  "1:49" (exfiltrated "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { HttpUpgrade(getenv(\"X\")) }")
+  "1:42" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { Query(getenv(\"X\")) }")
+  "" (exfiltrated "/IP(dst=ip_addr(getenv(\"X\")))/UDP(dst=int(getenv(\"Y\"))) { Raw(arg(0)) }")
+  "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { print(getenv(\"X\"))\nRaw(\"x\") }")
+  "" (exfiltrated "x = resolve(\"${getenv(\"X\")}.example.com\")")
+  "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(\"x\")\nexpect Raw { x = resolve(MATCH[Raw].data) } }")
+  "" (exfiltrated "/IP(dst=resolve(getenv(\"X\"))[0])/UDP(dst=7) { Raw(\"x\") }")
+  "" (exfiltrated "print(hostname(ip_addr(getenv(\"X\"))))")
+  "" (exfiltrated "on /IP/UDP/Raw(length(resolve(string(data))) > 0) {}")
+  "" (exfiltrated "on /IP(hostname(src, default=\"\") == \"a\")/UDP/Raw {}")
+  "" (exfiltrated "/IP(dst=resolve(arg(0))[0])/UDP(dst=7) { Raw(\"x\") }")
+  "" (exfiltrated "print(hostname(1.2.3.4, default=getenv(\"X\")))")
+  "1:35" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(\"${resolve(getenv(\"X\"))}\") }")
+  "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(\"x\")\nexpect Raw { print(hostname(MATCH[IP].src)) } }")
 *)
 
 (* [denied text] is what [denied_literals] says of that program, with local

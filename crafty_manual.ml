@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 1a168ff53333216061e6945926031cba) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 6c28fd3ab075243ebfd1a28a7ff7f542) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -301,7 +301,7 @@ A program may declare them, once each, at its top level, with literals only:
         accepting it.
     -   `mac_spoofing`: allows sending from another MAC than the interface's.
     -   `exfiltration`: allows sending a payload made of the payload of a
-        received packet.
+        received packet or of `getenv`.
     -   `promiscuous`: receives the frames for other addresses too, unless
         `local_ips` denies them.
     -   A sent packet denied by the above rules stops the program. A received
