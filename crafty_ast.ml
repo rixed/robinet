@@ -42,13 +42,13 @@ struct
     type t =
         | Eth | IP | IP6 | TCP | UDP | ICMP | ICMP6 | Echo | Request | Reply
         | DestUnreachable | TimeExceeded | PacketTooBig | RouterSolicit
-        | RouterAdvert | Redirect | DNS | Query | Answer | HTTP | HttpRequest | HttpAnswer | WebSocket | Raw
+        | RouterAdvert | Redirect | DNS | Query | Answer | HTTP | HttpRequest | HttpUpgrade | HttpAnswer | WebSocket | Raw
 
     let all =
         [ Eth ; IP ; IP6 ; TCP ; UDP ; ICMP ; ICMP6 ; Echo ; Request ; Reply ;
           DestUnreachable ; TimeExceeded ; PacketTooBig ; RouterSolicit ;
           RouterAdvert ; Redirect ; DNS ; Query ; Answer ;
-          HTTP ; HttpRequest ; HttpAnswer ; WebSocket ; Raw ]
+          HTTP ; HttpRequest ; HttpUpgrade ; HttpAnswer ; WebSocket ; Raw ]
 
     let to_string = function
         | Eth -> "Eth" | IP -> "IP" | IP6 -> "IP6" | TCP -> "TCP" | UDP -> "UDP"
@@ -58,7 +58,8 @@ struct
         | RouterSolicit -> "RouterSolicit" | RouterAdvert -> "RouterAdvert"
         | Redirect -> "Redirect"
         | DNS -> "DNS" | Query -> "Query" | Answer -> "Answer" | HTTP -> "HTTP"
-        | HttpRequest -> "HttpRequest" | HttpAnswer -> "HttpAnswer"
+        | HttpRequest -> "HttpRequest" | HttpUpgrade -> "HttpUpgrade"
+        | HttpAnswer -> "HttpAnswer"
         | WebSocket -> "WebSocket" | Raw -> "Raw"
 
     (* However written; IP4 is an alias for IP: *)

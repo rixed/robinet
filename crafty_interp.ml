@@ -2680,6 +2680,21 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n\
            /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP/HttpAnswer(101, headers=[{name: \"Upgrade\", value: \"websocket\"}]) }")
 *)
+(* HttpUpgrade: the url makes the request, whose headers can be replaced; the
+ * key is random, and answered. It is seen as an HttpRequest: *)
+(*$= & ~printer:identity
+  "a 0.000s: GET /chat?x=1\nb 0.000s: GET /chat?x=1 HTTP/1.1 {name: Host, value: example.com:8080} {name: Upgrade, value: websocket} {name: Connection, value: Upgrade} 24 [{name: sec-websocket-version, value: 8}, {name: Origin, value: o}]\na 0.000s: Sec-WebSocket-Accept\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=5000, dst=80)#2}}\nb 0.000s: true #68656c6c6f\nb 1.000s: done Eth#7{IP(src=10.0.0.2, dst=10.0.0.1)#6{TCP(src=80, dst=5000)#6}}" \
+    (two ~sent:true "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80)/HTTP {\n  p = HttpUpgrade(\"ws://example.com:8080/chat?x=1\", headers=[{name: \"sec-websocket-version\", value: \"8\"}, {name: \"Origin\", value: \"o\"}])\n  print(\"${p[HttpRequest].method} ${p[HttpRequest].url}\")\n  expect timeout=1s HttpAnswer(101) { print(MATCH[HttpAnswer].headers[1].name) }\n  WebSocket(WS_TEXT)/Raw(\"hello\") }" \
+         "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  r = MATCH[HttpRequest]\n  print(\"${r.method} ${r.url} ${r.version} ${r.headers[0]} ${r.headers[1]} ${r.headers[2]} ${length(r.headers[3].value)} ${r.headers[4:]}\")\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP/HttpAnswer(101, headers=[{name: \"Upgrade\", value: \"websocket\"}]) }\non for=1s /IP/TCP(dst == 80)/HTTP/WebSocket { print(\"${MATCH[WebSocket].masked} ${MATCH[Raw].data}\") }")
+  "0s: failed: line 1, column 1: HttpUpgrade cannot do TLS, so not wss" \
+    (runs "/IP(dst=10.0.0.2)/TCP!(src=5000, dst=80)/HTTP/HttpUpgrade(\"wss://example.com/chat\")")
+  "0s: failed: line 1, column 1: HttpUpgrade needs a url with a host (ws://example.com/chat) or a Host header" \
+    (runs "/IP(dst=10.0.0.2)/TCP!(src=5000, dst=80)/HTTP/HttpUpgrade(\"/chat\")")
+  "0s: failed: line 1, column 1: HttpUpgrade needs a url" \
+    (runs "/IP(dst=10.0.0.2)/TCP!(src=5000, dst=80)/HTTP/HttpUpgrade")
+  "4ps: /chat HTTP/1.0 {name: Upgrade, value: websocket}\n4ps: done" \
+    (runs ~sent:true "/IP(dst=10.0.0.2)/TCP!(src=5000, dst=80)/HTTP {\n  p = HttpUpgrade(\"/chat\", version=\"HTTP/1.0\", headers=[{name: \"Host\", value: \"h\"}])\n  print(\"${p[HttpRequest].url} ${p[HttpRequest].version} ${p[HttpRequest].headers[0]}\") }")
+*)
 (* The HTTP server of the manual: *)
 (*$= & ~printer:identity
   "a 0.000s: 200, 6 bytes\na 0.000s: 404, 0 bytes\na 0.000s: done Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=5000, dst=80)#3}}\nb 1.000s: done Eth#7{IP(src=10.0.0.2, dst=10.0.0.1)#6{TCP(src=80, dst=5000)#6}}" \

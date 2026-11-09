@@ -260,8 +260,9 @@ let variant_type ctors =
  * name is one variant, which the layers that share it all read the same
  * record as: *)
 let packet_type =
-    Type.Array (variant_type (List.map (fun (l : L.layer) ->
-        lname l.name, packet_record l) L.all |> List.unique))
+    Type.Array (variant_type (List.filter_map (fun (l : L.layer) ->
+        if l.received_as <> None then None else
+        Some (lname l.name, packet_record l)) L.all |> List.unique))
 
 (*$T packet_record
   List.for_all (fun (a : Crafty_layers.layer) -> List.for_all (fun (b : Crafty_layers.layer) -> \
@@ -2231,6 +2232,9 @@ and pattern env (p : A.pattern) =
     let _, pls =
         List.fold_left (fun (base, pls) (pl : A.pattern_layer) ->
             let base', l = push ~hint pl.pl_loc base pl.pl_name in
+            Option.may (fun n ->
+                error pl.pl_loc "%s is only sent: it is received as %s"
+                    (L.to_string l) (lname n)) l.received_as ;
             let pls =
                 if base' == base then pls
                 else { pl_loc = pl.pl_loc ; pl_layer = L.root ; pl_mode = L.Driven ;
@@ -3608,6 +3612,11 @@ let check_patterns (ps : A.patterns) =
   "" (types "/IP(dst=1.2.3.4)/TCP(dst=80) { p = Raw(\"GET /\") }")
   "" (types "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { p = HttpRequest(\"/\") }")
   "" (types "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { p = WebSocket(WS_TEXT)/Raw(\"x\") }")
+  "" (types "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { p = HttpUpgrade(\"ws://a/\") }")
+  "line 1, column 44: HttpUpgrade is only sent: it is received as HttpRequest" (types "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { expect HttpUpgrade {} }")
+  "line 1, column 17: HttpUpgrade is only sent: it is received as HttpRequest" (types "on /IP/TCP/HTTP/HttpUpgrade {}")
+  "line 2, column 7: No HttpUpgrade in a packet" (types "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { p = HttpUpgrade(\"ws://a/\")\nprint(p[HttpUpgrade].url) }")
+  "line 1, column 60: HttpUpgrade has no field method" (types "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { HttpUpgrade(\"ws://a/\", method=\"POST\") }")
   "" (types "/IP(dst=1.2.3.4)/UDP(dst=53) { p = Raw(\"x\") }")
   "line 2, column 7: LAST[Eth].ts is not known: only a packet captured as it leaves has it (p = MESSAGE)" \
     (types "/IP!(dst=1.2.3.4)/UDP(dst=53) { Raw(\"x\")\n  t = LAST[Eth].ts }")

@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 dfd342c3bf7ed9244e828dd6edc19a6c) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 1a168ff53333216061e6945926031cba) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -40,18 +40,16 @@ goes on top of the current one.
 
 Some layers are terminal (`Raw`, `Request`, `Reply`, `Query`, `Answer`): they
 end the stack and send the message. An incomplete stack is followed instead by a
-block of further instructions. `HttpRequest`, `HttpAnswer` and `WebSocket` send
-too, unless followed by a block or a layer (`Raw`, their body).
+block of further instructions. A few layers can be both, and are terminal unless
+followed by a block or a layer.
 
 The layers of a stack are streams: `UDP` picks its source port once (from
 `--udp`), and every message sent and every pattern on top of it belong to that
 stream.
 
-An `expect` that times out is an error. An error leaves the enclosing blocks one
-after the other, until a `catch` drops it or a `retry` runs its block again; one
-that reaches the top ends the program.
-
-The language is statically typed.
+Any error (such as a timeout) leaves the enclosing blocks one after the other,
+until a `catch` drops it or a `retry` runs its block again; uncaught errors end
+the program.
 
 ### Going down the stack
 
@@ -84,16 +82,17 @@ Like relative patterns, relative stacks can go back with `../` and modify upper
 layers' options while reusing the stream:
 
     # The same stream, but for one datagram with a TTL of 1:
-    /IP(dst=192.0.2.10)/UDP(dst=7) {
+    /IP(dst=192.0.2.10)/TCP(dst=7) {
       Raw("ttl 64")
-      print("Sent from port ${LAST[UDP].src}")   # LAST is the last packet sent
-      # ../../ goes back to /Eth, where IP and UDP land on the IP and UDP of
+      print("Sent from port ${LAST[TCP].src}")   # LAST is the last packet sent
+      # ../../ goes back to /Eth, where IP and TCP land on the IP and TCP of
       # the current stack. They overlay them: the same streams, with their
-      # options (dst, the ports) unless given. ttl=1 is for this message only.
-      ../../IP(ttl=1)/UDP/Raw("ttl 1")
-      print("Also sent from port ${LAST[UDP].src}")
+      # options (dst, the ports, TCP internal state) unless overwritten.
+      # ttl=1 is for this message only.
+      ../../IP(ttl=1)/TCP/Raw("ttl 1")
+      print("Also sent from port ${LAST[TCP].src}")
       repeat count=2 {
-        # Wait for Raw in the same stream (unlike with /IP/UDP/Raw that would
+        # Wait for Raw in the same stream (unlike with /IP/TCP/Raw that would
         # match even outside this stream)
         expect timeout=1s Raw { print(MATCH[Raw].data) }
       }
@@ -106,18 +105,15 @@ layers' options while reusing the stream:
 
 The rule, for stacks and patterns alike: relative ones stay on the streams of
 the current stack (`../` overlaying some of its layers); absolute ones start
-anew from `Eth`. Overlaying can set a temporary value for an earlier option;
-unless that's a key: `../IP(dst=another)` would create a new stream indeed.
+anew from `Eth`. Overlaying can set a temporary value for an earlier option.
 
 ### Manual layers
 
-So far, streams were *self-driven*: crafty resolves addresses with ARP or
-neighbor discovery, connects, retransmits, fragments and reassembles. A bang
-makes a layer *manual*, for packets as on the wire: `TCP!(flags=SYN, ack_num=0)`
-is a SYN packet with this sequence number regardless of the state of the TCP
-connection. On reception, `IP!` sees each fragment, the first also as the start
-of what it carries (`IP!/UDP`, `IP!/TCP!`), and `TCP!` each segment, even
-without data.
+So far, streams were *self-driven*: crafty resolves addresses, connects,
+retransmits, fragments and reassembles. A bang makes a layer *manual*, for
+packets as on the wire: `TCP!(flags=SYN, ack_num=0)` is a SYN packet with this
+sequence number regardless of the state of the TCP connection. On reception,
+`IP!` sees each fragment and `TCP!` each segment, even without data.
 
     # A SYN of our own, and the SYN-ACK that answers it:
     target = 192.0.2.10
@@ -134,24 +130,20 @@ without data.
       print("SYN of seq ${seg[TCP].seq_num} sent")
     }
 
-`encode(STACK)` is the bytes of the layers of `STACK`, all manual, as if sent,
-but nothing is. An `IP` or `IP6` right below them fills in the checksum of what
-they carry, as of a whole packet, ignoring its fragment fields. It uses up what
-a send does (`IP!` ids, `Request` and `TCP!` sequence numbers). Its top may be
-non-terminal. It cannot be in a condition.
+    % sudo crafty --tcp 40000 --fw syn.cfty
+    SYN of seq 1000 sent
+    SYN-ACK: seq 1969569245, ack 1001
 
-This is how to fragment by hand, since no fragment has what the checksum covers:
+`encode(STACK)` is the bytes of the layers of `STACK`, all manual, as if sent.
+An `IP` or `IP6` right below them fills in the checksum of what they carry. This
+is how to fragment by hand, since no fragment has what the checksum covers:
 
-    # A datagram in two fragments, the last first; frag_offset counts 8 byte blocks:
+    # A datagram in two fragments, the last first:
     /IP!(dst=target, id=1234, proto=17) {
       d = encode(UDP(src=4000, dst=7)/Raw(randbytes(100)))
       ../IP!(frag_offset=8)/Raw(d[64:])
       ../IP!(more_frags=true)/Raw(d[:64])
     }
-
-    % sudo crafty --tcp 40000 --fw syn.cfty
-    SYN of seq 1000 sent
-    SYN-ACK: seq 1969569245, ack 1001
 
 ### Running crafty
 
@@ -166,18 +158,11 @@ Options:
 -   `-e PROG`: the program itself, rather than a file.
 -   `-i IFACE`: the interface to send from and capture on, rather than that of
     the default route. Crafty needs root.
--   `--routing kernel|manual`: `kernel`, the default on Linux, asks the kernel
-    for the route of each packet, so route changes apply at once. Crafty only
-    uses one interface: what is routed through another, or refused, has no
-    route. Each time a destination loses its route, Crafty warns. With `-i`,
-    routes are looked up through that interface, and what has none there is
-    taken as on-link, as with `ping -I`. Only the destination is asked about, so
-    rules on the source are ignored. `manual`, the only one elsewhere, uses the
-    interface's subnets and default gateways as they are at start.
+-   `--routing kernel|manual`: `kernel` (default) uses kernel routes. `manual`
+    takes gateway from the interface and then does ARP etc.
 -   `--tcp LO-HI`, `--udp LO-HI` (repeatable): the ranges to pick source ports
-    from, with the program's `PORTS` (see [Budget, ports and
-    permissions](#budget-ports-and-permissions)). A program that sends TCP or
-    UDP without a `src` needs them.
+    from (see also [Budget, ports and
+    permissions](#budget-ports-and-permissions)).
 -   `--fw`: crafty shares the interface's address with the host, whose kernel
     would answer what crafty receives with TCP resets and ICMP port
     unreachables. `--fw` keeps the kernel off the ports of `--tcp` and `--udp`.
@@ -187,14 +172,13 @@ Options:
 -   `--format csv|json`: change the output format to csv or json (json makes -p
     print all available details of every packet).
 -   `--stats`: prints the stats of each stream (see `stats()`) as it ends.
--   `--check`: only compiles the program.
--   `--max-duration`, `--max-packets`, `--max-bytes`, `--max-packets-per-secs`,
-    `--max-bytes-per-secs`, `--max-syns`, `--max-syns-per-secs`, `--max-ram`:
-    self-imposed budget. When neither `--max-duration` nor `BUDGET.max_duration`
-    is set, a run stops after 10m.
+-   `--check`: check the program and quit.
+-   `--max-duration` (default: 10m), `--max-packets`, `--max-bytes`,
+    `--max-packets-per-secs`, `--max-bytes-per-secs`, `--max-syns`,
+    `--max-syns-per-secs`, `--max-ram`: self-imposed budget.
 -   `--local-ip accept|deny:CIDR`, `--remote-ip accept|deny:CIDR` (repeatable),
     `--mac-spoofing BOOL`, `--exfiltration BOOL`, `--promiscuous BOOL`:
-    permissions, over the program's (see [Budget, ports and
+    permissions (see [Budget, ports and
     permissions](#budget-ports-and-permissions)).
 -   `--reference`: prints the reference manual.
 -   `--examples`: prints many examples of use.
@@ -211,7 +195,7 @@ deny, 130 when interrupted.
     like, but not stderr (`crafty x.cfty | grep ...`, not `2>&1 | grep`)
 -   Parameterize your programs with arguments (`crafty x.cfty 10.0.0.1 5`, read
     with `arg(0)`, `arg(1)`) or environment variables
-    (`TARGET=10.0.0.1 crafty x.cfty`, read with `getenv("TARGET")`)
+    (`TARGET=10.0.0.1 crafty x.cfty`, read with `getenv("TARGET")`) then cast.
 -   When unsure, use --max-duration
 |crafty_manual}
 
@@ -224,8 +208,8 @@ let reference = {crafty_manual|### Lexical conventions
 -   Comments run from a `#` to the end of the line. A `#` followed by a
     hexadecimal digit is a byte literal instead.
 -   Names of layers, fields, functions and keywords are case insensitive.
-    Constants, `MATCH`, `LAST`, `OWN_IP` and `OWN_IPS` are upper case. All but
-    field names are reserved. Variables and constructors are case sensitive.
+    Constants, `MATCH`, `LAST`, `OWN_IP` and `OWN_IPS` are upper case. Variables
+    and constructors are case sensitive.
 
 ### Types and literals
 
@@ -233,8 +217,7 @@ let reference = {crafty_manual|### Lexical conventions
 -   `int`: `42`, `-1`, `0x1f`, `0o17`, `0b101`.
 -   `float`: `1.5`, `2e-3`.
 -   `byte`: `#1f`.
--   bytes: `#deadbeef` (an even number of digits), or a string where bytes are
-    expected. An array of bytes.
+-   bytes: `#deadbeef` (an even number of digits). An array of bytes.
 -   `string`: `"text ${expr}"`.
 -   `interval`: `5s`, `10ms`, `1m30s`, `1.5ms`, `-2s`. Units: `d`, `h`, `m`,
     `s`, `ms`, `us` (or `µs`), `ns`, `ps`. Printed in one unit up to `s`:
@@ -264,19 +247,13 @@ Strings interpolate any expression: `"ttl ${MATCH[IP].ttl - 1}"`. Escapes: `\n`,
 hexadecimal (`#68656c6c6f`); bytes passed where a string is expected, as to
 `print`, are text, as `string(b)` makes them.
 
-**Conversions** happen where needed: an int to a float, a byte to an int, a
-string, an IP address or a MAC address to bytes and back (4, 16 and 6 bytes), an
-int to a bool. Bytes compare with the others as bytes. Others use the functions
-`int`, `float`, `bool`, `byte`, `interval`, `time`, `ip_addr`, `mac_addr` and
-`cidr`, which also read a string as a literal: `ip_addr(getenv("SERVER"))`. An
-IPv4 address converts to an int and back: `ip_addr(int(a) + 1)`. `bytes(x)`
-makes bytes of a byte or of what converts to them, for `+`:
-`#0102 + bytes(10.0.0.1)`. `checksum(b)` is the 2 bytes of the Internet checksum
-of `b` (RFC 1071): `h1 + checksum(h1 + #0000 + h2) + h2`. `be16(x)` and
-`le16(x)` are the bytes of an int, big and little endian
-(`be16(0x0102) == #0102`, `le16(0x0102) == #0201`), likewise for 24, 32, 40, 48,
-56 and 64 bits. A negative one is in two's complement; one that does not fit
-fails, before the program runs if it is constant.
+**Conversions** happen where that make sense: an int to a float, a byte to an
+int, an IP address or a MAC address to bytes and back, an int to a bool... Bytes
+compare with the others as bytes. Others use the functions `int`, `float`,
+`bool`, `byte`, `interval`, `time`, `ip_addr`, `mac_addr` and `cidr`, which also
+read a string as a literal: `ip_addr(getenv("SERVER"))`. An IPv4 address
+converts to an int: `ip_addr(int(a) + 1)`. `+` can concatenate strings and
+bytes.
 
 **Variants** need no declaration. Where variants meet (items of an array,
 branches of an `if`, values assigned to a variable...), they make one variant
@@ -289,24 +266,23 @@ with the constructors of all, which `case` tells apart:
 
 ### Variables
 
--   `x = expr` declares `x` in the current block, with the type of `expr`.
-    Declaring a name twice in one block is an error; an inner block may shadow
-    it.
+-   `x = expr` declares `x` in the current block, with the type of `expr`. An
+    inner block may shadow it.
 -   `x := expr` assigns it, and `x += expr` (also `-=`, `*=`, etc.) updates it.
 -   Predefined: `MATCH` (in the block of an `expect` or `on`), `LAST` (the last
     packet sent, once a block has sent one), `I`, the counter of a `repeat` or
-    the item of a `foreach`, `BUDGET`, `PORTS` and `PERMISSIONS`, and `OWN_IPS`,
-    the addresses of the interface (or `--ip`'s), IPv4 ones first, and `OWN_IP`,
-    the first of them.
+    the item of a `foreach`, `BUDGET`, `PORTS`, `PERMISSIONS`, `OWN_IPS`, the
+    addresses of the interface (or `--ip`'s), IPv4 ones first, and `OWN_IP`, the
+    first of them.
 -   `LAST` is the packet as given, not as it left: reading a field that only the
     wire knows (`LAST[Eth].ts`, or `IP.id`, `UDP.checksum`... under a
-    self-driven `IP`) is an error. `p = MESSAGE` captures the packet as it
-    leaves (see [Self-driven vs manual stacks](#self-driven-vs-manual-stacks)).
+    self-driven `IP`) is an error. In contrast, `p = MESSAGE` captures the
+    packet as it leaves (see [Self-driven vs manual
+    stacks](#self-driven-vs-manual-stacks)).
 
 ### Budget, ports and permissions
 
-A program may declare them, once each, at its top level, with literals, `OWN_IP`
-and `OWN_IPS` only:
+A program may declare them, once each, at its top level, with literals only:
 
     BUDGET = {max_duration: 30s, max_syns: 30}
     PORTS = {tcp: [[40000, 40100]], udp: [[5000, 5000]]}
@@ -314,16 +290,13 @@ and `OWN_IPS` only:
                    remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
 
 -   `BUDGET`'s fields are the budget options of crafty, named alike.
--   `max_ram`, in bytes, stops a program that leaks: its heap is checked now and
-    then, so expect overshoot. Also stops it before making an array, bytes (8
-    bytes per item) or a string that would outgrow it.
--   `PORTS` has ranges `[first, last]` by protocol; a protocol left out gets no
-    port.
+-   `max_ram`, in bytes.
+-   `PORTS` has ranges `[first, last]` by protocol; default to no port.
 -   crafty runs with what both the program and the command line allow.
 -   `PERMISSIONS`:
     -   `local_ips`, `remote_ips`: rules `Accept(x)` or `Deny(x)`, `x` being a
-        CIDR, `OWN_IP` or `OWN_IPS`; the first that matches an address decides,
-        and none matching denies. Unset, `local_ips` is `[Accept(OWN_IPS)]` and
+        CIDR or `OWN_IP(S)`; the first that matches an address decides, and none
+        matching denies. Unset, `local_ips` is `[Accept(OWN_IPS)]` and
         `remote_ips` accepts any. Sending from an address takes `local_ips`
         accepting it.
     -   `mac_spoofing`: allows sending from another MAC than the interface's.
@@ -340,29 +313,23 @@ and `OWN_IPS` only:
 Operators, from the tightest binding to the loosest:
 
 1.  `!x`, `-x`.
-2.  `*`, `/`, `%`: on numbers. An array (or a byte) times an int repeats it:
-    `#01 * 2` is `#0101`, `[0] * 3` is `[0, 0, 0]`.
+2.  `*`, `/`, `%`: on numbers. An array (or a byte) times an int repeats it.
 3.  `+`, `-`: on numbers; a time minus a time is an interval, a time plus an
     interval (or a number of seconds) is a time. `+` also concatenates arrays
     (`[1] + [2, 3]`) and appends or prepends an item (`[1, 2] + 3`,
     `0 + [1, 2]`). To `+`, a byte is one-element bytes: `#41 + #42` is `#4142`.
-    A string plus a string or bytes is a string, as if interpolated:
-    `"a=" + #4142` is `"a=${#4142}"`, so `"a=#4142"`; use `string(b)` for bytes
-    as text. Others convert explicitly: `"n=" + string(1)`. Other arrays append:
-    `["a"] + "b"`.
+    A string plus a string or bytes is a string; use `string(b)` for bytes as
+    text.
 4.  `<<`, `>>`: shift an int or a byte by an int; `>>` keeps the sign of an int,
     and a byte stays 8 bits.
-5.  `&`, then `^`, then `|`: bitwise, on ints or bytes. They bind tighter than
-    comparisons: `flags & RST == 0` is `(flags & RST) == 0`.
-6.  `==`, `!=`, `<`, `<=`, `>`, `>=`, and `in` (an IP address in a CIDR): they
-    do not chain; ordering works on numbers, bytes, intervals, times and
-    strings.
+5.  `&`, then `^`, then `|`: bitwise, on ints or bytes.
+6.  `==`, `!=`, `<`, `<=`, `>`, `>=`, and `in` (an IP address in a CIDR).
 7.  `&&`, then `||`.
 
-Also: `r.field`, `a[i]` (`a[-1]` is the last item), `m[k]` (else the default,
-else an error), `f(arg, name=arg)`, and the layer selectors of
-[Patterns](#patterns). Arrays, bytes and strings slice as in Python. `a[i] := v`
-and `m[k] += 1` change an item, adding the key to a map if need be.
+Also: `r.field`, `a[i]` (`a[-1]` is the last item), `m[k]`, `f(arg, name=arg)`,
+and the layer selectors of [Patterns](#patterns). Arrays, bytes and strings
+slice as in Python. `a[i] := v` and `m[k] += 1` change an item, adding the key
+to a map if need be.
 
 **Blocks, `if` and `case` are expressions**:
 
@@ -370,53 +337,34 @@ and `m[k] += 1` change an item, adding the key to a map if need be.
     ttl = case var=h MATCH[1] IP { h.ttl } else { 0 }
     rtt = { t0 = now() ; Request("ping") ; expect Reply {} ; now() - t0 }
 
-A block can wait, send, receive, loop, `break` or `continue` only as the whole
-value of a declaration, an assignment or a statement: `n = 1 + { wait 1s ; 1 }`
-is an error.
-
 ### Self-driven vs manual stacks
 
 Sent messages can be assigned to a variable:
 
 `p = /IP!(dst=target)/TCP!(src=1, dst=2, flags=SYN)/Raw()`
 
-This sends a packet and waits until it is recaptured on its way out, failing 1s
-after no layer holds it any more (a self-driven `TCP` holds what waits for the
-connection or the windows, and what is not acked). Its timestamp `p[Eth].ts` is
-therefore accurate. Through self-driven layers, `p` is the first frame that
-carries some of the message: its first fragment, if `IP` fragments it, or its
-first segment, if `TCP` splits it, decoded as far as that frame goes.
+This sends a packet and waits until it is recaptured on its way out. Its
+timestamp `p[Eth].ts` is therefore accurate. Through self-driven layers, `p` is
+the first frame that carries some of the message.
 
 Self-driven and manual layers can be mixed with some restrictions: a manual
 layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 
 ### Patterns
 
--   `/IP/UDP(dst == 7)/Raw`: *absolute*, matched from the interface up, on any
-    stream.
--   `Raw("pong")`: *relative*, on top of the current stack, so only on its
-    stream, as its layers see it: in `/IP/UDP { expect Raw }`, reassembled
-    datagrams only.
+-   `/IP/UDP(dst == 7)/Raw`: *absolute*, matched from the interface up.
+-   `Raw("pong")`: *relative*, on top of the current stack.
 -   `../ICMP/DestUnreachable`: relative to a layer below the top of the current
     stack.
 -   `Raw("pong") | ../ICMP`: alternatives.
--   `UDP(src == port)`: conditions in parentheses are boolean expressions. A
-    bare name is a variable if there is one (`port`), else a field of the layer
-    (`src`).
+-   `UDP(src == port)`: conditions in parentheses are boolean expressions.
 -   `IP.src` is the field of the innermost IP layer, this one included. A path
     names the layers below the one meant, `_` being any one: `/IP.src` is the
-    first IP, `TimeExceeded/IP.src` the one on top of `TimeExceeded`,
-    `ICMP/_/IP.src` the one on top of any ICMP error.
+    first IP's `src`, `ICMP/_/IP.src` the one on top of any ICMP error.
 -   A condition that is not a bool compares the default field: `Raw("pong")` is
     `Raw(data == "pong")`.
 -   The fields that can be read depend on the mode (see [Layers](#layers)): a
     self-driven `TCP` shows its ports, a manual `TCP!` each segment's header.
-
-A packet matches in one mode only: a fragment `IP!`, a reassembled packet `IP`
-(or `IP6`); TCP data `TCP/Raw`, in order and once per chunk delivered, and each
-segment `TCP!`; a WebSocket message `WebSocket`, and each frame `WebSocket!`. A
-pattern matches a packet once, but for HTTP: each message or WebSocket frame
-matches.
 
 **`MATCH`** is the packet that matched, as an array of layers: `MATCH[IP].src`,
 `MATCH[Raw].data`, with paths as in conditions (`MATCH[/IP]`,
@@ -435,8 +383,7 @@ what their engine computes (checksums).
 
 -   `repeat var=v count=n every=d for=d { ... }`: runs the block `count` times,
     or while `for` has not elapsed. An iteration starts `every` after the
-    previous one started, or when it ends if later. `v` (default `I`) counts
-    from 0.
+    previous one started. `v` (default `I`) counts from 0.
 -   `foreach v every=d for=d ARRAY { ... }`: a `repeat` over the items of the
     array or map (as `{key: k, value: v}`), `v` (default `I`) being the item.
 -   `retry max=n { ... }`: runs the block again, up to `n` times (default 3),
@@ -461,11 +408,9 @@ what their engine computes (checksums).
 -   `spawn for=d { ... }`: runs the block alongside the enclosing one, which
     goes on. With `for`, the enclosing block waits for it, cancelling it after
     `d`; without, it ends with the statements of the enclosing block.
--   `{ ... }`: a block; its variables and patterns end with it. A block ends
-    once its statements are done, its `linger`s waited, and its `on`s and
-    `spawn`s with a `for` ended. Leaving a block, normally or on an error,
-    cancels what it still had going: patterns, timers, inner blocks, and the
-    streams it held, closing their connections.
+-   `{ ... }`: a block. Ends once its statements are done, its `linger`s waited
+    and its `on`s and `spawn`s with a `for` ended. Leaving a block, normally or
+    on an error, cancels what it still had going.
 
 ### Functions
 
@@ -473,8 +418,7 @@ what their engine computes (checksums).
     text).
 -   `string(x)`: `x` as `"${x}"` (bytes as text).
 -   `format(x)`: any value as a string, in the format of `--format`. CSV takes a
-    scalar, or a record, array or map of scalars; record fields come in the
-    order of their names: `print(format(stats()))`.
+    scalar, or a record, array or map of scalars.
 -   `summary(x)`: return `{count, min, mean, stddev, p50, p95, p99, max}` from
     all values in `x` (key by key if `x` is a map or a record).
 -   `report(x, name=s)`: prints the summary of `x` according to `--format`.
@@ -486,51 +430,49 @@ what their engine computes (checksums).
     included, and adds, as Linux's `tcp_info`: `bytes_acked`, `bytes_received`
     (in order), `retrans`, `dupacks`, `timeouts`, `holes_in` (gaps opened in
     what was received), `ooo_in` (segments filling a gap within `min_rtt` of the
-    one beyond it: reordered, not resent), `dup_in` (segments with only data
-    already received: the peer's spurious retransmissions), `srtt`, `rttvar`,
-    `min_rtt`, `rtt_samples`, `rto`, `snd_mss`, `rcv_mss`, `cwnd`, `ssthresh`
-    (2\^31-1 before any loss), `snd_wnd` (the peer's window), `rcv_wnd`,
-    `snd_wscale` and `rcv_wscale` (the window shifts the peer and we offered, -1
-    if none; scaling is on only if both offered one) and `established`. An IP or
-    IP6 stream adds `fragmented` (packets sent in fragments), `frags_out`,
-    `frags_in`, `reassembled` and `reasm_timeouts` (incomplete after 30s, or 60s
-    for IP6).
--   `getenv(name, default=s)`: fails if unset and no default.
--   `arg(n, default=s)`: the n-th argument after the program, from 0; fails if
-    missing and no default. `nargs()`: how many there are.
+    one beyond it), `dup_in` (segments with only data already receiveds),
+    `srtt`, `rttvar`, `min_rtt`, `rtt_samples`, `rto`, `snd_mss`, `rcv_mss`,
+    `cwnd`, `ssthresh` (2\^31-1 before any loss), `snd_wnd` (the peer's window),
+    `rcv_wnd`, `snd_wscale` and `rcv_wscale` (the window shifts the peer and we
+    offered, -1 if none) and `established`. An IP or IP6 stream adds
+    `fragmented`, `frags_out`, `frags_in`, `reassembled` and `reasm_timeouts`
+    (incomplete after 30s, or 60s for IP6).
+-   `getenv(name, default=s)`
+-   `arg(n, default=s)`: the n-th argument after the program, from 0. `nargs()`:
+    how many there are.
 -   `resolve(name)`: the addresses of a name, IPv4 first, as an array, from the
-    system's resolver; an address resolves to itself. `hostname(ip, default=s)`:
-    the name of an address. Blocking, so better resolved before sending.
-    `is_ip4(ip)`, `is_ip6(ip)`: its version.
--   `rand(max)`: an int or a float in `[0, max)` (default 1.0), or a bool if
-    `max` is `true`. `randbytes(len)`: random bytes.
--   `int(x)`, `float(x)`, `bool(x)`, `byte(x)` (the low 8 bits): `int` and
-    `float` also take an interval, as seconds, and a time (see `time` above).
-    `interval(secs)`: the reverse.
--   `exp(x)`, `ln(x)`, `log(x)` (base 10). `log2(n)`: the integer base 2
-    logarithm of a positive int.
+    system's resolver. Blocking.
+-   `hostname(ip, default=s)`: the name of an address. Blocking.
+-   `is_ip4(ip)`, `is_ip6(ip)`
+-   `rand(max)`: an int or a float in `[0, max)` (or a bool if `max` is `true`)
+-   `randbytes(len)`: random bytes.
+-   `int(x)`, `float(x)`, `bool(x)`, `byte(x)` (the low 8 bits): of intervals,
+    times, or numbers
+-   `interval(secs)`.
+-   `exp(x)`, `ln(x)`, `log(x)` (base 10). `log2(n)`.
 -   `split(s, by)`: the parts of `s` between the occurrences of `by`.
 -   `array(init=v, len=n)`, `length(a)` (or `count(a)`, of an array, a map or a
     string), `concat(a, b)`, `append(a, x)`, `prepend(x, a)`.
--   `sorted(a)`: a sorted copy. `sort(a)`, a statement, sorts an array.
+-   `sorted(a)`: a sorted copy.
+-   `sort(a)`: in place.
 -   `has(m, k)`, `remove(m, k)` (a copy), `keys(m)`, `values(m)` on map `m`.
 -   `sum(a)`, `min(a)`, `max(a)`, `mean(a)`, `stddev(a)`, `percentile(a, p)`: of
-    an array, or the values of a map. Only `sum` takes none (0). `mean` and
-    `stddev` take numbers (giving a float) or intervals. `percentile` is the
-    smallest value that `p` percent of them do not exceed; 50 is the median.
+    an array, or the values of a map.
 -   `histogram(a, bucket=b)`: the values counted in buckets of width `b` from 0,
-    as an array of `{min, count, max}`, `min` and `max` being the extreme values
-    in the bucket.
+    as an array of `{min, count, max}`, `min` and `max` being observed values.
+-   `checksum(b)`: the 2 bytes of the Internet checksum of `b` (RFC 1071)
+-   `be16(x)`, `le16(x)`, all the way to 64: the bytes of an int, big and little
+    endian.
 
 ### Layers
 
-Each field has its type, and the modes in which it can be *set* as an option and
-*read* in a condition or in `MATCH`: **M** manual, **S** self-driven. A layer
-with a single mode is manual. *(key)* fields tell streams apart.
+Each field has the modes in which it can be *set* as an option and *read* in a
+condition or in `MATCH`: **M** manual, **S** self-driven. A layer with a single
+mode is manual. *(key)* fields tell streams apart.
 
-Every layer but `UDP` and the terminal ones has also `length`: int; read M; the
-bytes it carries (`TCP!(length > 0)`: segments with data). `Raw` has it too: the
-bytes of its data.
+Every layer but the terminal ones has also `length`: int; read M; the bytes it
+carries (`TCP!(length > 0)`: segments with data). `Raw` has it too: the bytes of
+its data. Exception: `UDP.length` is the `length` field of the header.
 
 #### `Eth`: Ethernet (bottom of every stack)
 
@@ -542,11 +484,7 @@ bytes of its data.
     the frame that completed it. Unset in `LAST`.
 
 Self-driven, it carries `IP` and `IP6`, and finds next hops with ARP and
-neighbor discovery. Sending a packet without a route is an error, as is `Eth!`
-without a `dst`; what a layer sends on its own, such as a TCP retransmission, is
-dropped. It answers both for an address of its own (`--ip`); the host's kernel
-answers for the interface's. Neighbor solicitations and advertisements never
-reach the program; the messages of routers do. `Eth!` frames go out as they are.
+neighbor discovery (or ask the kernel). `Eth!` frames go out as they are.
 
 #### `IP`: IPv4
 
@@ -590,7 +528,7 @@ connection. `IP!` sends the header as given, but for the checksum.
 -   `is_fragment`: bool; read M.
 
 The `frag_` fields and `more_frags` are those of the fragment header: 0 and
-false without one. `IP6!` has one if any of them is given.
+false without one.
 
 Self-driven IP6 fragments to the MTU and reassembles, as `IP`.
 
@@ -614,18 +552,15 @@ Self-driven IP6 fragments to the MTU and reassembles, as `IP`.
 -   `sack_ok`: bool; set M; read M. Whether SACK is permitted.
 
 The fields of the options cannot be given with `options`. A missing `ts_val` or
-`ts_ecr` is 0. Given -1, as they read without their option, they leave it out.
-Self-driven, `mss` and `wscale` are what the connection offers (-1 offers no
-window scaling, which caps its window at 64KiB); a `TCP!` over it does not send
-them.
+`ts_ecr` is 0. Given -1 they leave it out. Self-driven, `mss` and `wscale` are
+what the connection offers (-1 offers no window scaling, which caps its window
+at 64KiB).
 
 Self-driven, the first message sent connects, and what follows waits for the
 connection. A TCP stream created by a pattern accepts the connection instead.
 
 `TCP!` segments take the sequence and ack numbers, the window and the ACK|PSH
-flags of the stream's connection when not given, and the connection accounts for
-them: they advance its sequence, FIN closes it, RST aborts it. They are not
-retransmitted.
+flags of the stream's connection when not given, and update them.
 
 #### `UDP`
 
@@ -662,16 +597,11 @@ sequence numbers per stream.
 #### `DestUnreachable` and `TimeExceeded` (on `ICMP` or `ICMP6`), `PacketTooBig` (on `ICMP6`)
 
 -   `code`: int; set M; read M. Default 0. Constants: `NET_UNREACHABLE`,
-    `HOST_UNREACHABLE`, `PROTOCOL_UNREACHABLE`, `PORT_UNREACHABLE`,
-    `FRAG_NEEDED`, `SOURCE_ROUTE_FAILED`; `TTL_EXCEEDED`, `REASSEMBLY_TIMEOUT`.
-    Under `ICMP6`: `NO_ROUTE`, `ADMIN_PROHIBITED`, `BEYOND_SCOPE`,
-    `ADDRESS_UNREACHABLE`, `PORT_UNREACHABLE6`; `HOP_LIMIT_EXCEEDED`,
-    `REASSEMBLY_TIMEOUT`.
+    `TTL_EXCEEDED`, `PORT_UNREACHABLE6` etc.
 -   `mtu`: int; set M; read M. Not in `TimeExceeded`; default 0. Always 0 in a
     `DestUnreachable` of `ICMP6`.
 
-On top is the start of the packet the error is about: a quoted `IP` (`IP6` under
-`ICMP6`), or `Raw`.
+On top is the quoted `IP` (`IP6` under `ICMP6`) the error is about, or `Raw`.
 
 #### `RouterSolicit`, `RouterAdvert` (terminal) and `Redirect` (on `ICMP6`)
 
@@ -696,13 +626,8 @@ On top is the start of the packet the error is about: a quoted `IP` (`IP6` under
 -   `target`, `dst`: ip; set M; read M. Required.
 -   `target_lla`: mac; set M; read M. Default 00:00:00:00:00:00.
 
-All have `options`: bytes; set M; read M. Given, they are all the options, which
-the other fields of options cannot be given with. A link-layer address reads
-00:00:00:00:00:00 without its option, and given so leaves it out; an `mtu` -1
-likewise. They are sent with a hop limit of 255, which receivers check, unless
-`IP6` is given another. On top of `Redirect` is the start of the packet
-redirected, a quoted `IP6` or `Raw`, cut to a multiple of 8 bytes. `Eth` does
-not take what is sent to all routers (ff02::2) unless `PERMISSIONS.promiscuous`.
+All have `options`: bytes; set M; read M. On top of `Redirect` is the start of
+the packet redirected, a quoted `IP6` or `Raw`, cut to a multiple of 8 bytes.
 
     p = {prefix: 2001:db8:1::/64, on_link: true, autonomous: true, valid: 86400, preferred: 14400}
     /IP6(dst=ff02::1)/ICMP6/RouterAdvert(mtu=1400, prefixes=[p])
@@ -718,9 +643,9 @@ connection. Errors print them as `IP?`, `IP6?`, `UDP?`, `TCP?`.
     }
 
 `MATCH[TimeExceeded/IP]` is the quoted packet, `MATCH[/IP]` the error's. A quote
-is often cut 8 bytes after the IP header: of `TCP`, only the ports and `seq_num`
-are then sure, the other fields reading 0. Sent, a quoted `IP` or `IP6` needs a
-`src` and a `dst`; lengths and checksums are computed unless given.
+is often cut 8 bytes after the IP header: absent fields will read 0. Sent, a
+quoted `IP` or `IP6` needs a `src` and a `dst`; lengths and checksums are
+managed.
 
     /IP6(dst=2001:db8::2)/UDP(src=4000, dst=9)/Raw("anyone?")
     expect timeout=1s /IP6/ICMP6/DestUnreachable(code == PORT_UNREACHABLE6)/IP6/UDP(src == 4000) {
@@ -738,15 +663,14 @@ The stream of a DNS id, for `Query` and `Answer` messages.
 -   `name`: string; set M; read M. Default field; required. Without the trailing
     dot (`"example.com"`), but for the root (`"."`).
 -   `type`: int; set M; read M. Default `TYPE_A`. Constants `TYPE_A`, `TYPE_NS`,
-    `TYPE_CNAME`, `TYPE_SOA`, `TYPE_PTR`, `TYPE_MX`, `TYPE_TXT`, `TYPE_AAAA`,
-    `TYPE_SRV`, `TYPE_ANY`.
+    etc.
 -   `class`: int; set M; read M. Default `CLASS_IN`.
 -   `opcode`: int; set M; read M. Default 0.
 -   `authoritative`, `truncated`, `rec_avail`, `authentic_data`,
     `checking_disabled`: bool; set M; read M. Default false.
 -   `rec_desired`: bool; set M; read M. Default true.
 -   `status`: int; set M; read M. Default `NOERROR`. Constants `NOERROR`,
-    `FORMERR`, `SERVFAIL`, `NXDOMAIN`, `NOTIMP`, `REFUSED`.
+    `FORMERR`, `SERVFAIL`, etc.
 -   `answers`, `authority`, `additional`: records; set M; read M. Default none.
     Each is `{name: string, type: int, class: int, ttl: int, data: bytes}`; the
     data of an A record converts to an IP address.
@@ -758,9 +682,9 @@ message with several.
 
 The stream of the HTTP/1.x messages of a TCP connection, then, after a 101
 answer received or sent, of its WebSocket frames. On `TCP`, each is seen once
-complete, however segments cut it; on `TCP!`, those that fill a segment. An
-answer without a length ends with the connection (or the segment's FIN). Not
-seen: the answer to a `HEAD` (it waits for a body).
+complete; on `TCP!`, those that fill a segment. An answer without a length ends
+with the connection (or the segment's FIN). Not seen: the answer to a `HEAD` (it
+waits for a body).
 
 #### `HttpRequest` and `HttpAnswer` (on `HTTP`)
 
@@ -774,20 +698,30 @@ seen: the answer to a `HEAD` (it waits for a body).
 
 Alone, a message has no body; `Raw` on top is its body, sent as given.
 `Content-Length` is added unless a length or `Transfer-Encoding` header is
-given: to an answer (but 1xx, 204 and 304), to a request with a body. Received,
-`MATCH[Raw].data` is the body, dechunked. A 101 answer to a request with a
-`Sec-WebSocket-Key` gets its `Sec-WebSocket-Accept`, unless given.
+given. Received, `MATCH[Raw].data` is the body, dechunked. A 101 answer to a
+request with a `Sec-WebSocket-Key` gets its `Sec-WebSocket-Accept`, unless
+given.
 
     /IP(dst=192.0.2.10)/TCP(dst=80)/HTTP {
       HttpRequest("/upload", method="POST", headers=[{name: "Host", value: "example.com"}])/Raw("data")
       expect timeout=1s HttpAnswer(code >= 400) { print("refused: ${MATCH[HttpAnswer].code}") }
     }
 
+#### `HttpUpgrade` (on `HTTP`, terminal)
+
+-   `url`: string; set M. Default field; required. Gives the request line and
+    the `Host`; the stack gives the destination. No `wss` or `https`: no TLS.
+-   `version`: string; set M. Default `"HTTP/1.1"`.
+-   `headers`: records; set M. Default none. Added last, replacing those of the
+    same name. Must give a `Host` if `url` has no host.
+
+The `GET` asking for a WebSocket. Only sent: it is received, matched and read
+back (`p[HttpRequest]`) as an `HttpRequest`.
+
 #### `WebSocket` (on `HTTP`)
 
 -   `opcode`: int; set M, S; read M, S. Default field; default `WS_BINARY`.
-    Constants `WS_CONTINUATION`, `WS_TEXT`, `WS_BINARY`, `WS_CLOSE`, `WS_PING`,
-    `WS_PONG`.
+    Constants `WS_CONTINUATION`, `WS_TEXT`, `WS_BINARY`, `WS_CLOSE`, etc.
 -   `final`: bool; set M; read M. Default true.
 -   `masked`: bool; set M; read M. Default: whether this side sent the request.
 -   `mask`: int; set M; read M. As on the wire (0 if not masked). Default:
@@ -799,11 +733,7 @@ self-driven stack or pattern uses the stream, it answers pings (which it does
 not show) and a close it did not send.
 
     /IP(dst=192.0.2.10)/TCP(dst=80)/HTTP {
-      HttpRequest("/chat", headers=[{name: "Host", value: "example.com"},
-                                    {name: "Upgrade", value: "websocket"},
-                                    {name: "Connection", value: "Upgrade"},
-                                    {name: "Sec-WebSocket-Key", value: "dGhlIHNhbXBsZSBub25jZQ=="},
-                                    {name: "Sec-WebSocket-Version", value: "13"}])
+      HttpUpgrade("ws://example.com/chat")
       expect timeout=1s HttpAnswer(101) {}
       WebSocket(WS_TEXT)/Raw("hello")
       expect timeout=1s WebSocket(WS_TEXT) { print(MATCH[Raw].data) }
@@ -814,9 +744,7 @@ not show) and a close it did not send.
 
 -   `data`: bytes; set M; read M. Default field.
 
-What a layer carries when not decoded further: the payload of UDP, the data of
-TCP, a fragment, a quote, an unknown protocol, an HTTP body, a WebSocket
-payload. Sent as given.
+What a layer carries when not decoded further. Sent as given.
 |crafty_manual}
 
 let examples = {crafty_manual|These ran against a host with UDP and TCP echo servers on port 7.
@@ -884,31 +812,6 @@ The times are those of the captures, of the probe going out and of its echo
 coming in. Each probe expects its own echo, so that a late one is not taken for
 the next.
 
-### Resolve, then ping
-
-    /IP(dst=192.0.2.53)/UDP/DNS {
-      Query("www.example.com")
-      expect timeout=2s Answer(status == NOERROR) {
-        a = MATCH[Answer].answers
-        assert(length(a) > 0 && a[0].type == TYPE_A, msg="no address")
-        /IP(dst=a[0].data)/ICMP/Echo {
-          Request("hi")
-          expect timeout=1s Reply { print("${a[0].name} is up") }
-        }
-      }
-    }
-
-The first record is an address only if the name has no CNAME.
-
-### Fetch a page
-
-    /IP(dst=192.0.2.10)/TCP(dst=80)/HTTP {
-      HttpRequest("/", headers=[{name: "Host", value: "example.com"}])
-      expect timeout=2s HttpAnswer {
-        print("${MATCH[HttpAnswer].code}, ${length(MATCH[Raw].data)} bytes")
-      }
-    }
-
 ### An HTTP server
 
     BUDGET = {max_duration: 61m}
@@ -923,7 +826,7 @@ The first record is an address only if the name has no CNAME.
 
 ### A UDP echo server
 
-    PERMISSIONS = {exfiltration: true}  # it sends back what it receives
+    PERMISSIONS = {exfiltration: true}  # it sends what's sniffed
     BUDGET = {max_duration: 61m}
     on for=1h /IP/UDP(dst == 7)/Raw {
       /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Raw(MATCH[Raw].data)
@@ -934,7 +837,7 @@ The first record is an address only if the name has no CNAME.
 ### Losses per flow
 
     # 4 flows of 25 datagrams to the UDP echo server: how many get no echo?
-    target = 192.0.2.10
+    target = ip_addr(arg(0))
     lost = array(init=25, len=4)
     {
       on linger=1s /IP(src == target)/UDP(src == 7, dst >= 40000, dst < 40004) {

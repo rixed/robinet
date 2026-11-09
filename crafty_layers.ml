@@ -1693,6 +1693,23 @@ let http_request_node _ =
                                 string_of ~def:"/" fields "url") in
         pack_http_message fields cmd ~length_needed:(fun b -> b <> "") [] payload)
 
+(* The url tells the request line and the Host, which [headers] can give
+ * instead. There is no TLS to honour a secure scheme: *)
+let http_upgrade_node _ =
+    manual (fun fields _ _ ->
+        let url = Url.of_string (string_of ~def:"" fields "url")
+        and headers = http_headers fields in
+        if url.path = "" && url.net_loc = "" then
+            V.fail "HttpUpgrade needs a url" ;
+        if List.mem (String.lowercase_ascii url.scheme) [ "wss" ; "https" ] then
+            V.fail "HttpUpgrade cannot do TLS, so not %s" url.scheme ;
+        if url.net_loc = "" && header_value "Host" headers = None then
+            V.fail "HttpUpgrade needs a url with a host (ws://example.com/chat) \
+                    or a Host header" ;
+        Http.Pdu.pack { (Websocket.upgrade_request ~headers url) with
+                        version = string_of ~def:Http.Pdu.default_version fields "version" },
+        [])
+
 (* An answer has a length, but those that have no body: *)
 let http_answer_node _ =
     manual (fun fields _ payload ->
@@ -1789,6 +1806,9 @@ type layer =
       (* Of a packet quoted by an ICMP error, which goes by the name of the
        * layer it is a quote of: *)
       quoted : bool ;
+      (* For a layer that is only sent, what it is received as; no pattern or
+       * packet has it: *)
+      received_as : N.t option ;
       (* Whether it has a self-driven mode distinct from the manual one; for
        * those that have not, a bang is ignored and they behave manually: *)
       driven : bool ;
@@ -1831,7 +1851,7 @@ let unsendable name _ =
  * its own has: *)
 let length_field = field "length" Type.Int ~set_in:[] ~about:"the bytes %s carries"
 
-let layer ?(above=[]) ?(quoted=false) ?(driven=false) ?(terminal=false) ?(ends=terminal) ?default
+let layer ?(above=[]) ?(quoted=false) ?received_as ?(driven=false) ?(terminal=false) ?(ends=terminal) ?default
           ?(constants=[]) ?node ?(stats=[]) ?(unpack=fun _ _ -> None) name fields =
     let fields, unpack =
         if (terminal && name <> N.Raw) ||
@@ -1847,7 +1867,7 @@ let layer ?(above=[]) ?(quoted=false) ?(driven=false) ?(terminal=false) ?(ends=t
             with Not_found ->
                 invalid_arg ("Crafty_layers: no field "^ d ^" in "^ N.to_string name)
         ) default in
-    { name ; above ; quoted ; driven ; terminal ; ends ; fields ; default_field ;
+    { name ; above ; quoted ; received_as ; driven ; terminal ; ends ; fields ; default_field ;
       constants ; node = node |? unsendable name ; stats ; unpack }
 
 (** As in error messages: [IP?] for a quoted IP. *)
@@ -2078,6 +2098,13 @@ let http_request =
         field "version" Type.String ;
         field "headers" (Type.Array http_header) ]
 
+let http_upgrade =
+    layer N.HttpUpgrade ~above:[ http ] ~terminal:true ~default:"url"
+          ~received_as:N.HttpRequest ~node:http_upgrade_node [
+        field "url" Type.String ;
+        field "version" Type.String ;
+        field "headers" (Type.Array http_header) ]
+
 (* A frame, whose payload is on top: *)
 let websocket =
     layer N.WebSocket ~above:[ http ] ~driven:true ~ends:true ~default:"opcode" ~node:ws_node
@@ -2151,7 +2178,7 @@ let all =
       dest_unreachable ; time_exceeded ; dest_unreachable6 ; packet_too_big ;
       time_exceeded6 ; router_solicit ; router_advert ; redirect ; quoted_ip ; quoted_ip6 ; quoted_udp ; quoted_tcp ;
       dns ; dns_message N.Query ~query:true ; dns_message N.Answer ~query:false ;
-      http ; http_request ; http_answer ; websocket ; raw ]
+      http ; http_request ; http_upgrade ; http_answer ; websocket ; raw ]
 
 let same_name a b = String.lowercase_ascii a = String.lowercase_ascii b
 

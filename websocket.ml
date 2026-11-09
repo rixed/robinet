@@ -206,6 +206,19 @@ let header_has name value headers =
 let is_upgrade (req : Http.Pdu.t) =
     header_has "Upgrade" "websocket" req.headers
 
+(** The request of a client to upgrade to a websocket at [url], with a random
+    key. [headers] come last and replace those of the same name. *)
+let upgrade_request ?(headers=[]) url =
+    let given n = Http.headers_find n headers <> None in
+    let key = base64 (string_of_bitstring (randbs 16)) in
+    Http.Pdu.make_request "GET" (Url.request_target url)
+        (List.filter (fun (n, _) -> not (given n))
+            [ "Host", url.Url.net_loc ;
+              "Upgrade", "websocket" ;
+              "Connection", "Upgrade" ;
+              "Sec-WebSocket-Key", key ;
+              "Sec-WebSocket-Version", "13" ] @ headers)
+
 (** {2 TRX}
 
     Turns a byte stream (typically a TCP connection) into a websocket: it
@@ -345,14 +358,7 @@ struct
         t.on_handshake t
 
     let send_request t url =
-        let key = base64 (string_of_bitstring (randbs 16)) in
-        let req =
-            Http.Pdu.make_request "GET" (Url.request_target url)
-                ([ "Host", url.Url.net_loc ;
-                   "Upgrade", "websocket" ;
-                   "Connection", "Upgrade" ;
-                   "Sec-WebSocket-Key", key ;
-                   "Sec-WebSocket-Version", "13" ] @ t.headers) in
+        let req = upgrade_request ~headers:t.headers url in
         t.request <- Some req ;
         emit t (Http.Pdu.pack req)
 

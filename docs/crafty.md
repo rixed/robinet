@@ -747,6 +747,17 @@ given.
 }
 ```
 
+#### `HttpUpgrade` (on `HTTP`, terminal)
+
+- `url`: string; set M. Default field; required. Gives the request line and
+  the `Host`; the stack gives the destination. No `wss` or `https`: no TLS.
+- `version`: string; set M. Default `"HTTP/1.1"`.
+- `headers`: records; set M. Default none. Added last, replacing those of the
+  same name. Must give a `Host` if `url` has no host.
+
+The `GET` asking for a WebSocket.  Only sent: it is received, matched and read
+back (`p[HttpRequest]`) as an `HttpRequest`.
+
 #### `WebSocket` (on `HTTP`)
 
 - `opcode`: int; set M, S; read M, S. Default field; default `WS_BINARY`.
@@ -764,11 +775,7 @@ once a self-driven stack or pattern uses the stream, it answers pings
 
 ```
 /IP(dst=192.0.2.10)/TCP(dst=80)/HTTP {
-  HttpRequest("/chat", headers=[{name: "Host", value: "example.com"},
-                                {name: "Upgrade", value: "websocket"},
-                                {name: "Connection", value: "Upgrade"},
-                                {name: "Sec-WebSocket-Key", value: "dGhlIHNhbXBsZSBub25jZQ=="},
-                                {name: "Sec-WebSocket-Version", value: "13"}])
+  HttpUpgrade("ws://example.com/chat")
   expect timeout=1s HttpAnswer(101) {}
   WebSocket(WS_TEXT)/Raw("hello")
   expect timeout=1s WebSocket(WS_TEXT) { print(MATCH[Raw].data) }
