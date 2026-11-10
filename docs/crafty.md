@@ -792,23 +792,28 @@ What a layer carries when not decoded further. Sent as given.
 
 ## 3. Examples
 
-These ran against a host with UDP and TCP echo servers on port 7.
-
-### Ping
+### Resolve, then ping
 
 ```
-/IP(dst=192.0.2.10)/ICMP/Echo {
-  received = 0
-  repeat count=5 every=200ms {
-    Request("hello")
-    catch {
-      expect timeout=1s Reply(payload == "hello") {
-        received += 1
-        print("reply from ${MATCH[IP].src}: seq=${MATCH[Reply].seq} ttl=${MATCH[IP].ttl}")
+/IP(dst=192.0.2.53)/UDP/DNS {
+  Query("www.example.com")
+  expect timeout=2s Answer(status == NOERROR) {
+    a = MATCH[Answer].answers
+    assert(length(a) > 0 && a[0].type == TYPE_A, msg="no address")
+    /IP(dst=a[0].data)/ICMP/Echo {
+      received = 0
+      repeat count=5 every=200ms {
+        Request("hi")
+        catch {
+          expect timeout=1s Reply {
+            received += 1
+            print("reply from ${MATCH[IP].src}: seq=${MATCH[Reply].seq} ttl=${MATCH[IP].ttl}")
+          }
+        }
       }
+      print("${received} replies out of 5")
     }
   }
-  print("${received} replies out of 5")
 }
 ```
 

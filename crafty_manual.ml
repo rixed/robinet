@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 1090e39697db3a205a72e4966e16a22e) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 3cf5d1a283c37b02c1b20048fe152925) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -747,22 +747,27 @@ not show) and a close it did not send.
 What a layer carries when not decoded further. Sent as given.
 |crafty_manual}
 
-let examples = {crafty_manual|These ran against a host with UDP and TCP echo servers on port 7.
+let examples = {crafty_manual|### Resolve, then ping
 
-### Ping
-
-    /IP(dst=192.0.2.10)/ICMP/Echo {
-      received = 0
-      repeat count=5 every=200ms {
-        Request("hello")
-        catch {
-          expect timeout=1s Reply(payload == "hello") {
-            received += 1
-            print("reply from ${MATCH[IP].src}: seq=${MATCH[Reply].seq} ttl=${MATCH[IP].ttl}")
+    /IP(dst=192.0.2.53)/UDP/DNS {
+      Query("www.example.com")
+      expect timeout=2s Answer(status == NOERROR) {
+        a = MATCH[Answer].answers
+        assert(length(a) > 0 && a[0].type == TYPE_A, msg="no address")
+        /IP(dst=a[0].data)/ICMP/Echo {
+          received = 0
+          repeat count=5 every=200ms {
+            Request("hi")
+            catch {
+              expect timeout=1s Reply {
+                received += 1
+                print("reply from ${MATCH[IP].src}: seq=${MATCH[Reply].seq} ttl=${MATCH[IP].ttl}")
+              }
+            }
           }
+          print("${received} replies out of 5")
         }
       }
-      print("${received} replies out of 5")
     }
 
     % sudo crafty --ip 192.0.2.5 ping.cfty
