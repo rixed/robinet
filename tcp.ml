@@ -383,7 +383,7 @@ struct
              urg : 1 ; ack : 1 ; psh : 1 ; rst : 1 ; syn : 1 ; fin : 1 ;
              win_size : 16 ; checksum : 16 ; urg_ptr  : 16 ;
              options : ((hdr_len lsl 2) - no_opt_hdr_len) * 8 : bitstring ;
-             payload  : -1 : bitstring |} ->
+             payload  : -1 : bitstring |} when hdr_len >= 5 ->
             Ok { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
                  seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;
                  flags = { cwr ; ece ; urg ; ack ; psh ; rst ; syn ; fin } ;
@@ -393,6 +393,12 @@ struct
 
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
+     *)
+
+    (* A header must be at least as long as its fixed part: *)
+    (*$T unpack
+      Result.is_error (unpack (bitstring_of_string \
+        ("\000\001\000\002" ^ String.make 8 '\000' ^ "\032" ^ String.make 7 '\000')))
      *)
 
     let has_payload t =
