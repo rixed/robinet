@@ -1813,6 +1813,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "repeat count=0 { print(\"never\") }")
   "0s: [::1] [2, 4] [a: 1, b: 3] [[1, 2], [2]] true false true false\n0s: done" \
     (runs "a = [x for x in [1.2.3.4, ::1] if is_ip6(x)]\nb = [2 * x for x in [1, 2]]\nc = [e.key: e.value + x for e in [\"a\": 1, \"b\": 2] for x in [0, 1] if x <= e.value - 1]\nd = [[y for y in [1, 2] if y >= x] for x in [1, 2]]\nprint(\"${a} ${b} ${c} ${d} ${any(is_ip6(x) for x in [::1])} ${all([true, false])} ${any([0, 2])} ${all([\"a\": 1, \"b\": 0])}\")")
+  "0s: -1 7 1.0\n0s: done" \
+    (runs "a = [0] * 0\nb = [7]\nprint(\"${length(a) > 0 ? a[0] : -1} ${length(b) > 0 ? b[0] : -1} ${true ? 1 : 2.5}\")")
   "0s: [0, 1, 2] [2, 3] [] [0, 2, 4]\n0s: done" \
     (runs "print(\"${range(3)} ${range(2, 4)} ${range(5, 1)} ${[2 * i for i in range(3)]}\")")
   "0s: [] true false [x: 1]\n0s: done" \

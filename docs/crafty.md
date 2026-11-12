@@ -356,6 +356,7 @@ Operators, from the tightest binding to the loosest:
 5. `&`, then `^`, then `|`: bitwise, on ints or bytes.
 6. `==`, `!=`, `<`, `<=`, `>`, `>=`, and `in` (an IP address in a CIDR).
 7. `&&`, then `||`.
+8. `c ? a : b`: `a` if `c`, else `b`, computing only that one.
 
 Also: `r.field`, `a[i]` (`a[-1]` is the last item), `m[k]`, `f(arg, name=arg)`,
 and the layer selectors of [Patterns](#patterns). Arrays, bytes and strings

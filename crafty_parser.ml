@@ -754,7 +754,20 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
             | Some (`Cmp (op, r)) -> { loc = l.loc ; desc = Binop (op, l, r) }
             | Some (`Match p) -> { loc = l.loc ; desc = Matches (l, p) } in
     let conjunction = left_assoc (op "&&" And) comparison in
-    left_assoc (op "||" Or) conjunction |? "expression"
+    let disjunction = left_assoc (op "||" Or) conjunction in
+    (* [c ? a : b], an [if] of one expression per branch: *)
+    let ternary = fix (fun ternary ->
+        disjunction ++ optional_greedy ~def:None (
+            maybe_next (item '?') -- nl_sp -+ ternary +- nl_sp +- item ':' +- nl_sp ++
+            ternary >>: Option.some) >>:
+        fun (cond, branches) ->
+            match branches with
+            | None -> cond
+            | Some (a, b) ->
+                let branch (e : expr) = [ { stmt_loc = e.loc ; stmt = Expr e } ] in
+                { loc = cond.loc ;
+                  desc = If { cond ; then_ = branch a ; else_ = Some (branch b) } }) in
+    ternary |? "expression"
 
 let make_pattern cond_expr =
     let conditions =
@@ -1134,6 +1147,11 @@ let parse_patterns text =
   "x = [[z for z in y] for y in a]\n" (reads "x = [[z for z in y] for y in a]")
   "x = any([is_ip6(y) for y in a])\n" (reads "x = any(is_ip6(y) for y in a)")
   "x = [(i * 2) for i in range(3)]\n" (reads "x = [i * 2 for i in range(3)]")
+  "x = if a > 1 {\n  b + 1\n} else {\n  c\n}\n" (reads "x = a > 1 ? b + 1 : c")
+  "x = if a {\n  1\n} elsif b {\n  2\n} else {\n  3\n}\n" \
+    (reads "x = a ? 1\n  : b ? 2 : 3")
+  "x = [if a {\n  1\n} else {\n  2\n}: 3]\ny = z[if a {\n  1\n} else {\n  2\n}]\n" \
+    (reads "x = [a ? 1 : 2: 3]\ny = z[a ? 1 : 2]")
   "x[1][(i + 1)] += 2\nx[0] := [1]\n" (reads "x[1][i+1] += 2\nx[0]:=[1]")
   "x = [1: \"a\", (2 + 3): \"b\"]\n" (reads "x = [1:\"a\", 2+3 : \"b\",]")
   "x = [true: 1, 1.2.3.4: 2, AA:BB:CC:DD:EE:FF: 3, y: [4]]\n" \
