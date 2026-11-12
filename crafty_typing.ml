@@ -2287,6 +2287,8 @@ and stack_layers ~hint env base over (layers : A.layer list) =
                     | None ->
                         (match l.default_field with
                         | Some i -> i
+                        | None when Crafty_parser.is_condition a.value ->
+                            error a.arg_loc "%s" (Crafty_parser.condition_hint a.value)
                         | None -> error a.arg_loc "The options of %s must be named" (L.to_string l)) in
                 let f = l.fields.(i) in
                 if not (List.mem mode f.set_in) then (
@@ -3649,6 +3651,8 @@ let check_patterns (ps : A.patterns) =
     (types "Rae(\"x\")")
   "line 1, column 30: UDP has no field flags" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53, flags=2) {}")
+  "line 1, column 10: src == ::1 is a condition, as in a pattern, while a field is set with field=value. Is an \"on\" or an \"expect\" missing?" \
+    (types "x = /IP6(src == ::1)/ICMP6/Echo/Request(\"x\")")
   "line 1, column 30: UDP has no field ttl: IP has one, below it" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53, ttl=3)/Raw()")
   "line 1, column 28: Echo has no field seq: Request and Reply have one, on top of it" \

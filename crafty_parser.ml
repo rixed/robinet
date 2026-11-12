@@ -90,6 +90,26 @@ let not_a_message ?(block=false) anchor layers =
          else if terminals = [] then ", or a block in which to stack them"
          else ", or a block in which to stack one")
 
+(* Whether [e] is a condition, as in a pattern, rather than a value: *)
+let rec is_condition (e : expr) =
+    match e.desc with
+    | Binop ((Eq | Ne | Lt | Le | Gt | Ge | In), _, _) | Matches _ -> true
+    | Binop ((And | Or), a, b) -> is_condition a || is_condition b
+    | Unop (Not, a) -> is_condition a
+    | _ -> false
+
+(* The first unnamed option of [layers] that is a condition: *)
+let condition_option layers =
+    Stdlib.List.find_map (fun l ->
+        List.find_opt (fun a -> a.arg_name = None && is_condition a.value)
+            l.options) layers
+
+(* Why a condition [e] cannot be an option of a layer being sent: *)
+let condition_hint e =
+    Printf.sprintf "%s is a condition, as in a pattern, while a field is set \
+                    with field=value. Is an \"on\" or an \"expect\" missing?"
+        (IO.to_string (print_expr_at ~all:false ~indent:0 0) e)
+
 module P = Parsers.Make (ParsersPositions.LineCol (Parsers.SimpleConfig (Char)))
 open P
 
@@ -927,6 +947,11 @@ let () = set_stmt (
         (anchor ++
          repeat ~min:1 ~sep:(maybe_next (slash -- nl_sp)) layer >>=
             fun (anchor, layers) ->
+                (match condition_option layers with
+                | Some a ->
+                    return () >>: fun () ->
+                        reject_at a.arg_loc "%s" (condition_hint a.value)
+                | None -> return ()) >>= fun () ->
                 let top = (List.last layers).layer_name in
                 if terminal top then
                     (* Refused at the brace, rather than at the block's end: *)
@@ -1374,6 +1399,10 @@ let parse_patterns text =
   "line 1, column 26: Parameter max of retry given twice" \
     (reads "retry Timeout max=1 max=2 {\n}")
   "line 1, column 10: Parameter depth of break given twice" (reads "break 2 3")
+  "line 1, column 6: src == ::1 is a condition, as in a pattern, while a field is set with field=value. Is an \"on\" or an \"expect\" missing?" \
+    (reads "/IP6(src == ::1)/ICMP6(type == 129)/Echo {\n}")
+  "line 1, column 25: !(id > 1) is a condition, as in a pattern, while a field is set with field=value. Is an \"on\" or an \"expect\" missing?" \
+    (reads "/IP6/ICMP6/Echo/Request(!(id > 1))")
   "line 1, column 6: Parameters of on must be named" \
     (reads "on 1s Raw(\"x\") {\n}")
   "line 1, column 18: Expected '=' in statement" (reads "repeat count=3 x {\n}")
