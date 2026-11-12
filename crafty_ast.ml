@@ -81,6 +81,24 @@ end
   List.for_all (fun n -> Layer_name.of_string (Layer_name.to_string n) = Some n) Layer_name.all
 *)
 
+(** The errors a program may catch, named as constructors. Any other error is
+ * a fault of the program, which ends it. *)
+module Error_name =
+struct
+    type t = Timeout | Closed | No_route | Unset | Invalid | Unresolved | Assertion
+
+    let all = [ Timeout ; Closed ; No_route ; Unset ; Invalid ; Unresolved ; Assertion ]
+
+    let to_string = function
+        | Timeout -> "Timeout" | Closed -> "Closed" | No_route -> "NoRoute"
+        | Unset -> "Unset" | Invalid -> "Invalid" | Unresolved -> "Unresolved"
+        | Assertion -> "Assertion"
+
+    let of_string s = List.find_opt (fun n -> to_string n = s) all
+
+    let names = List.map to_string all
+end
+
 (** Types of values. *)
 module Type =
 struct
@@ -253,16 +271,20 @@ and stmt_desc =
     (* A [Repeat] whose [var] is each of [items] in turn: *)
     | For of { var : string ; items : expr ; every : expr option ;
                for_ : expr option ; body : block }
-    (* Run [body], and again up to [max] times while it fails: *)
-    | Retry of { max : expr option ; body : block }
-    (* Run [body], leaving it on its first error: *)
-    | Catch of block
+    (* Run [body], and again up to [max] times while it fails with one of
+     * the errors [on], named as written: *)
+    | Retry of { max : expr option ; on : string list ; body : block }
+    (* Run [body], leaving it on its first error, which goes to the first
+     * handler that names it, else to [else_]: *)
+    | Catch of { body : block ; handlers : handler list ; else_ : block option }
     (* Leaving [depth] enclosing loops, or with [continue] going on with
      * the next iteration of the last: *)
     | Break of { depth : expr option ; continue : bool }
     | Wait of expr
-    (* The block of the first of those patterns to match, never empty: *)
-    | Expect of { timeout : expr option ; cases : (patterns * block) list }
+    (* The block of the first of those patterns to match, never empty, or
+     * [else_] once [timeout] passed: *)
+    | Expect of { timeout : expr option ; cases : (patterns * block) list ;
+                  else_ : block option }
     (* The block of the patterns of each match, never empty: *)
     | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
               max : expr option ; cases : (patterns * block) list }
@@ -271,6 +293,9 @@ and stmt_desc =
 
 (* Alternatives, never empty: *)
 and patterns = pattern list
+
+(* Of alternative [errors], named as written, never empty: *)
+and handler = { handler_loc : location ; errors : string list ; handler : block }
 
 and block = stmt list
 
@@ -353,7 +378,7 @@ let functions =
 let self_declared = [ "BUDGET" ; "PORTS" ; "PERMISSIONS" ]
 
 (** Variables that the language defines, upper case as are the constants. *)
-let predefined = [ "MATCH" ; "LAST" ; "OWN_IP" ; "OWN_IPS" ] @ self_declared
+let predefined = [ "MATCH" ; "LAST" ; "ERROR" ; "OWN_IP" ; "OWN_IPS" ] @ self_declared
 
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
@@ -556,6 +581,9 @@ and print_stmt ~all indent oc s =
         List.iteri (fun i (p, body) ->
             Printf.fprintf oc "%s%a " (if i = 0 then " " else " | ") pattern p ;
             print_block ~all indent oc body) in
+    let print_else =
+        Option.may (fun b -> String.print oc " else " ; print_block ~all indent oc b) in
+    let print_errors = List.print ~first:"" ~last:"" ~sep:"|" String.print in
     String.print oc (String.make indent ' ') ;
     match s.stmt with
     | Stack { anchor ; layers ; body } ->
@@ -584,20 +612,26 @@ and print_stmt ~all indent oc s =
             (print_expr_at ~bare:true ~all ~indent 0) items ;
         param "every" every ; param "for" for_ ;
         Char.print oc ' ' ; print_block ~all indent oc body
-    | Retry { max ; body } ->
-        String.print oc "retry" ; param "max" max ;
+    | Retry { max ; on ; body } ->
+        Printf.fprintf oc "retry %a" print_errors on ; param "max" max ;
         Char.print oc ' ' ; print_block ~all indent oc body
-    | Catch body ->
-        String.print oc "catch " ; print_block ~all indent oc body
+    | Catch { body ; handlers ; else_ } ->
+        String.print oc "catch " ; print_block ~all indent oc body ;
+        List.iteri (fun i h ->
+            Printf.fprintf oc "%s%a " (if i = 0 then " " else " | ")
+                print_errors h.errors ;
+            print_block ~all indent oc h.handler) handlers ;
+        print_else else_
     | Break { depth ; continue } ->
         String.print oc (if continue then "continue" else "break") ;
         param "depth" depth
     | Wait dur ->
         if all then (String.print oc "wait" ; param "dur" (Some dur))
         else Printf.fprintf oc "wait %a" expr dur
-    | Expect { timeout ; cases } ->
+    | Expect { timeout ; cases ; else_ } ->
         String.print oc "expect" ; param "timeout" timeout ;
-        print_cases cases
+        print_cases cases ;
+        print_else else_
     | On { for_ ; linger ; timeout ; max ; cases } ->
         String.print oc "on" ; param "for" for_ ; param "linger" linger ;
         param "timeout" timeout ; param "max" max ;

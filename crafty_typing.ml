@@ -155,13 +155,16 @@ and stmt_desc =
     (* With [items], [var] is each of them in turn, rather than a counter: *)
     | Repeat of { var : var ; count : expr option ; items : expr option ;
                   every : expr option ; for_ : expr option ; body : block }
-    | Retry of { max : expr option ; body : block }
-    | Catch of block
+    (* Retried on the errors [on]: *)
+    | Retry of { max : expr option ; on : A.Error_name.t list ; body : block }
+    (* An error goes to the first handler that names it, if any: *)
+    | Catch of { body : block ; handlers : handler list }
     (* How many enclosing [repeat], [on] and [spawn] to leave, going on
      * with the next iteration (or match) of the last with [continue]: *)
     | Break of { depth : int ; continue : bool }
     | Wait of expr
-    | Expect of { timeout : expr option ; cases : case list }
+    | Expect of { timeout : expr option ; cases : case list ;
+                  else_ : block option }
     (* Without [for_], it ends [linger] after the statements of its block: *)
     | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
               max : expr option ; cases : case list }
@@ -172,6 +175,10 @@ and stmt_desc =
 (* Of alternative [patterns]; [match_] is the variable [MATCH] of the
  * block: *)
 and case = { patterns : pattern list ; match_ : var ; body : block }
+
+(* Of [errors], or of any a program may catch if empty; [error_] is the
+ * variable [ERROR] of the block, its message: *)
+and handler = { errors : A.Error_name.t list ; error_ : var ; handler : block }
 
 and block = stmt list
 
@@ -898,6 +905,14 @@ let resolve_permissions ~program ~cli =
   address_rules ~own:[] [ Firewall.Accept, Own_ip ] = []
 *)
 
+let error_name loc s =
+    match A.Error_name.of_string s with
+    | Some n -> n
+    | None ->
+        error loc "Unknown error %s%s (errors are %s)"
+            s (A.did_you_mean A.Error_name.names s)
+            (String.concat ", " A.Error_name.names)
+
 let lookup_var env loc name =
     match List.find_opt (fun (v : var) -> v.name = name) env.vars with
     | Some v -> v
@@ -905,6 +920,8 @@ let lookup_var env loc name =
         if List.mem name env.poisoned then raise Already_told ;
         if name = "MATCH" then
             error loc "MATCH is only defined in the blocks of expect and on" ;
+        if name = "ERROR" then
+            error loc "ERROR is only defined in the handlers of catch" ;
         (* In a condition, a name can also be a field of the layer, and
          * those of the layers around it read otherwise: *)
         let fields, elsewhere =
@@ -2629,19 +2646,43 @@ and stmt errors env (s : A.stmt) =
                                         loops = "for" :: env.loops } body in
             env, Some (mk (Repeat { var = v ; count = None ; items = Some items ;
                                     every ; for_ ; body }))
-        | A.Retry { max ; body } ->
+        | A.Retry { max ; on ; body } ->
+            if on = [] then
+                error loc "retry needs the errors it retries on, as in \
+                           retry Timeout|Closed max=3 { ... }" ;
+            let on = List.map (error_name loc) on in
             if body = [] then
                 env.warnings :=
                     (loc, "This retry has an empty block: it has nothing to retry") ::
                     !(env.warnings) ;
             let max = opt_expr env "The maximum of retry" Type.Int max in
-            env, Some (mk (Retry { max ; body = block errors env body }))
-        | A.Catch body ->
+            env, Some (mk (Retry { max ; on ; body = block errors env body }))
+        | A.Catch { body ; handlers ; else_ } ->
+            if handlers = [] && else_ = None then
+                error loc "catch needs handlers of the errors it catches, as in \
+                           catch { ... } Timeout|Closed { ... }, or else { ... } \
+                           for any error that can be caught" ;
+            let handlers =
+                List.map (fun (h : A.handler) ->
+                    h, List.map (error_name h.handler_loc) h.errors) handlers in
             if body = [] then
                 env.warnings :=
                     (loc, "This catch has an empty block: it catches nothing") ::
                     !(env.warnings) ;
-            env, Some (mk (Catch (block errors env body)))
+            let handler names b =
+                let error_ = new_var "ERROR" Type.String in
+                { errors = names ; error_ ;
+                  handler = block errors { env with vars = error_ :: env.vars } b } in
+            ignore (List.fold_left (fun seen ((h : A.handler), names) ->
+                List.fold_left (fun seen n ->
+                    if List.mem n seen then
+                        error h.handler_loc "%s is caught twice"
+                            (A.Error_name.to_string n) ;
+                    n :: seen) seen names) [] handlers) ;
+            let handlers =
+                List.map (fun ((h : A.handler), names) -> handler names h.handler) handlers @
+                Option.map_default (fun b -> [ handler [] b ]) [] else_ in
+            env, Some (mk (Catch { body = block errors env body ; handlers }))
         | A.Break { depth ; continue } ->
             let what = if continue then "continue" else "break" in
             let depth =
@@ -2661,9 +2702,10 @@ and stmt errors env (s : A.stmt) =
             env, Some (mk (Break { depth ; continue }))
         | A.Wait dur ->
             env, Some (mk (Wait (expect "The duration of wait" (expr env dur) Type.Interval)))
-        | A.Expect { timeout ; cases = cs } ->
+        | A.Expect { timeout ; cases = cs ; else_ } ->
             let timeout = timeout_of env "expect" timeout in
-            env, Some (mk (Expect { timeout ; cases = cases cs }))
+            env, Some (mk (Expect { timeout ; cases = cases cs ;
+                                    else_ = Option.map (block errors env) else_ }))
         | A.On { for_ ; linger ; timeout ; max ; cases = cs } ->
             if for_ <> None && linger <> None then
                 error loc "An on lasts either for its own duration (for), \
@@ -2691,9 +2733,15 @@ let rec declarations (b : block) =
         | Assign { path ; value ; _ } ->
             List.concat_map (expr_declarations % snd) path @ expr_declarations value
         | Expr e -> expr_declarations e
-        | Stack { body = b ; _ } | Retry { body = b ; _ } | Catch b
+        | Stack { body = b ; _ } | Retry { body = b ; _ }
         | Spawn { body = b ; _ } -> declarations b
-        | Expect { cases ; _ } | On { cases ; _ } ->
+        | Catch { body ; handlers } ->
+            declarations body @
+            List.concat_map (fun h -> declarations h.handler) handlers
+        | Expect { cases ; else_ ; _ } ->
+            List.concat_map (fun (c : case) -> declarations c.body) cases @
+            Option.map_default declarations [] else_
+        | On { cases ; _ } ->
             List.concat_map (fun (c : case) -> declarations c.body) cases
         | Repeat { var ; body ; _ } -> var :: declarations body
         | _ -> []) b
@@ -2731,7 +2779,7 @@ and expr_declarations e =
 
 (* Errors in the order of the source: *)
 let in_order es =
-    List.rev_map (fun (where, message) -> Crafty_parser.{ where ; message }) es |>
+    List.rev_map (fun (where, message) -> Crafty_parser.{ where ; message ; kind = None }) es |>
     List.sort (fun (a : Crafty_parser.error) b -> compare a.where b.where)
 
 (* The expressions directly within [s], not within its blocks: *)
@@ -2772,10 +2820,13 @@ let sub_exprs e =
 (* The blocks directly within [s] and [e]: *)
 let stmt_blocks s =
     match s.stmt with
-    | Stack { body ; _ } | Repeat { body ; _ } | Retry { body ; _ } | Catch body
+    | Stack { body ; _ } | Repeat { body ; _ } | Retry { body ; _ }
     | Spawn { body ; _ } ->
         [ body ]
-    | Expect { cases ; _ } | On { cases ; _ } -> List.map (fun (c : case) -> c.body) cases
+    | Catch { body ; handlers } -> body :: List.map (fun h -> h.handler) handlers
+    | Expect { cases ; else_ ; _ } ->
+        List.map (fun (c : case) -> c.body) cases @ Option.map_default (fun b -> [ b ]) [] else_
+    | On { cases ; _ } -> List.map (fun (c : case) -> c.body) cases
     | Send _ | Expr _ | Declare _ | Wait _ | Assign _ | Break _ -> []
 
 let expr_blocks e =
@@ -3083,7 +3134,7 @@ let cache_constants (b : block) =
   0 (memos "x = #00 * 3")
   0 (memos "if 1 > 0 { x = #00 * 3 }")
   1 (memos "repeat count=2 { x = #00 * 3 }")
-  1 (memos "retry { x = #00 * 3 }")
+  1 (memos "retry Timeout { x = #00 * 3 }")
   1 (memos "on for=1s /IP { x = #00 * 3 }")
   0 (memos "expect timeout=1s /IP { x = #00 * 3 }")
   1 (memos "repeat count=2 { expect timeout=1s /IP { x = #00 * 3 } }")
@@ -3170,7 +3221,7 @@ let check_patterns (ps : A.patterns) =
             if p.anchor <> A.Absolute then
                 error p.pat_loc "The pattern must be absolute (start with /)" ;
             pattern env p) ps)
-    with Error (where, message) -> Error Crafty_parser.{ where ; message }
+    with Error (where, message) -> Error Crafty_parser.{ where ; message ; kind = None }
 
 (* [types text] is what the program in that text declares, with the types,
  * or what is wrong with it. *)
@@ -3213,9 +3264,9 @@ let check_patterns (ps : A.patterns) =
   "" (warns "on /IP/UDP {}\non linger=1s /IP/TCP {}")
   "" (warns "on /IP/UDP {}\nwait 1s")
   "line 2, column 1: This catch has an empty block: it catches nothing" \
-    (warns "wait 1s\ncatch { }")
+    (warns "wait 1s\ncatch { } else {}")
   "line 1, column 1: This retry has an empty block: it has nothing to retry" \
-    (warns "retry max=2 { }")
+    (warns "retry Timeout max=2 { }")
   "line 2, column 12: This id is the variable id, not the field of IP: write IP.id for the field\nline 2, column 18: This id is the variable id, not the field of IP: write IP.id for the field" \
     (warns "id = 5\nexpect /IP(id == id) {}")
   "" (warns "id = 5\nexpect /IP(IP.id == id) {}")
@@ -3477,8 +3528,23 @@ let check_patterns (ps : A.patterns) =
     (types "expect timeout=1 Raw {}")
   "line 2, column 5: MATCH is only defined in the blocks of expect and on" \
     (types "expect Raw {} | Raw { x = MATCH }\ny = MATCH")
-  "line 1, column 11: The maximum of retry must be an int, not an interval" \
-    (types "retry max=1s {}")
+  "line 1, column 5: ERROR is only defined in the handlers of catch" (types "x = ERROR")
+  "line 1, column 23: Timeout is caught twice" \
+    (types "catch {} Timeout {} | Closed|Timeout {}")
+  "e: string" (types "catch {} else { e = ERROR }")
+  "line 1, column 1: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, NoRoute, Unset, Invalid, Unresolved, Assertion)" \
+    (types "retry Timout {}")
+  "line 1, column 10: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, NoRoute, Unset, Invalid, Unresolved, Assertion)" \
+    (types "catch {} Closed | Timout {}")
+  "line 1, column 1: retry needs the errors it retries on, as in retry Timeout|Closed max=3 { ... }" \
+    (types "retry {}")
+  "line 1, column 1: retry needs the errors it retries on, as in retry Timeout|Closed max=3 { ... }" \
+    (types "retry max=2 {}")
+  "line 2, column 1: catch needs handlers of the errors it catches, as in catch { ... } Timeout|Closed { ... }, or else { ... } for any error that can be caught" \
+    (types "x = 1\ncatch { x := 2 }\nx := 3")
+  "x: int" (types "expect timeout=1s Raw {} else { x = 1 }")
+  "line 1, column 19: The maximum of retry must be an int, not an interval" \
+    (types "retry Timeout max=1s {}")
   "line 1, column 10: The items of for must be an array or a map, not an int" \
     (types "for t in 3 {}")
   "line 1, column 20: The period of for must be an interval, not an int" \

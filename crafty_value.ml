@@ -269,12 +269,18 @@ let bits_of_bytes = function
 
 (** {2 Errors} *)
 
-exception Runtime_error of A.location * string
+(* Named if the program may catch it, else a fault of the program: *)
+exception Runtime_error of A.Error_name.t option * A.location * string
 
-let error loc fmt = Printf.ksprintf (fun s -> raise (Runtime_error (loc, s))) fmt
+let error loc fmt = Printf.ksprintf (fun s -> raise (Runtime_error (None, loc, s))) fmt
+
+let error_as name loc fmt =
+    Printf.ksprintf (fun s -> raise (Runtime_error (Some name, loc, s))) fmt
 
 (* An error of what has no location to tell, such as a layer building a
  * packet, which whoever runs it places: *)
-exception Failed of string
+exception Failed of A.Error_name.t option * string
 
-let fail fmt = Printf.ksprintf (fun s -> raise (Failed s)) fmt
+let fail fmt = Printf.ksprintf (fun s -> raise (Failed (None, s))) fmt
+
+let fail_as name fmt = Printf.ksprintf (fun s -> raise (Failed (Some name, s))) fmt

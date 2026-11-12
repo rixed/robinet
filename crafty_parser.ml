@@ -93,7 +93,8 @@ let not_a_message ?(block=false) anchor layers =
 module P = Parsers.Make (ParsersPositions.LineCol (Parsers.SimpleConfig (Char)))
 open P
 
-type error = { where : location ; message : string }
+(* [kind] names the errors a program may catch: *)
+type error = { where : location ; message : string ; kind : Error_name.t option }
 
 let print_error oc e =
     if e.where = nowhere then String.print oc e.message
@@ -810,6 +811,16 @@ let () =
 
 let params ?unnamed ?pattern form names = params_of expr ?unnamed ?pattern form names
 
+(* Alternative errors ([Timeout|Closed]), the first of which is no
+ * parameter's name: *)
+let error_names =
+    let name =
+        identifier >>= fun s ->
+            if is_keyword s || Layer_name.of_string s <> None then fail
+            else return s in
+    nay (identifier -- sp -- item '=') -+
+    repeat ~min:1 ~sep:(sp -- item '|' -- sp) name
+
 let end_of_stmt = "end of statement (';' or new line)"
 let stmt_sep = sp -- (item '\n' ||| item ';') -- nl_sp |? end_of_stmt
 
@@ -829,8 +840,20 @@ let assign_op =
 
 let () = set_stmt (
     let body = sp -+ block in
-    (* Of expect and on, separated by bars that may start or end lines: *)
-    let cases = repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp) (patterns ++ body) in
+    (* Of expect, on and catch, separated by bars that may start or end
+     * lines, then maybe an [else], with or without a bar before it: *)
+    let sep = nl_sp -- item '|' -- nl_sp in
+    let cases = repeat ~min:1 ~sep (patterns ++ body) in
+    let else_ = (sep ||| nl_sp) -+ keyword "else" -+ body in
+    (* Errors then their block, which no statement but a stack starts with: *)
+    let handler =
+        here ++ (error_names +- sp +- check (item '{')) ++ body >>:
+        fun ((handler_loc, errors), handler) -> { handler_loc ; errors ; handler } in
+    let handlers =
+        optional_greedy ~def:([], None) (
+            (nl_sp -+ repeat ~min:1 ~sep handler ++
+             optional_greedy ~def:None (else_ >>: Option.some)) |||
+            (else_ >>: fun b -> [], Some b)) in
     let with_loc p = here ++ p >>: fun (stmt_loc, stmt) -> { stmt_loc ; stmt } in
     (* Any name, that is then refused if reserved, for a better message: *)
     let variable =
@@ -934,9 +957,11 @@ let () = set_stmt (
         (for_head expr ++ params ~unnamed:false "for" [ "every" ; "for" ] ++ body >>:
             fun (((var, items), p), body) ->
                 For { var ; items ; every = p "every" ; for_ = p "for" ; body }) |||
-        (keyword "retry" -+ params "retry" [ "max" ] ++ body >>:
-            fun (p, body) -> Retry { max = p "max" ; body }) |||
-        (keyword "catch" -+ body >>: fun body -> Catch body) |||
+        (keyword "retry" -+ optional ~def:[] (sp -+ error_names) ++
+         params ~unnamed:false "retry" [ "max" ] ++ body >>:
+            fun ((on, p), body) -> Retry { max = p "max" ; on ; body }) |||
+        (keyword "catch" -+ body ++ handlers >>:
+            fun (body, (handlers, else_)) -> Catch { body ; handlers ; else_ }) |||
         (keyword "break" -+ params "break" [ "depth" ] >>:
             fun p -> Break { depth = p "depth" ; continue = false }) |||
         (keyword "continue" -+ params "continue" [ "depth" ] >>:
@@ -949,7 +974,13 @@ let () = set_stmt (
                     | None -> reject "%s needs a duration" k in
          wait "wait" ||| wait "sleep") |||
         (keyword "expect" -+ params ~pattern:true "expect" [ "timeout" ] +- sp ++
-         cases >>: fun (p, cases) -> Expect { timeout = p "timeout" ; cases }) |||
+         cases ++ optional_greedy ~def:None (else_ >>: Option.some) >>:
+            fun ((p, cases), else_) ->
+                let timeout = p "timeout" in
+                if else_ <> None && timeout = None then
+                    reject "The else of expect runs once its timeout passed: \
+                            expect needs one" ;
+                Expect { timeout ; cases ; else_ }) |||
         (keyword "on" -+
          params ~pattern:true "on" [ "for" ; "linger" ; "timeout" ; "max" ] +- sp ++
          cases >>: fun (p, cases) ->
@@ -1014,18 +1045,21 @@ let ambiguity readings =
                   message =
                     Printf.sprintf "This statement can be read in %d ways, \
                                     such as:\n  %s\nand:\n  %s"
-                        (List.length readings) (String.strip a) (String.strip b) })
+                        (List.length readings) (String.strip a) (String.strip b) ;
+                  kind = None })
         | _ ->
             { where = { line = 1 ; column = 1 } ;
               message = Printf.sprintf "The program can be read in %d ways"
-                                       (List.length readings) } in
+                                       (List.length readings) ;
+              kind = None } in
     match readings with
     | p1 :: p2 :: _ -> diff (p1, p2)
     | _ -> diff ([], [])
 
 (*$= ambiguity & ~printer:(IO.to_string print_error)
   { where = { line = 2 ; column = 1 } ; \
-    message = "This statement can be read in 2 ways, such as:\n  y = [a, b]\nand:\n  y = [a: b]" } \
+    message = "This statement can be read in 2 ways, such as:\n  y = [a, b]\nand:\n  y = [a: b]" ; \
+    kind = None } \
     (let open Crafty_ast in \
      let reading m = \
          let p = Result.get_ok (parse ("x = 1\ny = [a, b]")) in \
@@ -1043,16 +1077,17 @@ let parse_with ?ambiguous p text =
                        (stream_of_string text)) with
     | Ok (p, _) -> Ok p
     | Error (NoSolution None) ->
-        Error { where = { line = 1 ; column = 1 } ; message = "Syntax error" }
+        Error { where = { line = 1 ; column = 1 } ; message = "Syntax error" ; kind = None }
     | Error (NoSolution (Some e)) ->
-        Error { where = loc_of e.where ; message = message_of e.what }
+        Error { where = loc_of e.where ; message = message_of e.what ; kind = None }
     | Error (Ambiguous rs) ->
         Error (match ambiguous with
               | Some f -> f (List.map (fun (r, _, _) -> r) rs)
               | None ->
                   { where = { line = 1 ; column = 1 } ;
                     message = Printf.sprintf "The text can be read in %d ways"
-                                             (List.length rs) })
+                                             (List.length rs) ;
+                    kind = None })
     | Error (Approximation _) ->
         (* Only with error correction, which is not asked for *)
         assert false
@@ -1111,8 +1146,17 @@ let parse_patterns text =
     (reads "IP!(ttl=1)\\TCP!(flags=2)/Raw(\"x\")")
   "../../IP!/TCP!(flags=4)/Raw\n" (reads "../../IP!/TCP!(flags=4)/Raw()")
   "x = (y =~ /IP/UDP(dport == 53))\n" (reads "x = y =~ /IP/UDP(dport = 53)")
-  "retry max=3 {\n  break\n}\n" (reads "retry 3 {\n  break\n}")
-  "catch {\n  x = 1\n}\n" (reads "catch { x = 1 }")
+  "retry Timeout max=3 {\n  break\n}\n" (reads "retry Timeout max=3 {\n  break\n}")
+  "catch {\n  x = 1\n} else {\n}\n" (reads "catch { x = 1 } else {}")
+  "retry Timeout|Closed max=2 {\n}\n" (reads "retry Timeout | Closed max=2 {}")
+  "retry Unset {\n}\n" (reads "retry Unset {}")
+  "catch {\n} Timeout|NoRoute {\n  x = 1\n} | Unset {\n} else {\n}\nx = 2\n" \
+    (reads "catch {}\nTimeout | NoRoute { x = 1 }\n| Unset {} else {}\nx = 2")
+  "catch {\n} else {\n}\nUDP {\n}\n" (reads "catch {}\nelse {}\nUDP {}")
+  "expect timeout=1s Raw {\n} | ICMP {\n} else {\n}\n" \
+    (reads "expect timeout=1s Raw {}\n  | ICMP {}\n  else {}")
+  "line 1, column 22: The else of expect runs once its timeout passed: expect needs one" \
+    (reads "expect Raw {} else {}")
   "if x == 1 {\n  y := 1\n}\n" (reads "if x == 1 { y := 1 }")
   "if x {\n} else {\n  y := 2\n}\n" (reads "if x {}\nelse { y := 2 }")
   "if a {\n} elsif b {\n} elsif c && d {\n} else {\n}\n" \
@@ -1304,8 +1348,8 @@ let parse_patterns text =
     (reads "for k, v in m {}")
   "line 1, column 14: A for binds a single variable; over a map, it is a record of fields key and value" \
     (reads "x = [k for k, v in m]")
-  "line 1, column 18: Parameter max of retry given twice" \
-    (reads "retry max=1 max=2 {\n}")
+  "line 1, column 26: Parameter max of retry given twice" \
+    (reads "retry Timeout max=1 max=2 {\n}")
   "line 1, column 10: Parameter depth of break given twice" (reads "break 2 3")
   "line 1, column 6: Parameters of on must be named" \
     (reads "on 1s Raw(\"x\") {\n}")
@@ -1357,7 +1401,7 @@ let parse_patterns text =
   "line 1, column 16: Unknown function foo" (reads "print(\"${foo(2)}\")")
   "line 1, column 10: Unknown function foo" (reads "if foo(1) { x := 1 }")
   "line 2, column 12: Unknown function foo" \
-    (reads "catch {\n  if foo(1) { x := 1 } else { x := 2 }\n}")
+    (reads "catch {\n  if foo(1) { x := 1 } else { x := 2 }\n} else {}")
   "line 1, column 10: A layer is selected by the layers below it, not by carets: /IP is the first IP, TimeExceeded/IP the one on top of TimeExceeded" (reads "x = a[^IP]")
   "line 1, column 6: _ is a reserved name" (reads "_ = 1")
   "line 1, column 6: _ is a reserved name" (reads "for _ in [1] {}")

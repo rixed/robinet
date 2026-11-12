@@ -115,7 +115,7 @@ and pattern =
       (* Told a packet that completed it: *)
       matched : packet -> unit ;
       (* Told an error of one of its conditions: *)
-      failed : A.location -> string -> unit ;
+      failed : A.Error_name.t option -> A.location -> string -> unit ;
       (* Told the layer of a node never self-driven that a packet would have
        * passed, had the layer of the pattern been manual: *)
       missed : L.layer -> unit }
@@ -597,7 +597,7 @@ let of_stream n (u : L.unpacked) =
         equal v (List.assoc n.layer.fields.(i).peer u.values)) n.key ||
     Option.map_default has false (quoted_key n.layer u)
 
-type event = Match of packet | Condition_error of A.location * string
+type event = Match of packet | Condition_error of A.Error_name.t option * A.location * string
 
 (* What a packet did to the patterns it met, the last first, each in its
  * round: at most one thing to each per round, alternatives counting as
@@ -630,8 +630,8 @@ let check w packet modes (pending : pending list) =
             | true, [] -> meet w p (Match packet) ; None
             | true, rest -> Some (p, rest)
             | false, _ -> None
-            | exception Runtime_error (where, message) ->
-                meet w p (Condition_error (where, message)) ; None)
+            | exception Runtime_error (kind, where, message) ->
+                meet w p (Condition_error (kind, where, message)) ; None)
         | _ -> None) pending
 
 (* Tells the patterns of [pending] whose next layer is self-driven that the
@@ -738,7 +738,7 @@ let rec receive root frame =
     List.iter (fun (_, p, e) ->
         match e with
         | Match packet -> p.matched packet
-        | Condition_error (where, message) -> p.failed where message)
+        | Condition_error (kind, where, message) -> p.failed kind where message)
 
 (* The root layer of [frame], its [ts] when it was captured, if it was, else
  * now, as dated by the simulation: *)
@@ -943,7 +943,7 @@ let to_string n = IO.to_string print n
       [ Crafty_layers.field "id" Crafty_ast.Type.Int ~discriminant:true
           ~pick:(Crafty_layers.Random_in (1, 2)) ] in
   ignore (child loc ip l []) ; ignore (child loc ip l []) ;
-  assert_raises (Crafty_value.Runtime_error (loc, "No id left for another Echo"))
+  assert_raises (Crafty_value.Runtime_error (None, loc, "No id left for another Echo"))
       (fun () -> child loc ip l [])
 *)
 (* Local ports are picked from the ranges of the tree, across them all: *)
@@ -954,7 +954,7 @@ let to_string n = IO.to_string print n
   let udp () = src (child loc ip Crafty_layers.udp [ 1, port 53 ]) in
   let picked = List.sort Int.compare [ udp () ; udp () ; udp () ] in
   assert_equal ~printer:dump [ 10 ; 11 ; 20 ] picked ;
-  assert_raises (Crafty_value.Runtime_error (loc, "No src left for another UDP"))
+  assert_raises (Crafty_value.Runtime_error (None, loc, "No src left for another UDP"))
       (fun () -> udp ()) ;
   let tcp = child loc ip Crafty_layers.tcp [ 1, port 80 ] in
   assert_bool "other layers keep the dynamic ports" (src tcp >= 49152)

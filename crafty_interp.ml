@@ -35,10 +35,15 @@
    any) has elapsed since it started; it ends right after its last
    iteration. Over
    [items], as from a [for], it runs one iteration per item.
-   [retry max=N] runs its block again up to N times (3 by default) while it
-   fails, the error of the last attempt going to the enclosing block.
+   Errors are either named ones, which a program may catch (see
+   {!Crafty_ast.Error_name}), or faults of the program, which always reach
+   the program's block.
+   [retry E max=N] runs its block again up to N times (3 by default) while
+   it fails with one of the errors E, the error of the last attempt going to
+   the enclosing block.
    [wait] goes on with the next statement after that duration.
-   [catch] leaves its block on its first error, which goes no further. [if]
+   [catch] leaves its block on its first error, which goes to the first of
+   its handlers that names it (or to its [else]), if any, and no further. [if]
    runs the block of the first condition that holds, if any, and [case] that
    of its value's constructor. A block, an [if] or a [case] that is the
    value of a declaration, an assignment or a statement runs as a block of
@@ -46,8 +51,9 @@
    typer lets it only compute, and it is evaluated at once. An error
    reaching the program's block ends the program.
 
-   [expect] waits for the first of its patterns to match, failing after its
-   timeout if any, then runs the block of that pattern once.
+   [expect] waits for the first of its patterns to match, then runs the
+   block of that pattern once; after its timeout, if any, it runs its [else]
+   block, or else fails.
    A packet sent, by any block, is then [LAST]. [on] lets its block go on, and runs the block of the pattern of every
    match until its timeout, its [max] or a [break] out of it; a block ends
    only once its statements are done and its [on]s are over. The packet
@@ -178,11 +184,11 @@ let rec convert loc (from : A.Type.t) (typ : A.Type.t) value =
     | Array Byte, String, Array a -> String (string_of_bytes a)
     | Array Byte, Ip, Array a ->
         if Array.length a <> 4 && Array.length a <> 16 then
-            error loc "%d bytes are no IP address" (Array.length a) ;
+            error_as A.Error_name.Invalid loc "%d bytes are no IP address" (Array.length a) ;
         Ip (Ip.Addr.of_bytes (Bytes.of_string (string_of_bytes a)))
     | Array Byte, Mac, Array a ->
         if Array.length a <> 6 then
-            error loc "%d bytes are no MAC address" (Array.length a) ;
+            error_as A.Error_name.Invalid loc "%d bytes are no MAC address" (Array.length a) ;
         Mac (Eth.Addr.o (Bitstring.bitstring_of_string (string_of_bytes a)))
     | Variant cs, Variant ds, Variant (n, v) ->
         Variant (n, convert_to loc (List.assoc n cs) (List.assoc n ds) v)
@@ -202,7 +208,7 @@ and convert_to loc from typ value =
 let parsed loc what ok s =
     match Option.map of_literal (Crafty_parser.parse_literal (String.trim s)) with
     | Some v when ok v -> v
-    | _ -> error loc "Cannot convert %S to %s" s what
+    | _ -> error_as A.Error_name.Invalid loc "Cannot convert %S to %s" s what
 
 (* That statistic over the values [vs], of which there is at least one: *)
 let stat loc (b : T.builtin) vs args =
@@ -374,22 +380,22 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now ~check_words =
         (match getenv name, default with
         | Some v, _ -> String v
         | None, [ d ] -> d
-        | None, _ -> error loc "Environment variable %s is not set" name)
+        | None, _ -> error_as A.Error_name.Unset loc "Environment variable %s is not set" name)
     | T.Arg, Int n :: default ->
         (match default with
         | _ when n >= 0 && n < Array.length !prog_args -> String !prog_args.(n)
         | [ d ] -> d
-        | _ -> error loc "No argument %d: %d given" n (Array.length !prog_args))
+        | _ -> error_as A.Error_name.Unset loc "No argument %d: %d given" n (Array.length !prog_args))
     | T.Nargs, [] -> Int (Array.length !prog_args)
     | T.Resolve, [ String name ] ->
         (match resolve name with
-        | [] -> error loc "%s has no IP address" name
+        | [] -> error_as A.Error_name.Unresolved loc "%s has no IP address" name
         | addrs -> Array (Array.of_list (List.map (fun a -> Ip a) addrs)))
     | T.Hostname, Ip ip :: default ->
         (match hostname ip, default with
         | Some n, _ -> String n
         | None, [ d ] -> d
-        | None, _ -> error loc "%s has no name" (Ip.Addr.to_dotted_string ip))
+        | None, _ -> error_as A.Error_name.Unresolved loc "%s has no name" (Ip.Addr.to_dotted_string ip))
     | T.Is_ip4, [ Ip ip ] -> Bool (Ip.Addr.length ip = 32)
     | T.Is_ip6, [ Ip ip ] -> Bool (Ip.Addr.length ip = 128)
     | T.Split, [ String s ; String by ] ->
@@ -482,7 +488,7 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now ~check_words =
     | T.Print, [ String s ] -> print s ; Void
     | T.Print_err, [ String s ] -> print_err s ; Void
     | T.Assert, [ cond ; String msg ] ->
-        if cond = Bool false || cond = Int 0 then error loc "%s" msg ;
+        if cond = Bool false || cond = Int 0 then error_as A.Error_name.Assertion loc "%s" msg ;
         Void
     | _ -> assert false
 
@@ -720,7 +726,7 @@ let rec eval output (env : env) (e : T.expr) =
                             ~hold:(fun n -> held := n :: !held) |>
                 Crafty_tree.encode written |>
                 Crafty_layers.bytes_value
-            with Failed msg -> error e.loc "%s" msg) ()
+            with Failed (kind, msg) -> raise (Runtime_error (kind, e.loc, msg))) ()
     | T.Unop (A.Not, a) ->
         (match eval a with Bool b -> Bool (not b) | _ -> assert false)
     | T.Unop (A.Neg, a) ->
@@ -876,8 +882,8 @@ let release b =
 let guard b f =
     match f () with
     | x -> Some x
-    | exception Runtime_error (where, message) ->
-        b.fail Crafty_parser.{ where ; message } ;
+    | exception Runtime_error (kind, where, message) ->
+        b.fail Crafty_parser.{ where ; message ; kind } ;
         None
 
 type t =
@@ -913,7 +919,7 @@ let await t b loc e along holding k =
             else (
                 disarm () ;
                 ignore (guard b (fun () ->
-                    error loc "The packet sent was not seen leaving within %s"
+                    error_as A.Error_name.Timeout loc "The packet sent was not seen leaving within %s"
                         (Interval.to_short_string capture_timeout))))) in
     Simulation.delay t.power capture_timeout timer ()
 
@@ -996,7 +1002,13 @@ let nothing_matched loc timeout missed =
         | Some (l : Crafty_layers.layer) ->
             let n = Crafty_layers.N.to_string l.name in
             Printf.sprintf " (%s! would have: that %s stream is not self-driven)" n n in
-    error loc "Nothing matched within %s%s" (Interval.to_short_string timeout) hint
+    error_as A.Error_name.Timeout loc "Nothing matched within %s%s" (Interval.to_short_string timeout) hint
+
+(* Whether error [e] is one of [names], or else any a program may catch: *)
+let caught names (e : error) =
+    match e.kind with
+    | None -> false
+    | Some n -> names = [] || List.mem n names
 
 (* Runs that block within [parent], then [k], unless it fails or breaks
  * first; returns the block. Its environment is what [enter] makes of [env]
@@ -1072,28 +1084,36 @@ and exec t b env (s : T.stmt) k =
             Simulation.delay t.power i (fun () -> if b.live then k env) ())
     | T.Repeat { var ; count ; items ; every ; for_ ; body } ->
         repeat t b env var count items every for_ body s.stmt_loc (fun () -> k env)
-    | T.Retry { max ; body } ->
+    | T.Retry { max ; on ; body } ->
         guard (fun () ->
             match Option.map eval max with Some (Int n) -> n | _ -> 3) |>
         Option.may (fun max ->
             let rec attempt retries =
                 ignore (run_block t b env body ~break_:b.break_ (fun _ -> k env)
                     ~fail:(fun e ->
-                        if retries < max && b.live then attempt (retries + 1)
+                        if retries < max && b.live && caught on e then
+                            attempt (retries + 1)
                         else b.fail e)) in
             attempt 0)
-    | T.Catch body ->
+    | T.Catch { body ; handlers } ->
         ignore (run_block t b env body ~break_:b.break_ (fun _ -> k env)
-                    ~fail:(fun _ -> if b.live then k env))
+            ~fail:(fun e ->
+                match List.find_opt (fun (h : T.handler) -> caught h.errors e) handlers with
+                | None -> b.fail e
+                | Some h ->
+                    if b.live then
+                        let env = bind env h.error_ (String e.message) in
+                        ignore (run_block t b env h.handler ~fail:b.fail
+                                    ~break_:b.break_ (fun _ -> k env))))
     | T.Stack { depth ; overlay ; layers ; body } ->
         (* The block holds the nodes of its stack: *)
         let enter b env =
             match push t b env depth overlay layers with
             | stack -> Some { env with stack }
-            | exception Failed message ->
-                b.fail Crafty_parser.{ where = s.stmt_loc ; message } ; None
-            | exception Runtime_error (where, message) ->
-                b.fail Crafty_parser.{ where ; message } ; None in
+            | exception Failed (kind, message) ->
+                b.fail Crafty_parser.{ where = s.stmt_loc ; message ; kind } ; None
+            | exception Runtime_error (kind, where, message) ->
+                b.fail Crafty_parser.{ where ; message ; kind } ; None in
         ignore (run_block ~enter t b env body ~fail:b.fail ~break_:b.break_
                     (fun _ -> k env))
     | T.Send { depth ; overlay ; layers ; capture } ->
@@ -1107,7 +1127,7 @@ and exec t b env (s : T.stmt) k =
             try
                 let stack = push t b env depth overlay layers in
                 stack, Crafty_tree.send ~mark:(capture <> None) stack
-            with Failed msg -> error s.stmt_loc "%s" msg) |>
+            with Failed (kind, msg) -> raise (Runtime_error (kind, s.stmt_loc, msg))) |>
         Option.may (fun (stack, (packet, emitted)) ->
             env.last := lazy (packet_value (Lazy.force packet)) ;
             (* The first capture makes its variable, which the next ones
@@ -1134,7 +1154,7 @@ and exec t b env (s : T.stmt) k =
                 let d = Crafty_tree.busy_for stack in
                 if Interval.compare d Interval.zero <= 0 then k env else wait d in
             wait (Interval.psec 1))
-    | T.Expect { timeout ; cases } ->
+    | T.Expect { timeout ; cases ; else_ } ->
         guard (fun () -> timeout_of eval "expect" timeout) |>
         Option.may (fun timeout ->
             let armed = ref true and unregister = ref ignore and missed = ref None in
@@ -1148,14 +1168,19 @@ and exec t b env (s : T.stmt) k =
                                 bind_lazy env c.match_ (fun () -> match_value packet) in
                             ignore (run_block t b inner c.body ~fail:b.fail
                                         ~break_:b.break_ (fun _ -> k env)))) cases)
-                    ~failed:(fun where message -> fire (fun () ->
-                        b.fail Crafty_parser.{ where ; message }))
+                    ~failed:(fun kind where message -> fire (fun () ->
+                        b.fail Crafty_parser.{ where ; message ; kind }))
                     ~missed:(fun l -> missed := Some l) ;
             b.cleanups <- disarm :: b.cleanups ;
             Option.may (fun timeout ->
                 Simulation.delay t.power timeout (fun () -> fire (fun () ->
-                    ignore (guard (fun () ->
-                        nothing_matched s.stmt_loc timeout missed)))) ()) timeout)
+                    match else_ with
+                    | Some body ->
+                        ignore (run_block t b env body ~fail:b.fail
+                                    ~break_:b.break_ (fun _ -> k env))
+                    | None ->
+                        ignore (guard (fun () ->
+                            nothing_matched s.stmt_loc timeout missed)))) ()) timeout)
     | T.On { for_ ; linger ; timeout ; max ; cases } ->
         let duration what = Option.map (fun (e : T.expr) ->
             match eval e with
@@ -1275,10 +1300,10 @@ and on t b env loc cases ~for_ ~linger ~timeout max =
             check_over ()) in
     unregister :=
         register t b env (List.map (fun (c : T.case) -> c.patterns, matched c) cases)
-            ~failed:(fun where message ->
+            ~failed:(fun kind where message ->
                 if !armed && b.live then (
                     disarm () ;
-                    b.fail Crafty_parser.{ where ; message }))
+                    b.fail Crafty_parser.{ where ; message ; kind }))
             ~missed:(fun l -> missed := Some l) ;
     b.cleanups <- disarm :: b.cleanups ;
     let end_ () = disarm () ; check_over () in
@@ -1527,7 +1552,8 @@ let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
     sim.on_exception <- (fun exn ->
         others exn ;
         if on_exception exn then
-            root.fail Crafty_parser.{ where = A.nowhere ; message = Printexc.to_string exn }) ;
+            root.fail Crafty_parser.{ where = A.nowhere ; message = Printexc.to_string exn ;
+                                      kind = None }) ;
     ignore (run_block t root vars program
                 ~fail:root.fail ~break_:root.break_
                 (fun _ -> cancel root ; exit Done)) ;
@@ -1609,7 +1635,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         let name = Crafty_layers.N.to_string l.name in
         if not (Hashtbl.mem told (name, p)) then (
             Hashtbl.add told (name, p) () ;
-            on_warning { Crafty_parser.where ; message =
+            on_warning { Crafty_parser.where ; kind = None ; message =
                 Printf.sprintf "%s source port %d is outside the ports allowed (%s): \
                                 replies to it are not captured" name p
                     (String.concat ", " (List.map (fun (lo, hi) ->
@@ -1757,8 +1783,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (*$= runs & ~printer:identity
   "0s: #0101\n0s: #0101\n0s: done" \
     (runs "repeat count=2 { print(\"${#01 * 2}\") }")
-  "0s: 0\n0s: 1\n0s: done" \
-    (runs "repeat count=2 { catch { x = #01 * -1\n  print(\"no\") }\n  print(I) }")
+  "0s: failed: line 1, column 30: Cannot repeat -1 times" \
+    (runs "repeat count=2 { catch { x = #01 * -1\n  print(\"no\") } else {}\n  print(I) }")
   "0s: 0\n0s: 1\n0s: done" \
     (runs "repeat count=2 { if I > 5 { print(\"${#01 * -1}\") }\n  print(I) }")
   "0s: [2, 2]\n0s: [3, 2]\n0s: done" \
@@ -1917,18 +1943,34 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "repeat count=3 { x = I * 2\n  print(x) }")
   "0s: failed: line 1, column 1: This repeat runs 100000 times without the time moving on" \
     (runs "repeat { x = 1 }")
-  "0s: try\n0s: try\n0s: try\n0s: failed: line 2, column 7: Division by zero" \
-    (runs "retry max=2 { print(\"try\")\n  x = 1 / 0 }\nprint(\"not reached\")")
-  "0s: try\n0s: try\n0s: try\n0s: try\n0s: failed: line 2, column 7: No item 1 in an array of length 1" \
-    (runs "retry { print(\"try\")\n  x = [1][1] }")
-  "0s: try\n0s: failed: line 2, column 7: Division by zero" \
-    (runs "retry max=0 { print(\"try\")\n  x = 1 / 0 }")
+  "0s: try\n0s: try\n0s: try\n0s: failed: line 2, column 3: no" \
+    (runs "retry Assertion max=2 { print(\"try\")\n  assert(false, msg=\"no\") }\nprint(\"not reached\")")
+  "0s: try\n0s: try\n0s: try\n0s: try\n0s: failed: line 2, column 3: no" \
+    (runs "retry Assertion { print(\"try\")\n  assert(false, msg=\"no\") }")
+  "0s: try\n0s: failed: line 2, column 7: No item 1 in an array of length 1" \
+    (runs "retry Timeout|Assertion { print(\"try\")\n  x = [1][1] }")
+  "0s: try\n0s: failed: line 2, column 3: no" \
+    (runs "retry Timeout|Unset max=2 { print(\"try\")\n  assert(false, msg=\"no\") }")
+  "0s: try\n0s: try\n0s: failed: line 2, column 3: no" \
+    (runs "retry Unset|Assertion max=1 { print(\"try\")\n  assert(false, msg=\"no\") }")
+  "0s: try\n0s: failed: line 2, column 3: Assertion failed: false" \
+    (runs "retry Assertion max=0 { print(\"try\")\n  assert(false) }")
   "0s: 0\n0s: 1\n0s: 2\n0s: after\n0s: done" \
-    (runs "repeat count=3 { catch { print(I)\n    x = 1 / 0\n    print(\"not reached\") } }\nprint(\"after\")")
+    (runs "repeat count=3 { catch { print(I)\n    assert(false)\n    print(\"not reached\") } else {} }\nprint(\"after\")")
+  "0s: caught boom\n0s: after\n0s: done" \
+    (runs "catch { assert(false, msg=\"boom\") } Timeout { print(\"t\") }\n  | Unset|Assertion { print(\"caught ${ERROR}\") }\nprint(\"after\")")
+  "0s: failed: line 1, column 9: boom" \
+    (runs "catch { assert(false, msg=\"boom\") } Timeout { print(\"t\") }\nprint(\"not reached\")")
+  "0s: No argument 5: 0 given\n0s: done" \
+    (runs "catch { x = arg(5) }\nelse { print(ERROR) }")
+  "0s: failed: line 1, column 13: Division by zero" \
+    (runs "catch { x = 1 / 0 } else { print(\"not reached\") }")
+  "0s: failed: line 1, column 32: again" \
+    (runs "catch { assert(false) } else { assert(false, msg=\"again\") }")
   "0s: ok\n0s: failed: line 2, column 5: Division by zero" \
-    (runs "catch { print(\"ok\") }\nx = 1 / 0")
+    (runs "catch { print(\"ok\") } else {}\nx = 1 / 0")
   "0s: ok\n0s: failed: line 2, column 5: Division by zero" \
-    (runs "retry max=2 { print(\"ok\") }\nx = 1 / 0")
+    (runs "retry Assertion max=2 { print(\"ok\") }\nx = 1 / 0")
   "0s: 2 {a: 1, b: [1, 2]} #414243 1.2.3.4 AA:BB:CC:DD:EE:FF\n0s: done" \
     (runs "x = {a: 1, b: [1, 2]}\nprint(\"${x.b[1]} ${x} ${#414243} ${1.2.3.4} ${aa:bb:cc:dd:ee:ff}\")")
   "0s: ABC\n0s: true 1.5s 2s -1s 1 1.5\n0s: done" \
@@ -2008,7 +2050,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "0s: failed: line 2, column 1: x is 3" \
     (runs "x = 3\nassert(x == 4, msg=\"x is ${x}\")")
   "0s: caught\n0s: done" \
-    (runs "catch { assert(0) }\nprint(\"caught\")")
+    (runs "catch { assert(0) } else {}\nprint(\"caught\")")
   "0s: small 0\n0s: odd 1\n0s: big 2\n0s: odd 3\n0s: big 4\n0s: done" \
     (runs "repeat count=5 { if I & 1 print(\"odd ${I}\") elsif I > 1 print(\"big ${I}\")\n  else print(\"small ${I}\") }")
   "0s: 1 0 4\n0s: done" \
@@ -2063,8 +2105,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs ~trees:true "/IP(dst=1.2.3.4)/UDP(src=1, dst=53) { print(\"in\") }\nprint(\"out\")")
   "0s: a Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: b Eth{IP(src=10.0.0.1, dst=1.2.3.4)*2}\n3ps: c Eth{IP(src=10.0.0.1, dst=1.2.3.4)*3{ICMP*1{Echo(id=7)*1{Request}}, UDP(src=1, dst=53)*1}}\n3ps: d Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n3ps: e Eth{IP(src=10.0.0.1, dst=1.2.3.5)*1}\n3ps: done Eth" \
     (runs ~trees:true "IP(dst=1.2.3.4) {\n  print(\"a\")\n  /IP(dst=1.2.3.4) {\n    print(\"b\")\n    UDP(src=1, dst=53) {\n      /IP(dst=1.2.3.4)/ICMP/Echo(id=7)/Request\n      print(\"c\") } }\n  print(\"d\") }\n/IP(dst=1.2.3.5) { print(\"e\") }")
-  "0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: failed: line 4, column 9: Division by zero Eth" \
-    (runs ~trees:true "retry max=1 {\n  /IP(dst=1.2.3.4)/UDP(src=1, dst=53) {\n    print(\"try\")\n    x = 1 / 0 } }")
+  "0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: failed: line 4, column 5: no Eth" \
+    (runs ~trees:true "retry Assertion max=1 {\n  /IP(dst=1.2.3.4)/UDP(src=1, dst=53) {\n    print(\"try\")\n    assert(false, msg=\"no\") } }")
   "0s: done Eth" \
     (runs ~trees:true "repeat count=3 { /IP(dst=1.2.3.4)/UDP(dst=53) {} }")
 *)
@@ -2228,7 +2270,12 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect timeout=1s Raw(\"pong\") { print(\"no\") } }")
   "2s400ms3ps: 2\n2s400ms3ps: done" \
     (runs ~inject:[ 0.5, reply "pong" ; 1.4, reply "pong" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  catch { repeat count=3 { Raw(\"ping\")\n      expect timeout=1s Raw(\"pong\") { n += 1 } } }\n  print(n) }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  catch { repeat count=3 { Raw(\"ping\")\n      expect timeout=1s Raw(\"pong\") { n += 1 } } } else {}\n  print(n) }")
+  "500ms: pong\n1s500ms3ps: lost\n1s500ms3ps: after\n1s500ms3ps: done" \
+    (runs ~inject:[ 0.5, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  repeat count=2 { Raw(\"ping\")\n    expect timeout=1s Raw(\"pong\") { print(\"pong\") }\n    else { print(\"lost\") } }\n  print(\"after\") }")
+  "1s: Nothing matched within 1s\n1s: done" \
+    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  catch { expect timeout=1s Raw(\"pong\") {} } Closed {} | Timeout { print(ERROR) } }")
   "500ms: false false\n500ms: done" \
     (runs ~inject:[ 0.5, reply "pong!" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw {\n    print(\"${MATCH[IP].dst == MATCH[Raw].data} ${MATCH[Raw].data == MATCH[IP].dst}\") } }")
@@ -2383,7 +2430,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "0s: 0\n0s: 1\n0s: 2\n0s: done" \
     (runs "repeat count=5 { spawn { if I == 3 { break 2 } } ; print(I) }")
   "100ms: b\n100ms: done" \
-    (runs "catch { spawn for=1s { wait 100ms ; x = 1 / 0 }\n  wait 500ms ; print(\"a\") }\nprint(\"b\")")
+    (runs "catch { spawn for=1s { wait 100ms ; assert(false) }\n  wait 500ms ; print(\"a\") } else {}\nprint(\"b\")")
   "100ms: failed: line 1, column 33: Division by zero" \
     (runs "spawn for=1s { wait 100ms ; x = 1 / 0 }")
   "0s: failed: line 1, column 11: The duration of spawn cannot be negative" \
@@ -2554,7 +2601,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
  * program: *)
 (*$= & ~printer:identity
   "b 1.500s: listening\nb 2.000s: ping from 10.0.0.1:1000\na 2.000s: pong from 10.0.0.2\na 2.000s: done Eth#2\nb 2.000s: done Eth#4" \
-    (two "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7) {\n  retry { Raw(\"ping\")\n    expect timeout=1s Raw(\"pong\") { print(\"pong from ${MATCH[IP].src}\") } } }" \
+    (two "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7) {\n  retry Timeout { Raw(\"ping\")\n    expect timeout=1s Raw(\"pong\") { print(\"pong from ${MATCH[IP].src}\") } } }" \
          "wait 1500ms\nprint(\"listening\")\nexpect /IP/UDP(dst == 7)/Raw(\"ping\") {\n  print(\"ping from ${MATCH[IP].src}:${MATCH[UDP].src}\")\n  /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Raw(\"pong\") }")
   "a 1.000s: 100 pongs\na 1.000s: done Eth#101\nb 2.000s: done Eth#101" \
     (two "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7) {\n  n = 0\n  { on for=1s Raw(\"pong\") { n += 1 }\n    repeat count=100 every=1ms { Raw(\"ping\") } }\n  print(\"${n} pongs\") }" \
@@ -3031,7 +3078,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (policed "print(\"hello\")\n/IP(dst=1.2.3.4)/UDP(src=1000, dst=7)/Raw(\"x\")")
   "0.003s: hit max-packets\n0.003s: stopped\n3 frames" (policed ~max_packets:3 pings)
   "0.003s: hit max-packets\n0.003s: stopped\n3 frames" \
-    (policed ~max_packets:3 ("catch { "^ pings ^" }\nprint(\"not caught\")"))
+    (policed ~max_packets:3 ("catch { "^ pings ^" } else {}\nprint(\"not caught\")"))
   "0.110s: hit max-packet-rate\n0.110s: stopped\n110 frames" (policed ~max_packet_rate:100. pings)
   "0.100s: stopped\n100 frames" (policed ~stop_at:0.1 pings)
   "0.000s: stopped\n0 frames" (policed ~stop:true pings)
@@ -3101,11 +3148,11 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "0.000s: stopped\n0 frames" \
     (policed ("BUDGET = {max_ram: 8000}\nx = bytes(\""^ String.make 1001 'x' ^"\")\nprint(\"b\")"))
   "0.000s: stopped\n0 frames" \
-    (policed "BUDGET = {max_ram: 8000}\ncatch { x = [0] * 1001 }\nprint(\"not caught\")")
+    (policed "BUDGET = {max_ram: 8000}\ncatch { x = [0] * 1001 } else {}\nprint(\"not caught\")")
   "0.000s: failed: Out of memory\n0 frames" \
     (policed "x = [0] * 1000000000000000\nprint(\"not reached\")")
   "0.000s: failed: Out of memory\n0 frames" \
-    (policed "catch { x = array(init=0, len=1000000000000000) }\nprint(\"not caught\")")
+    (policed "catch { x = array(init=0, len=1000000000000000) } else {}\nprint(\"not caught\")")
   "0.000s: a\n1.000s: failed: Out of memory\n0 frames" \
     (policed "print(\"a\")\nwait 1s\nx = [0] * 1000000000000000\nprint(\"not reached\")")
   "0.000s: failed: Invalid_argument(\"Array.make\")\n0 frames" \
@@ -3222,9 +3269,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
        /IP(dst=10.0.0.2)/UDP(dst=7)/Raw(\"on-subnet\")\n\
        /IP(dst=10.1.0.1)/UDP(dst=7)/Raw(\"specific\")\n\
        /IP(dst=10.2.0.1)/UDP(dst=7)/Raw(\"on-link\")\n\
-       catch { /IP(dst=10.9.9.9)/UDP(dst=7)/Raw(\"unrouted\") }\n\
-       catch { /IP(dst=10.0.0.1)/UDP(dst=7)/Raw(\"local\") }\n\
-       catch { /IP(dst=172.16.0.9)/UDP(dst=7)/Raw(\"elsewhere\") }\n\
+       catch { /IP(dst=10.9.9.9)/UDP(dst=7)/Raw(\"unrouted\") } else {}\n\
+       catch { /IP(dst=10.0.0.1)/UDP(dst=7)/Raw(\"local\") } else {}\n\
+       catch { /IP(dst=172.16.0.9)/UDP(dst=7)/Raw(\"elsewhere\") } else {}\n\
        wait dur=1s\n\
        /IP(dst=10.0.0.255)/UDP(dst=7)/Raw(\"broadcast\")\n\
        /Eth!/IP!(src=10.0.0.1, dst=10.1.0.1)/UDP!(src=5000, dst=7)/Raw(\"manual\")") in
@@ -3313,7 +3360,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   assert_equal ~printer:string_of_int 0 frames ;
   (* Not when it is caught, the next packet being asked about again: *)
   let status, told, _ =
-      routed_run (ports ^ "retry max=2 { /IP(dst=10.9.9.9)/UDP(dst=7)/Raw(\"x\") }")
+      routed_run (ports ^ "retry NoRoute max=2 { /IP(dst=10.9.9.9)/UDP(dst=7)/Raw(\"x\") }")
                  ~lookup:(fun _ _ -> Error no_route) in
   assert_bool status (String.exists status "Cannot send to 10.9.9.9") ;
   assert_equal [ "10.9.9.9", no_route ] told ;

@@ -8,6 +8,6 @@
         num_resp += 1
       }
     }
-  }
+  } Timeout {}
   print("Got ${num_resp} repsonses")
 }

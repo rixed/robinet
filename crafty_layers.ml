@@ -305,7 +305,7 @@ let make_router ~ifname ~lookup ~on_unrouted =
 let check_route route dst =
     match route dst with
     | Ok _ -> ()
-    | Error e -> V.fail "Cannot send to %s: %s" (Ip.Addr.to_dotted_string dst) e
+    | Error e -> V.fail_as Error_name.No_route "Cannot send to %s: %s" (Ip.Addr.to_dotted_string dst) e
 
 (* Sends the IP packet [bits] along the route to [dst], which [Eth.TRX.tx]
  * would otherwise find from the configuration of [st], or drops it if there is
@@ -948,7 +948,7 @@ let tcp_node ctx =
       send = (fun fields _ payload ->
         let s = stream fields in
         if bitstring_length payload > 0 then
-            if s.trx.closed then V.fail "This TCP connection is closed"
+            if s.trx.closed then V.fail_as Error_name.Closed "This TCP connection is closed"
             else if Tcp.TRX.is_established s.trx then Tcp.TRX.tx s.trx payload
             else s.pending <- payload :: s.pending) ;
       receive = (fun modes u ->

@@ -22,14 +22,12 @@ internals are accessible.
     # /IP(dst=192.0.2.10)/UDP(dst=7)/Raw("ping ${I}")
     # Unset options will be filled in automatically.
     Raw("ping ${I}")
-    catch {                       # a lost answer is no error
-      # expect waits for a packet that matches a pattern; here, any Raw
-      # layer on top of the current stack, coming back:
-      expect timeout=1s Raw {
-        answers += 1
-        print(MATCH[Raw].data)  # MATCH is the packet that matched
-      }
-    }
+    # expect waits for a packet that matches a pattern; here, any Raw
+    # layer on top of the current stack, coming back:
+    expect timeout=1s Raw {
+      answers += 1
+      print(MATCH[Raw].data)  # MATCH is the packet that matched
+    } else {}                 # after the timeout: a lost answer is no error
   }
   # An "if", as a block, is worth the value of the branch it runs:
   verdict = if answers == 3 { "all back" } else { "some lost" }
@@ -60,9 +58,26 @@ The layers of a stack are streams: `UDP` picks its source port once (from
 `--udp`), and every message sent and every pattern on top of it belong to that
 stream.
 
-Any error (such as a timeout) leaves the enclosing blocks one after the other,
-until a `catch` drops it or a `retry` runs its block again; uncaught errors end
-the program.
+An error leaves the enclosing blocks one after the other, until a `catch`
+handles it or a `retry` runs its block again; uncaught errors end the program.
+Only these errors can be caught: `Timeout` (of `expect` or `on`), `Closed` (a
+TCP connection), `NoRoute`, `Unset` (`getenv`, `arg`), `Invalid` (converting a
+string or bytes), `Unresolved` (`resolve`, `hostname`) and `Assertion`
+(`assert`).
+
+```
+n = 1
+catch {
+  n := int(arg(0))
+} Unset {}                         # no argument: keep 1
+  | Invalid { print_err(ERROR) }   # ERROR is the message
+retry Timeout|Closed max=2 {       # retries on these errors only
+  /IP(dst=192.0.2.10)/TCP(dst=7) {
+    Raw("hello")
+    expect timeout=1s Raw { print(MATCH[Raw].data) }
+  }
+}
+```
 
 ### Going down the stack
 
@@ -302,7 +317,8 @@ print(case result Got { "${I} layers" } else { "${result}" })
 - `x = expr` declares `x` in the current block, with the type of `expr`.
   An inner block may shadow it.
 - `x := expr` assigns it, and `x += expr` (also `-=`, `*=`, etc.) updates it.
-- Predefined: `MATCH` (in the block of an `expect` or `on`), `LAST`
+- Predefined: `MATCH` (in the block of an `expect` or `on`), `ERROR` (in a
+  handler of `catch`), `LAST`
   (the last packet sent, once a block has sent one), `I`, the counter of
   a `repeat`, `BUDGET`, `PORTS`, `PERMISSIONS`,
   `OWN_IPS`, the addresses of the interface (or `--ip`'s), IPv4 ones first, and
@@ -424,9 +440,11 @@ what their engine computes (checksums).
   one started. `v` (default `I`) counts from 0.
 - `for v in a every=d for=d { ... }`: a `repeat` over the items `v` of the
   array or map `a` (as `{key: k, value: v}`).
-- `retry max=n { ... }`: runs the block again, up to `n` times (default 3),
-  while it fails. The last error escapes.
-- `catch { ... }`: blocks error propagation.
+- `retry E|E max=n { ... }`: runs the block again, up to `n` times
+  (default 3), while it fails with one of these errors. The last error escapes.
+- `catch { ... } E|E { ... } | E { ... } else { ... }`: runs the block of the
+  first handler naming the error, with `ERROR` its message, or else that of
+  `else` (any error that can be caught). Other errors escape.
 - `if COND STMT [elsif COND STMT] else STMT`: conditionals.
 - `case var=v X C { ... } | C { ... } else { ... }`: runs the block of the
   constructor of `X`, where `v` (default `I`) is what that constructor holds.
@@ -435,9 +453,9 @@ what their engine computes (checksums).
 - `continue n`: likewise, but goes on with the next iteration of the `n`th
   (or, for an `on`, waits for its next match).
 - `wait d` (or `sleep d`): pauses.
-- `expect timeout=d PATTERN { ... } | PATTERN { ... }`: waits for the first
-  packet that matches any pattern, then runs its block; a timeout (none by
-  default) is an error.
+- `expect timeout=d PATTERN { ... } | PATTERN { ... } else { ... }`: waits for
+  the first packet that matches any pattern, then runs its block; after the
+  timeout (none by default), runs `else`, or without one fails with `Timeout`.
 - `on for=d linger=d timeout=d max=n PATTERN { ... } | PATTERN { ... }`: the
   enclosing block goes on; each matching packet runs the block of its pattern,
   repeatedly (`max` times or unlimited) until its lifetime or that of the
@@ -814,12 +832,10 @@ What a layer carries when not decoded further. Sent as given.
       received = 0
       repeat count=5 every=200ms {
         Request("hi")
-        catch {
-          expect timeout=1s Reply {
-            received += 1
-            print("reply from ${MATCH[IP].src}: seq=${MATCH[Reply].seq} ttl=${MATCH[IP].ttl}")
-          }
-        }
+        expect timeout=1s Reply {
+          received += 1
+          print("reply from ${MATCH[IP].src}: seq=${MATCH[Reply].seq} ttl=${MATCH[IP].ttl}")
+        } else {}
       }
       print("${received} replies out of 5")
     }
@@ -845,7 +861,7 @@ The replies come back to the `Echo` stream of the requests, whatever its id.
   spawn { repeat every=10s { report(rtts, name="rtt") ; rtts := [] } }
   repeat count=6000 every=10ms {
     p = Raw("probe ${I}")
-    catch { expect timeout=500ms Raw("probe ${I}") { rtts += MATCH[Eth].ts - p[Eth].ts } }
+    expect timeout=500ms Raw("probe ${I}") { rtts += MATCH[Eth].ts - p[Eth].ts } else {}
   }
 }
 ```
@@ -862,9 +878,7 @@ With `--format json`, each report is a line such as
   rtts = []
   repeat count=100 every=10ms {
     p = Raw("probe ${I}")
-    catch {
-      expect timeout=500ms Raw("probe ${I}") { rtts += MATCH[Eth].ts - p[Eth].ts }
-    }
+    expect timeout=500ms Raw("probe ${I}") { rtts += MATCH[Eth].ts - p[Eth].ts } else {}
   }
   print("${length(rtts)}/100 echoed, rtt min ${min(rtts)} median ${percentile(rtts, 50)} p99 ${percentile(rtts, 99)} max ${max(rtts)}")
   for b in histogram(rtts, bucket=1ms) { print("${b.min} to ${b.max}: ${b.count}") }
@@ -1017,14 +1031,12 @@ port = int(arg(3, default="33434"))
       probe += 1
       p = ../../IP!(ttl=hop + 1, id=probe)/UDP/Raw("probe")
       if probe == 1 { print("to ${target} from UDP port ${p[UDP].src} to ${port}") }
-      catch {
-        expect timeout=1s /IP/ICMP/TimeExceeded/IP(id == probe, dst == target)/UDP {
-          rtts[MATCH[/IP].src] += MATCH[Eth].ts - p[Eth].ts
-        } | /IP/ICMP/DestUnreachable/IP(id == probe, dst == target)/UDP {
-          rtts[MATCH[/IP].src] += MATCH[Eth].ts - p[Eth].ts
-          reached := true
-        }
-      }
+      expect timeout=1s /IP/ICMP/TimeExceeded/IP(id == probe, dst == target)/UDP {
+        rtts[MATCH[/IP].src] += MATCH[Eth].ts - p[Eth].ts
+      } | /IP/ICMP/DestUnreachable/IP(id == probe, dst == target)/UDP {
+        rtts[MATCH[/IP].src] += MATCH[Eth].ts - p[Eth].ts
+        reached := true
+      } else {}
     }
     head = "${hop + 1}"
     answered = 0
@@ -1083,20 +1095,18 @@ ret_mtu = 0                                     # the way back fragmented at thi
       answered = false
       frag_max := 0
       Request(seq=size, payload=#00 * (size - 28))
-      catch {
-        expect timeout=1s Reply(seq == size) {
-          answered := true
-          lo := size
-          if frag_max > 0 {
-            print("${size}: echoed in fragments of up to ${frag_max} bytes")
-            ret_mtu := frag_max
-          } else { print("${size}: echoed whole") }
-        } | /IP(src != target)/ICMP/DestUnreachable(code == FRAG_NEEDED)/IP(dst == target, tot_len == size) {
-          told := MATCH[DestUnreachable].mtu
-          answered := true
-          print("${size}: too big for ${MATCH[/IP].src}, next hop MTU ${told}")
-        }
-      }
+      expect timeout=1s Reply(seq == size) {
+        answered := true
+        lo := size
+        if frag_max > 0 {
+          print("${size}: echoed in fragments of up to ${frag_max} bytes")
+          ret_mtu := frag_max
+        } else { print("${size}: echoed whole") }
+      } | /IP(src != target)/ICMP/DestUnreachable(code == FRAG_NEEDED)/IP(dst == target, tot_len == size) {
+        told := MATCH[DestUnreachable].mtu
+        answered := true
+        print("${size}: too big for ${MATCH[/IP].src}, next hop MTU ${told}")
+      } else {}
       if !answered { print("${size}: no answer (dropped one way or the other)") }
       if told > lo && told < size {
         hi := told
