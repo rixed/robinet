@@ -221,6 +221,8 @@ permissions deny, 130 when interrupted.
   read with `arg(0)`, `arg(1)`) or environment variables (`TARGET=10.0.0.1
   crafty x.cfty`, read with `getenv("TARGET")`) then cast.
 - When unsure, use --max-duration
+- Crafty is not Python, despite `for x in a` and comprehensions: only the
+  functions of the reference exist.
 
 ## 2. Reference
 
@@ -259,6 +261,8 @@ permissions deny, 130 when interrupted.
 - maps: `[192.0.2.1: "gw", ::1: "lo"]`, a `string[ip]`, in no
   particular order. `map(key=k, default=v)` is an empty map with keys of the
   type of `k`, where missing keys have the value `v`.
+- comprehensions: `[e for x in a if c]`, `[k: v for x in a if c]`, `x` being
+  an item of the array or map `a` (as `{key: k, value: v}`).
 - records: `{name: "gw", ip: 192.0.2.1}`. `{}` is an empty block, not a
   record.
 - variants: `Ok(42)`, `Failed("timeout")`, `Pending`. A constructor starts
@@ -298,7 +302,7 @@ print(case result Got { "${I} layers" } else { "${result}" })
 - `x := expr` assigns it, and `x += expr` (also `-=`, `*=`, etc.) updates it.
 - Predefined: `MATCH` (in the block of an `expect` or `on`), `LAST`
   (the last packet sent, once a block has sent one), `I`, the counter of
-  a `repeat` or the item of a `foreach`, `BUDGET`, `PORTS`, `PERMISSIONS`,
+  a `repeat`, `BUDGET`, `PORTS`, `PERMISSIONS`,
   `OWN_IPS`, the addresses of the interface (or `--ip`'s), IPv4 ones first, and
   `OWN_IP`, the first of them.
 - `LAST` is the packet as given, not as it left: reading a field that only
@@ -401,8 +405,8 @@ layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 which `case` tells apart:
 
 ```
-foreach MATCH {
-  print(case I IP { "IP from ${I.src}" } | UDP { "UDP to ${I.dst}" } else { "other" })
+for l in MATCH {
+  print(case l IP { "IP from ${I.src}" } | UDP { "UDP to ${I.dst}" } else { "other" })
 }
 ```
 
@@ -415,15 +419,15 @@ what their engine computes (checksums).
 - `repeat var=v count=n every=d for=d { ... }`: runs the block `count` times,
   or while `for` has not elapsed. An iteration starts `every` after the previous
   one started. `v` (default `I`) counts from 0.
-- `foreach v every=d for=d ARRAY { ... }`: a `repeat` over the items of the
-  array or map (as `{key: k, value: v}`), `v` (default `I`) being the item.
+- `for v in a every=d for=d { ... }`: a `repeat` over the items `v` of the
+  array or map `a` (as `{key: k, value: v}`).
 - `retry max=n { ... }`: runs the block again, up to `n` times (default 3),
   while it fails. The last error escapes.
 - `catch { ... }`: blocks error propagation.
 - `if COND STMT [elsif COND STMT] else STMT`: conditionals.
 - `case var=v X C { ... } | C { ... } else { ... }`: runs the block of the
   constructor of `X`, where `v` (default `I`) is what that constructor holds.
-- `break n`: leaves the `n` (default 1) innermost `repeat`, `foreach`, `on` or
+- `break n`: leaves the `n` (default 1) innermost `repeat`, `for`, `on` or
   `spawn`.
 - `continue n`: likewise, but goes on with the next iteration of the `n`th
   (or, for an `on`, waits for its next match).
@@ -485,9 +489,12 @@ what their engine computes (checksums).
 - `split(s, by)`: the parts of `s` between the occurrences of `by`.
 - `array(init=v, len=n)`, `length(a)` (or `count(a)`, of an array, a map or a
   string), `concat(a, b)`, `append(a, x)`, `prepend(x, a)`.
+- `range(n)`, `range(a, b)`: the ints from 0 (or `a`) up to, excluding, `n`
+  (or `b`).
 - `sorted(a)`: a sorted copy.
 - `sort(a)`: in place.
 - `has(m, k)`, `remove(m, k)` (a copy), `keys(m)`, `values(m)` on map `m`.
+- `any(a)`, `all(a)`: of an array of bools or ints, or the values of a map.
 - `sum(a)`, `min(a)`, `max(a)`, `mean(a)`, `stddev(a)`, `percentile(a, p)`:
   of an array, or the values of a map.
 - `histogram(a, bucket=b)`: the values counted in buckets of width `b` from
@@ -857,7 +864,7 @@ With `--format json`, each report is a line such as
     }
   }
   print("${length(rtts)}/100 echoed, rtt min ${min(rtts)} median ${percentile(rtts, 50)} p99 ${percentile(rtts, 99)} max ${max(rtts)}")
-  foreach histogram(rtts, bucket=1ms) { print("${I.min} to ${I.max}: ${I.count}") }
+  for b in histogram(rtts, bucket=1ms) { print("${b.min} to ${b.max}: ${b.count}") }
 }
 ```
 
@@ -1018,10 +1025,10 @@ port = int(arg(3, default="33434"))
     }
     head = "${hop + 1}"
     answered = 0
-    foreach rtts {
-      answered += length(I.value)
-      ms = float(int(float(min(I.value)) * 100000.0)) / 100.0
-      print("${head}\t${I.key}\t${length(I.value)}/${probes}\tmin ${ms}ms")
+    for r in rtts {
+      answered += length(r.value)
+      ms = float(int(float(min(r.value)) * 100000.0)) / 100.0
+      print("${head}\t${r.key}\t${length(r.value)}/${probes}\tmin ${ms}ms")
       head := ""
     }
     if answered < probes { print("${head}\t*\t${probes - answered}/${probes}") }

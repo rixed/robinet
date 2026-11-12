@@ -49,9 +49,10 @@ type builtin =
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
     | To_string | To_bytes | Word of int * bool | Checksum | To_ip | To_mac | To_cidr | Getenv | Arg | Nargs | Resolve | Hostname
     | Is_ip4 | Is_ip6 | Split
-    | Make_array | Length | Concat | Append | Prepend
+    | Make_array | Range | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
     | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
+    | Any | All
     | Print | Print_err | Format | Assert | Stats | Summary | Report
 
 type expr = { loc : A.location ; typ : Type.t ; mutable desc : desc }
@@ -82,6 +83,8 @@ and desc =
     | Record of expr list
     | Array of expr list
     | Map of (expr * expr) list
+    (* An array of [value], or a map of [key] to [value]: *)
+    | Comprehension of { key : expr option ; value : expr ; clauses : clause list }
     (* The value of that expression, as this one's type: *)
     | Convert of expr
     (* A constructor of a variant, with what it holds unless void: *)
@@ -98,6 +101,10 @@ and desc =
     | Memo of { value : expr ; mutable cached : Crafty_value.value option }
 
 and part = Text of string | Interp of expr
+
+(* [var] is each of the items of an array, or each binding of a map, as a
+ * record of its key and value: *)
+and clause = Bind of var * expr | Filter of expr
 
 (* [held] is what the constructor holds, unless void: *)
 and arm = { ctor : string ; held : var option ; branch : block }
@@ -495,7 +502,7 @@ type env =
       stack : (L.layer * L.mode) list ;
       (* Its layers as written, for messages: *)
       stack_text : string list ;
-      (* The [repeat], [foreach], [on] and [spawn] that enclose, the
+      (* The [repeat], [for], [on] and [spawn] that enclose, the
        * innermost first: *)
       loops : string list ;
       layer_ctx : layer_ctx option ;
@@ -530,7 +537,7 @@ let bound env name =
     List.exists (fun (v : var) -> v.name = name) env.vars ||
     List.mem name env.poisoned
 
-(* Whether [var], the variable of a repeat, foreach or case, is an [I] that
+(* Whether [var], the variable of a repeat or case, is an [I] that
  * hides another: *)
 let hides_i env var =
     var = None && List.exists (fun (v : var) -> v.name = "I") env.vars
@@ -1248,6 +1255,14 @@ let any_array t = match t with Type.Array _ -> Some t | _ -> None
 
 let any_map t = match t with Type.Map _ -> Some t | _ -> None
 
+(* What [for] binds to each item of [items]: *)
+let item_of what (items : expr) =
+    match items.typ with
+    | Type.Array t -> t
+    | Type.Map (k, v) -> record_type [ "key", k ; "value", v ]
+    | t -> error items.loc "The items of %s must be an array or a map, not %s"
+               what (a_type t)
+
 let ordered = Type.[ Int ; Float ; Byte ; Interval ; Time ; String ]
 
 (* The type of the items of an array, or of the values of a map: *)
@@ -1355,6 +1370,11 @@ let builtins =
       "array", Make_array,
         [ param "init" "a value" any_value ; param "len" "an int" (only Type.[ Int ]) ],
         (fun ts -> Type.Array (List.hd ts)) ;
+      (* From 0 to [a], or from [a] to [b]: *)
+      "range", Range,
+        [ param "a" "an int" (only Type.[ Int ]) ;
+          param "b" "an int" (only Type.[ Int ]) ~default:Omitted ],
+        res (Type.Array Type.Int) ;
       "length", Length, [ sized ], res Type.Int ;
       "count", Length, [ sized ], res Type.Int ;
       "min", Min, [ some_ordered ], item_type ;
@@ -1401,6 +1421,11 @@ let builtins =
         (function [ Type.Map (k, _) ] -> Type.Array k | _ -> assert false) ;
       "values", Values, [ param "m" "a map" any_map ],
         (function [ Type.Map (_, v) ] -> Type.Array v | _ -> assert false) ;
+      (* Of what conditions take: *)
+      "any", Any, [ param "a" "an array or a map of bools or ints" (values_of Type.[ Bool ; Int ]) ],
+        res Type.Bool ;
+      "all", All, [ param "a" "an array or a map of bools or ints" (values_of Type.[ Bool ; Int ]) ],
+        res Type.Bool ;
       "print", Print, [ param "x" "a value" printable ], res Type.Void ;
       "print_err", Print_err, [ param "x" "a value" printable ],
         res Type.Void ;
@@ -1753,6 +1778,36 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         let ks = List.map (fun k -> expect "A key of this map" k kt) ks
         and vs = List.map (fun v -> expect "A value of this map" v vt) vs in
         mk (Type.Map (kt, vt)) (Map (List.combine ks vs))
+    | A.Comprehension { key ; value ; clauses } ->
+        let env, clauses =
+            List.fold_left (fun (env, clauses) -> function
+                | A.Bind (name, items) ->
+                    let items = expr env items in
+                    let v = new_var name (item_of "for" items) in
+                    { env with vars = v :: env.vars }, Bind (v, items) :: clauses
+                | A.Filter c ->
+                    env, Filter (as_bool "The condition of if" (expr env c)) :: clauses
+            ) (env, []) clauses in
+        let clauses = List.rev clauses in
+        (* Of the expected type if it converts to it: *)
+        let item expected what e =
+            let e = expr ?expected env e in
+            if any_value e.typ = None then error e.loc "%s cannot be %s" what (a_type e.typ) ;
+            Option.map_default (fun t -> coerce e t |? e) e expected in
+        (match key, expected with
+        | None, _ ->
+            let t = match expected with Some (Type.Array t) -> Some t | _ -> None in
+            let value = item t "An item of an array" value in
+            mk (Type.Array value.typ) (Comprehension { key = None ; value ; clauses })
+        | Some k, _ ->
+            let kt, vt =
+                match expected with
+                | Some (Type.Map (k, v)) -> Some k, Some v
+                | _ -> None, None in
+            let key = item kt "A key of a map" k
+            and value = item vt "A value of a map" value in
+            mk (Type.Map (key.typ, value.typ))
+               (Comprehension { key = Some key ; value ; clauses }))
     | A.Matches _ -> error loc "=~ is not supported yet"
     | A.Block b ->
         let b, typ = branch b in
@@ -1945,18 +2000,22 @@ and call ?expected env loc f args =
     let fname, b, params, result = find_builtin loc f in
     let unnamed = List.filter (fun (a : A.arg) -> a.arg_name = None) args in
     (* The parameters of the unnamed arguments, in order: the only one, else
-     * those that must be given and are not named, if no fewer: *)
+     * those that are not named, the ones that must be given first: *)
     let slots =
         match params with
         | [ p ] -> List.map (fun _ -> p) unnamed
         | _ ->
-            List.filter (fun p ->
-                p.default = None &&
-                not (List.exists (fun (a : A.arg) ->
-                    Option.map_default (same_name p.pname) false a.arg_name) args)
-            ) params in
+            let free =
+                List.filter (fun p ->
+                    not (List.exists (fun (a : A.arg) ->
+                        Option.map_default (same_name p.pname) false a.arg_name) args)
+                ) params in
+            let required, optional = List.partition (fun p -> p.default = None) free in
+            required @ optional in
     if List.length unnamed > List.length slots then
-        error (List.hd unnamed).arg_loc "The arguments of %s must be named" fname ;
+        error (List.nth unnamed (List.length slots)).arg_loc
+            "Too many arguments for %s (expected %s)" fname
+            (String.concat ", " (List.map (fun p -> p.pname) params)) ;
     let slots = ref slots in
     let named =
         List.map (fun (a : A.arg) ->
@@ -2390,7 +2449,7 @@ and stmt errors env (s : A.stmt) =
                 match s.stmt with
                 | A.Stack { body = None ; _ } | A.Capture _ -> Some "A packet"
                 | A.Stack _ -> Some "A stack"
-                | A.Repeat _ -> Some "repeat" | A.Foreach _ -> Some "foreach"
+                | A.Repeat _ -> Some "repeat" | A.For _ -> Some "for"
                 | A.Retry _ -> Some "retry" | A.Catch _ -> Some "catch"
                 | A.Break { continue = false ; _ } -> Some "break"
                 | A.Break { continue = true ; _ } -> Some "continue"
@@ -2559,21 +2618,15 @@ and stmt errors env (s : A.stmt) =
                 warn_hidden_i env "the number of the iteration of this repeat" v ;
             env, Some (mk (Repeat { var = v ; count ; items = None ; every ;
                                     for_ ; body }))
-        | A.Foreach { var ; items ; every ; for_ ; body } ->
+        | A.For { var ; items ; every ; for_ ; body } ->
             let items = expr env items in
-            let t =
-                match items.typ with
-                | Type.Array t -> t
-                | Type.Map (k, v) -> record_type [ "key", k ; "value", v ]
-                | t -> error items.loc "The items of foreach must be an array or a map, not %s"
-                           (a_type t) in
-            let every = opt_expr env "The period of foreach" Type.Interval every
-            and for_ = opt_expr env "The duration of foreach" Type.Interval for_ in
-            let v = new_var (var |? "I") t in
+            let t = item_of "for" items in
+            let every = opt_expr env "The period of for" Type.Interval every
+            and for_ = opt_expr env "The duration of for" Type.Interval for_ in
+            let v = new_var var t in
             let body =
                 block errors { env with vars = v :: env.vars ;
-                                        loops = "foreach" :: env.loops } body in
-            if hides_i env var then warn_hidden_i env "the item of this foreach" v ;
+                                        loops = "for" :: env.loops } body in
             env, Some (mk (Repeat { var = v ; count = None ; items = Some items ;
                                     every ; for_ ; body }))
         | A.Retry { max ; body } ->
@@ -2597,7 +2650,7 @@ and stmt errors env (s : A.stmt) =
                 | Some { desc = A.Lit (A.Int n) ; _ } when n > 0 -> n
                 | Some e -> error e.loc "The depth of %s must be a positive integer" what in
             if depth > List.length env.loops then
-                error loc "%s out of %d repeat, foreach, on or spawn, but %s"
+                error loc "%s out of %d repeat, for, on or spawn, but %s"
                     (String.capitalize_ascii what) depth
                     (match List.length env.loops with
                     | 0 -> "there is none"
@@ -2666,6 +2719,11 @@ and expr_declarations e =
             List.concat_map (expr_declarations % snd) l.options) layers
     | Map kvs ->
         List.concat_map (fun (k, v) -> expr_declarations k @ expr_declarations v) kvs
+    | Comprehension { key ; value ; clauses } ->
+        List.concat_map (function
+            | Bind (v, items) -> v :: expr_declarations items
+            | Filter c -> expr_declarations c) clauses @
+        Option.map_default expr_declarations [] key @ expr_declarations value
     | String parts ->
         List.concat_map (function Interp e -> expr_declarations e | Text _ -> []) parts
     | Construct (_, e) -> Option.map_default expr_declarations [] e
@@ -2702,6 +2760,9 @@ let sub_exprs e =
     | Encode { layers ; _ } ->
         List.concat_map (fun l -> List.map snd l.options) layers
     | Map kvs -> List.concat_map (fun (k, v) -> [ k ; v ]) kvs
+    | Comprehension { key ; value ; clauses } ->
+        List.map (function Bind (_, e) | Filter e -> e) clauses @
+        Option.map_default (fun k -> [ k ]) [] key @ [ value ]
     | String parts -> List.filter_map (function Interp e -> Some e | Text _ -> None) parts
     | Construct (_, e) -> Option.map_default (fun e -> [ e ]) [] e
     | If { cond ; _ } -> [ cond ]
@@ -2837,11 +2898,13 @@ let exfiltrations (b : block) =
     let flows (v : var) e =
         if is_packet e then mark packets v ;
         if taints e then mark tainted v in
-    (* What a case binds, in any expression: *)
+    (* What a case or a comprehension binds, in any expression: *)
     let rec bind_cases e =
         (match e.desc with
         | Case { subject ; arms ; _ } ->
             List.iter (fun a -> Option.may (fun v -> flows v subject) a.held) arms
+        | Comprehension { clauses ; _ } ->
+            List.iter (function Bind (v, items) -> flows v items | Filter _ -> ()) clauses
         | _ -> ()) ;
         List.iter bind_cases (sub_exprs e) in
     while !changed do
@@ -2954,9 +3017,10 @@ let is_pure = function
     | To_int | To_float | To_bool | To_byte | To_interval | To_time
     | To_string | To_bytes | Word _ | Checksum | To_ip | To_mac | To_cidr
     | Is_ip4 | Is_ip6 | Split
-    | Make_array | Length | Concat | Append | Prepend
+    | Make_array | Range | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
     | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
+    | Any | All
     | Format | Getenv | Arg | Nargs -> true
     | Rand | Randbytes | Now | Resolve | Hostname
     | Print | Print_err | Assert | Stats | Summary | Report -> false
@@ -2967,7 +3031,7 @@ let rec is_constant e =
     | Lit _ -> true
     | Call (b, _) when not (is_pure b) -> false
     | String _ | Field _ | Index _ | Slice _ | Call _ | Unop _ | Binop _
-    | Record _ | Array _ | Map _ | Convert _ | Construct _ | Memo _ ->
+    | Record _ | Array _ | Map _ | Comprehension _ | Convert _ | Construct _ | Memo _ ->
         List.for_all is_constant (sub_exprs e)
     | Var _ | Packet_field _ | Select _ | Encode _ | Block _ | If _ | Case _ ->
         false
@@ -3165,14 +3229,12 @@ let check_patterns (ps : A.patterns) =
   "" (warns "expect Raw {} | ../ICMP {}")
   "line 1, column 41: This I is the number of the iteration of this repeat, which hides an outer I: name one of them with var=" \
     (warns "repeat count=2 { repeat count=2 { print(I) } }")
-  "line 1, column 41: This I is the item of this foreach, which hides an outer I: name one of them with var=" \
-    (warns "repeat count=2 { foreach [1, 2] { print(I) } }")
-  "line 2, column 35: This I is what Got holds, which hides an outer I: name one of them with var=" \
-    (warns "r = [Got(1), Pending]\nforeach r { case r[0] Got { print(I) } else {} }")
+  "line 2, column 36: This I is what Got holds, which hides an outer I: name one of them with var=" \
+    (warns "r = [Got(1), Pending]\nfor I in r { case r[0] Got { print(I) } else {} }")
   "" (warns "repeat count=2 { repeat count=2 { print(\"x\") }\n  print(I) }")
   "" (warns "repeat count=2 { repeat var=j count=2 { print(\"${I} ${j}\") } }")
-  "" (warns "r = [Got(1), Pending]\nforeach r { case I Got { print(I) } else {} }")
-  "" (warns "r = [Got(1), Pending]\nforeach r { case var=g r[0] Got { print(\"${I} ${g}\") } else {} }")
+  "" (warns "r = [Got(1), Pending]\nfor I in r { case I Got { print(I) } else {} }")
+  "" (warns "r = [Got(1), Pending]\nfor I in r { case var=g r[0] Got { print(\"${I} ${g}\") } else {} }")
 *)
 
 (*$= types & ~printer:identity
@@ -3197,7 +3259,7 @@ let check_patterns (ps : A.patterns) =
   "m: string[int], n: int[ip], c: int, k: ip[], v: int[], b: bool, l: int" \
     (types "m = [1: \"a\"]\nn = map(key=0.0.0.0, default=0)\nc = n[1.2.3.4]\nk = keys(n)\nv = values(n)\nb = has(n, 1.2.3.4)\nl = length(m)")
   "m: float[string], n: int[{a: int}], I: {key: string, value: float}, k: string" \
-    (types "m = [\"a\": 1, \"b\": 2.5]\nm[\"c\"] += 1\nm := remove(m, \"a\")\nn = [{a: 1}: 2]\nforeach m { k = I.key }")
+    (types "m = [\"a\": 1, \"b\": 2.5]\nm[\"c\"] += 1\nm := remove(m, \"a\")\nn = [{a: 1}: 2]\nfor I in m { k = I.key }")
   "I: int, x: int" (types "repeat count=2 { x = rand(max=3) }")
   "a: float, b: interval" (types "a = stddev([1, 2])\nb = stddev([1s])")
   "h: {count: int, max: float, min: float}[], i: {count: int, max: interval, min: interval}[]" \
@@ -3231,7 +3293,11 @@ let check_patterns (ps : A.patterns) =
   "x: int, y: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Raw(\"a\")\n  { x = LAST[UDP].src }\n  Raw(\"b\")\n  expect ../UDP(IP.src == LAST[IP].dst) { y = LAST[IP].src } }")
   "t: float, x: float, p: {a: int}, y: int" \
-    (types "foreach t [1, 2.5] { x = t * 2 }\nforeach p [{a: 1}] { y = p.a }")
+    (types "for t in [1, 2.5] { x = t * 2 }\nfor p in [{a: 1}] { y = p.a }")
+  "a: ip[], x: ip, b: float[], x: int, c: string[int], y: {key: string, value: int}, d: int[][], x: int, y: int, e: bool, x: int" \
+    (types "a = [x for x in resolve(\"h\") if is_ip6(x)]\nb = [x * 1.5 for x in [1, 2]]\nc = [y.value: y.key for y in [\"a\": 1]]\nd = [[x + y for y in [1]] for x in [2]]\ne = any(x > 1 for x in [1, 2])")
+  "a: float[], x: int, m: float[int], x: int" \
+    (types "a = [1.5]\na := [x for x in [1, 2]]\nm = map(key=0, default=0.0)\nm := [x: x for x in [1]]")
   "n: int, x: int, y: bool, z: float" \
     (types "n = 3\nif n & 1 { x = 1 } elsif n > 2 { y = true } else { z = 1.0 }")
   "" \
@@ -3391,15 +3457,15 @@ let check_patterns (ps : A.patterns) =
     (types "x = assert(true)")
   "line 1, column 7: Argument x of print must be a value, not a void" \
     (types "print(print(1))")
-  "line 1, column 1: Break out of 1 repeat, foreach, on or spawn, but there is none" \
+  "line 1, column 1: Break out of 1 repeat, for, on or spawn, but there is none" \
     (types "break")
-  "line 1, column 10: Break out of 2 repeat, foreach, on or spawn, but there is only one" \
+  "line 1, column 10: Break out of 2 repeat, for, on or spawn, but there is only one" \
     (types "repeat { break 2 }")
-  "line 1, column 9: Break out of 2 repeat, foreach, on or spawn, but there is only one" \
+  "line 1, column 9: Break out of 2 repeat, for, on or spawn, but there is only one" \
     (types "spawn { break 2 }")
   "line 1, column 9: A spawn has no next iteration to continue with" \
     (types "spawn { continue }")
-  "line 1, column 1: Continue out of 1 repeat, foreach, on or spawn, but there is none" \
+  "line 1, column 1: Continue out of 1 repeat, for, on or spawn, but there is none" \
     (types "continue")
   "line 1, column 11: The duration of spawn must be an interval, not an int" \
     (types "spawn for=1 {}")
@@ -3413,12 +3479,22 @@ let check_patterns (ps : A.patterns) =
     (types "expect Raw {} | Raw { x = MATCH }\ny = MATCH")
   "line 1, column 11: The maximum of retry must be an int, not an interval" \
     (types "retry max=1s {}")
-  "line 1, column 11: The items of foreach must be an array or a map, not an int" \
-    (types "foreach t 3 {}")
-  "line 1, column 15: The period of foreach must be an interval, not an int" \
-    (types "foreach every=1 [1] {}")
-  "line 2, column 2: Break out of 2 repeat, foreach, on or spawn, but there is only one" \
-    (types "foreach t [1] { x = t * 2.0\n break 2 }")
+  "line 1, column 10: The items of for must be an array or a map, not an int" \
+    (types "for t in 3 {}")
+  "line 1, column 20: The period of for must be an interval, not an int" \
+    (types "for t in [1] every=1 {}")
+  "line 1, column 17: The items of for must be an array or a map, not an int" \
+    (types "x = [y for y in 3]")
+  "line 1, column 24: The condition of if must be a bool, not a float" \
+    (types "x = [y for y in [1] if 1.5]")
+  "line 1, column 6: An item of an array cannot be a void" (types "x = [print(y) for y in [1]]")
+  "line 2, column 5: Unknown variable y" (types "x = [y for y in [1]]\nz = y")
+  "line 1, column 9: Argument a of any must be an array or a map of bools or ints, not a float[]" \
+    (types "x = any([1.5])")
+  "line 1, column 17: Too many arguments for range (expected a, b)" (types "x = range(1, 2, 3)")
+  "a: int[], b: string" (types "a = range(1, 2)\nb = getenv(\"X\", \"d\")")
+  "line 2, column 2: Break out of 2 repeat, for, on or spawn, but there is only one" \
+    (types "for t in [1] { x = t * 2.0\n break 2 }")
   "line 1, column 22: The period of repeat must be an interval, not an int" \
     (types "repeat count=3 every=1 {}")
   "line 1, column 6: The duration of wait must be an interval, not an int" \

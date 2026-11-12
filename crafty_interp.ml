@@ -34,7 +34,7 @@
    it has run [count] of them or the next one would start once [for] (if
    any) has elapsed since it started; it ends right after its last
    iteration. Over
-   [items], as from a [foreach], it runs one iteration per item.
+   [items], as from a [for], it runs one iteration per item.
    [retry max=N] runs its block again up to N times (3 by default) while it
    fails, the error of the last attempt going to the enclosing block.
    [wait] goes on with the next statement after that duration.
@@ -399,6 +399,11 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now ~check_words =
         if len < 0 then error loc "array needs a length, not %d" len ;
         check_words loc len ;
         Array (Array.make len init)
+    | T.Range, Int a :: b ->
+        let from, to_ = match b with [ Int b ] -> a, b | _ -> 0, a in
+        let len = max 0 (to_ - from) in
+        check_words loc len ;
+        Array (Array.init len (fun i -> Int (from + i)))
     | T.Length, [ Array a ] -> Int (Array.length a)
     | T.Concat, [ Array a ; Array b ] ->
         check_words loc (Array.length a + Array.length b) ;
@@ -462,6 +467,11 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now ~check_words =
             | Some (_, n, lo, hi) -> record n lo hi :: buckets
             | None -> buckets in
         Array (Array.of_list (List.rev buckets))
+    | (T.Any | T.All as b), [ vs ] ->
+        let vs = match vs with Array a -> a | Map (m, _) -> Array.of_enum (Map.PMap.values m)
+                             | _ -> assert false in
+        Bool ((if b = T.Any then Array.exists else Array.for_all)
+                  (function Bool b -> b | Int i -> i <> 0 | _ -> assert false) vs)
     | T.Sorted, [ Array a ] ->
         let a = Array.copy a in
         Array.stable_sort compare_values a ;
@@ -587,8 +597,17 @@ let push_layers ~eval ~hold env depth overlay (layers : T.layer list) =
         Crafty_tree.{ node ; mode = l.mode ; options } :: stack
     ) base layers
 
+(* The items of an array, or the bindings of a map as records of a key then
+ * a value, as their fields sort: *)
+let items_of = function
+    | Array a -> a
+    | Map (m, _) ->
+        Array.of_list (List.map (fun (k, v) -> Record [| k ; v |]) (Map.PMap.bindings m))
+    | _ -> assert false
+
 let rec eval output (env : env) (e : T.expr) =
-    let eval = eval output env in
+    let eval_in = eval output in
+    let eval = eval_in env in
     match e.desc with
     | T.Lit l -> of_literal l
     | T.Memo m ->
@@ -736,6 +755,24 @@ let rec eval output (env : env) (e : T.expr) =
         | Map (m, d) ->
             Map (List.fold_left (fun m (k, v) ->
                 let k = eval k in Map.PMap.add k (eval v) m) m kvs, d)
+        | _ -> assert false)
+    | T.Comprehension { key ; value ; clauses } ->
+        (* Each value, last first: *)
+        let rec values env acc = function
+            | [] -> (Option.map (eval_in env) key, eval_in env value) :: acc
+            | T.Bind (v, items) :: rest ->
+                Array.fold_left (fun acc x -> values (bind env v x) acc rest)
+                    acc (items_of (eval_in env items))
+            | T.Filter c :: rest ->
+                (match eval_in env c with
+                | Bool true -> values env acc rest
+                | _ -> acc) in
+        let vs = values env [] clauses in
+        output.check_words e.loc (List.length vs) ;
+        (match key, empty_map None with
+        | None, _ -> Array (Array.of_list (List.rev_map snd vs))
+        | Some _, Map (m, d) ->
+            Map (List.fold_right (fun (k, v) m -> Map.PMap.add (Option.get k) v m) vs m, d)
         | _ -> assert false)
     | T.Convert a ->
         let v = eval a in
@@ -1266,15 +1303,7 @@ and repeat t b env var count items every for_ body body_loc k =
     let eval = eval t.output env in
     let interval e = match eval e with Interval i -> i | _ -> assert false in
     guard b (fun () ->
-        let items =
-            Option.map (fun e ->
-                match eval e with
-                | Array a -> a
-                (* Records of a key then a value, as their fields sort: *)
-                | Map (m, _) ->
-                    Array.of_list (List.map (fun (k, v) -> Record [| k ; v |])
-                                            (Map.PMap.bindings m))
-                | _ -> assert false) items in
+        let items = Option.map (items_of % eval) items in
         (match items, Option.map eval count with
         | Some a, _ -> Some (Array.length a)
         | None, Some (Int n) -> Some n
@@ -1782,24 +1811,30 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "repeat var=i count=2 { repeat var=j count=2 { print(\"${i}.${j}\") } }")
   "0s: done" \
     (runs "repeat count=0 { print(\"never\") }")
+  "0s: [::1] [2, 4] [a: 1, b: 3] [[1, 2], [2]] true false true false\n0s: done" \
+    (runs "a = [x for x in [1.2.3.4, ::1] if is_ip6(x)]\nb = [2 * x for x in [1, 2]]\nc = [e.key: e.value + x for e in [\"a\": 1, \"b\": 2] for x in [0, 1] if x <= e.value - 1]\nd = [[y for y in [1, 2] if y >= x] for x in [1, 2]]\nprint(\"${a} ${b} ${c} ${d} ${any(is_ip6(x) for x in [::1])} ${all([true, false])} ${any([0, 2])} ${all([\"a\": 1, \"b\": 0])}\")")
+  "0s: [0, 1, 2] [2, 3] [] [0, 2, 4]\n0s: done" \
+    (runs "print(\"${range(3)} ${range(2, 4)} ${range(5, 1)} ${[2 * i for i in range(3)]}\")")
+  "0s: [] true false [x: 1]\n0s: done" \
+    (runs "a = [x for x in [1, 2] if x > 2]\nprint(\"${a} ${all(a == [] for a in [a])} ${any([x > 0 for x in a])} ${[x: 1 for x in [\"x\", \"x\"]]}\")")
   "0s: 3\n0s: 5\n0s: 6\n0s: done" \
-    (runs "foreach t [3, 5, 6] { print(t) }")
+    (runs "for t in [3, 5, 6] { print(t) }")
   "0s: a\n1s: b\n1s: after\n1s: done" \
-    (runs "foreach s every=1s [\"a\", \"b\"] { print(s) }\nprint(\"after\")")
+    (runs "for s in [\"a\", \"b\"] every=1s { print(s) }\nprint(\"after\")")
   "0s: a\n1s: b\n1s: done" \
-    (runs "foreach s every=1s for=1500ms [\"a\", \"b\", \"c\"] { print(s) }")
+    (runs "for s in [\"a\", \"b\", \"c\"] every=1s for=1500ms { print(s) }")
   "0s: done" \
-    (runs "foreach array(init=1, len=0) { print(\"never\") }")
+    (runs "for x in array(init=1, len=0) { print(\"never\") }")
   "0s: 1\n0s: 2\n0s: [9]\n0s: done" \
-    (runs "x = [1, 2]\nforeach v x { x := [9]\n  print(v) }\nprint(x)")
+    (runs "x = [1, 2]\nfor v in x { x := [9]\n  print(v) }\nprint(x)")
   "0s: 1\n0s: done" \
-    (runs "foreach [1, 2, 3] { if I == 2 { break }\n  print(I) }")
+    (runs "for x in [1, 2, 3] { if x == 2 { break }\n  print(x) }")
   "0s: 0\n0s: after\n0s: done" \
     (runs "repeat count=5 every=1s { print(I)\n  break }\nprint(\"after\")")
   "0s: 0\n0s: after\n0s: done" \
     (runs "repeat var=i count=3 { repeat { print(i)\n    break 2 } }\nprint(\"after\")")
   "0s: 1\n0s: 3\n0s: done" \
-    (runs "foreach [1, 2, 3] { if I == 2 { continue }\n  print(I) }")
+    (runs "for x in [1, 2, 3] { if x == 2 { continue }\n  print(x) }")
   "0s: 0\n2s: 2\n2s: done" \
     (runs "repeat count=3 every=1s { if I == 1 { continue }\n  print(I) }")
   "0s: 0.0\n1s: 1.0\n2s: 2.0\n3s: done" \
@@ -1813,9 +1848,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "0s: failed: line 1, column 5: Cannot split by an empty string" \
     (runs "x = split(\"a\", \"\")")
   "0s: [a: 2, b: 1] 2 0\n0s: done" \
-    (runs "n = map(key=\"\", default=0)\nforeach w [\"a\", \"b\", \"a\"] { n[w] += 1 }\nprint(\"${n} ${length(n)} ${n[\"z\"]}\")")
+    (runs "n = map(key=\"\", default=0)\nfor w in [\"a\", \"b\", \"a\"] { n[w] += 1 }\nprint(\"${n} ${length(n)} ${n[\"z\"]}\")")
   "0s: 2=b\n0s: 3=c\n0s: [1: a, 2: b, 3: c] [2, 3] [b, c] false\n0s: done" \
-    (runs "m = [2: \"b\", 1: \"a\"]\nm[3] := \"c\"\nn = m\nm := remove(m, 1)\nforeach m { print(\"${I.key}=${I.value}\") }\nprint(\"${n} ${keys(m)} ${values(m)} ${has(m, 1)}\")")
+    (runs "m = [2: \"b\", 1: \"a\"]\nm[3] := \"c\"\nn = m\nm := remove(m, 1)\nfor e in m { print(\"${e.key}=${e.value}\") }\nprint(\"${n} ${keys(m)} ${values(m)} ${has(m, 1)}\")")
   "0s: [1: [5]] true false\n0s: done" \
     (runs "m = map(key=0, default=[0])\nm[1][0] += 5\nprint(\"${m} ${m == [1: [5]]} ${m == [1: [6]]}\")")
   "0s: failed: line 2, column 5: No key 3 in this map" \
@@ -1825,7 +1860,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "0s: [1: 2.0]\n0s: done" \
     (runs "m = map(key=1, default=0.5)\nm := [1: 2]\nprint(m)")
   "0s: [tcp: 1, udp: 2], and 0 icmp\n0s: done" \
-    (runs "seen = map(key=\"\", default=0)\nforeach p [\"udp\", \"tcp\", \"udp\"] { seen[p] += 1 }\nprint(\"${seen}, and ${seen[\"icmp\"]} icmp\")")
+    (runs "seen = map(key=\"\", default=0)\nfor p in [\"udp\", \"tcp\", \"udp\"] { seen[p] += 1 }\nprint(\"${seen}, and ${seen[\"icmp\"]} icmp\")")
   "0s: 1 7 1.5 1.5s 2 3 1 2\n0s: done" \
     (runs "a = [5, 1, 4, 2, 3]\nprint(\"${min([3, 1, 2])} ${max([1: 5, 2: 7])} ${mean([1, 2])} ${mean([1s, 2s])} ${percentile(a, 40)} ${percentile(a, 40.1)} ${percentile([1], 0)} ${count([1, 2])}\")")
   "0s: 64 to 1500, median 512\n0s: done" \
@@ -1955,7 +1990,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "0s: [127.0.0.1] [::1] localhost\n0s: done" \
     (runs "print(\"${resolve(\"127.0.0.1\")} ${resolve(\"::1\")} ${hostname(resolve(\"localhost\")[0])}\")")
   "0s: true false\n0s: false true\n0s: done" \
-    (runs "foreach [1.2.3.4, ::1] { print(\"${is_ip4(I)} ${is_ip6(I)}\") }")
+    (runs "for a in [1.2.3.4, ::1] { print(\"${is_ip4(a)} ${is_ip6(a)}\") }")
   "0s: {ip: 10.0.0.2, ok: true, rtt: 1.5ms}\n0s: done" \
     (runs "print(format({ip: 10.0.0.2, rtt: 1.5ms, ok: true}))")
   "0s: {\"data\":\"#0102\",\"ip\":\"10.0.0.2\",\"rtt\":0.0015,\"tags\":[\"a\",\"b\"]}\n0s: done" \
@@ -2275,14 +2310,14 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
  * holds converted along: *)
 (*$= runs & ~printer:identity
   "0s: pending\n0s: got 2\n0s: Failed late\n0s: [Ok 1.0, Err a, Ok 2.5] true false A {b: [C]}\n0s: done" \
-    (runs "assert(Pending() == Pending)\nr = Pending\nforeach [1, 2, 3] {\n  if I == 2 { r := Got(I) } elsif I == 3 { r := Failed(\"late\") }\n  print(case r Pending { \"pending\" } | Got { \"got ${I}\" } else { \"${r}\" }) }\nx = [Ok(1), Err(\"a\"), Ok(2.5)]\nprint(\"${x} ${x[0] == Ok(1.0)} ${x[1] == Ok(1)} ${A({b: [C]})}\")")
+    (runs "assert(Pending() == Pending)\nr = Pending\nfor I in [1, 2, 3] {\n  if I == 2 { r := Got(I) } elsif I == 3 { r := Failed(\"late\") }\n  print(case r Pending { \"pending\" } | Got { \"got ${I}\" } else { \"${r}\" }) }\nx = [Ok(1), Err(\"a\"), Ok(2.5)]\nprint(\"${x} ${x[0] == Ok(1.0)} ${x[1] == Ok(1)} ${A({b: [C]})}\")")
 *)
 (* case runs the arm of a value's constructor, in which its var (I by
  * default) is what that constructor holds: *)
 (*$= runs & ~printer:identity
   "500ms: other\n500ms: ip 10.0.0.2\n500ms: udp 53\n500ms: other\n500ms: Raw\n1s500ms: 64\n1s500ms: done" \
     (runs ~inject:[ 0.5, reply "pong" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw(\"pong\") {\n    foreach MATCH { print(case I IP { \"ip ${I.src}\" } | UDP { \"udp ${I.src}\" } | else { \"other\" }) }\n    case var=l MATCH[3] Raw { print(\"Raw\") }\n    case MATCH[3] IP { print(\"not reached\") }\n    ttl = case var=h MATCH[1] IP { wait 1s\n      h.ttl } | else { 0 }\n    print(ttl) } }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw(\"pong\") {\n    for I in MATCH { print(case I IP { \"ip ${I.src}\" } | UDP { \"udp ${I.src}\" } | else { \"other\" }) }\n    case var=l MATCH[3] Raw { print(\"Raw\") }\n    case MATCH[3] IP { print(\"not reached\") }\n    ttl = case var=h MATCH[1] IP { wait 1s\n      h.ttl } | else { 0 }\n    print(ttl) } }")
 *)
 (* on runs its block for every match, and its block waits for it: *)
 (*$= runs & ~printer:identity

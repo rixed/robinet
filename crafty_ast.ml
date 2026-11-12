@@ -176,6 +176,9 @@ and expr_desc =
     | Array of expr list
     (* Never empty, as [[]] is an array: *)
     | Map of (expr * expr) list
+    (* An array of [value], or a map of [key] to [value], for each binding
+     * that [clauses] make, in order, the first one binding: *)
+    | Comprehension of { key : expr option ; value : expr ; clauses : clause list }
     | Matches of expr * pattern
     (* A constructor of a variant, with what it holds ([Ok(42)]) or nothing
      * ([Pending()]); without the parentheses, a constructor is read as a
@@ -192,6 +195,9 @@ and expr_desc =
                 else_ : block option }
 
 and arm = { arm_loc : location ; ctor : string ; body : block }
+
+(* [for v in items], within which the next clauses are, or [if cond]: *)
+and clause = Bind of string * expr | Filter of expr
 
 and string_part = Text of string | Interp of expr
 
@@ -245,8 +251,8 @@ and stmt_desc =
     | Repeat of { var : string option ; count : expr option ;
                   every : expr option ; for_ : expr option ; body : block }
     (* A [Repeat] whose [var] is each of [items] in turn: *)
-    | Foreach of { var : string option ; items : expr ; every : expr option ;
-                   for_ : expr option ; body : block }
+    | For of { var : string ; items : expr ; every : expr option ;
+               for_ : expr option ; body : block }
     (* Run [body], and again up to [max] times while it fails: *)
     | Retry of { max : expr option ; body : block }
     (* Run [body], leaving it on its first error: *)
@@ -335,10 +341,11 @@ let functions =
     [ "rand" ; "randbytes" ; "exp" ; "ln" ; "log" ; "log2" ; "int" ; "float" ;
       "bool" ; "byte" ; "interval" ; "time" ; "now" ; "string" ; "bytes" ; "checksum" ; "encode" ; "ip_addr" ; "mac_addr" ; "cidr" ; "getenv" ;
       "arg" ; "nargs" ; "resolve" ; "hostname" ; "is_ip4" ; "is_ip6" ; "split" ;
-      "array" ; "length" ; "concat" ; "append" ; "prepend" ;
+      "array" ; "range" ; "length" ; "concat" ; "append" ; "prepend" ;
       "map" ; "has" ; "remove" ; "keys" ; "values" ;
       "count" ; "sum" ; "min" ; "max" ; "mean" ; "stddev" ; "percentile" ;
       "sort" ; "sorted" ; "histogram" ;
+      "any" ; "all" ;
       "print" ; "print_err" ; "format" ; "summary" ; "report" ; "assert" ; "stats" ]
 
 (** Variables that the program declares of itself, at most once each and at
@@ -350,7 +357,7 @@ let predefined = [ "MATCH" ; "LAST" ; "OWN_IP" ; "OWN_IPS" ] @ self_declared
 
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
-    [ "true" ; "false" ; "repeat" ; "foreach" ; "retry" ; "catch" ; "if" ;
+    [ "true" ; "false" ; "repeat" ; "for" ; "retry" ; "catch" ; "if" ;
       "elsif" ; "else" ; "case" ; "break" ; "continue" ; "expect" ; "on" ; "wait" ;
       "sleep" ; "in" ; "spawn" ]
 
@@ -480,6 +487,14 @@ let rec print_expr_at ?(bare=false) ~all ~indent p oc e =
     | Map kvs ->
         Printf.fprintf oc "[%a]" (print_list (fun oc (k, v) ->
             Printf.fprintf oc "%a: %a" sub k sub v)) kvs
+    | Comprehension { key ; value ; clauses } ->
+        Char.print oc '[' ;
+        Option.may (Printf.fprintf oc "%a: " sub) key ;
+        sub oc value ;
+        List.iter (function
+            | Bind (v, items) -> Printf.fprintf oc " for %s in %a" v sub items
+            | Filter c -> Printf.fprintf oc " if %a" sub c) clauses ;
+        Char.print oc ']'
     | Matches (e, pat) ->
         let q = precedence Eq in
         paren q (fun oc ->
@@ -564,12 +579,11 @@ and print_stmt ~all indent oc s =
         Option.may (Printf.fprintf oc " var=%s") var ;
         param "count" count ; param "every" every ; param "for" for_ ;
         Char.print oc ' ' ; print_block ~all indent oc body
-    | Foreach { var ; items ; every ; for_ ; body } ->
-        String.print oc "foreach" ;
-        Option.may (Printf.fprintf oc " %s") var ;
+    | For { var ; items ; every ; for_ ; body } ->
+        Printf.fprintf oc "for %s in %a" var
+            (print_expr_at ~bare:true ~all ~indent 0) items ;
         param "every" every ; param "for" for_ ;
-        Printf.fprintf oc " %a " (print_expr_at ~bare:true ~all ~indent 0) items ;
-        print_block ~all indent oc body
+        Char.print oc ' ' ; print_block ~all indent oc body
     | Retry { max ; body } ->
         String.print oc "retry" ; param "max" max ;
         Char.print oc ' ' ; print_block ~all indent oc body

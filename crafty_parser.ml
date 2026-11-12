@@ -212,8 +212,18 @@ let unknown_function args =
            is_constructor s && not (is_reserved s)
         then fail else return s) ++ args >>:
     fun (s, _) ->
-        reject "Unknown function %s%s" s
-            (did_you_mean (functions @ List.map Layer_name.to_string Layer_name.all) s)
+        (* Functions of other languages: *)
+        let hints =
+            [ [ "len" ; "size" ], "use length(a)" ;
+              [ "str" ], "use string(x)" ;
+              [ "enumerate" ], "loop with repeat var=i count=length(a) { ... a[i] ... }" ;
+              [ "filter" ], "filter with [x for x in a if cond]" ;
+              [ "dict" ], "a map is [k: v, ...], or map(key=k, default=v) if empty" ] in
+        match List.find_opt (fun (ws, _) -> is_in ws s) hints with
+        | Some (_, hint) -> reject "Unknown function %s: %s" s hint
+        | None ->
+            reject "Unknown function %s%s" s
+                (did_you_mean (functions @ List.map Layer_name.to_string Layer_name.all) s)
 
 let known_layer =
     identifier >>= fun s ->
@@ -454,6 +464,33 @@ let list_of p =
 let in_ opening p closing =
     item opening -- nl_sp -+ p +- nl_sp +- item closing
 
+let check_var n =
+    if List.mem n self_declared then reject "%s cannot be changed" n ;
+    if is_reserved n then reject "%s is a reserved name" n ;
+    n
+
+(* [for v in items], of a loop or a comprehension: *)
+let for_head expr =
+    let var =
+        (identifier >>= fun s -> if is_keyword s then fail else return s) >>: check_var in
+    keyword "for" -- sp -+ var +- sp +- (
+        keyword "in" |||
+        (item ',' >>: fun _ ->
+            reject "A for binds a single variable; over a map, it is a record \
+                    of fields key and value")) +- nl_sp ++ expr
+
+(* What follows the item of a comprehension, starting with a [for]: *)
+let clauses expr =
+    let clause =
+        (for_head expr >>: fun (v, items) -> Bind (v, items)) |||
+        (keyword "if" -- nl_sp -+ expr >>: fun c -> Filter c) in
+    nl_sp -+ (for_head expr >>: fun (v, items) -> Bind (v, items)) ++
+    repeat_greedy ~sep:none (nl_sp -+ clause) >>: fun (c, cs) -> c :: cs
+
+let comprehension ?key expr =
+    here ++ expr ++ clauses expr >>:
+    fun ((loc, value), clauses) -> { loc ; desc = Comprehension { key ; value ; clauses } }
+
 let args expr =
     let arg =
         here ++
@@ -462,12 +499,11 @@ let args expr =
             Option.some) ++
         expr >>:
         fun ((arg_loc, arg_name), value) -> { arg_loc ; arg_name ; value } in
-    in_ '(' (list_of arg) ')' |? "arguments"
-
-let check_var n =
-    if List.mem n self_declared then reject "%s cannot be changed" n ;
-    if is_reserved n then reject "%s is a reserved name" n ;
-    n
+    (* A lone comprehension needs no brackets, as a generator in Python: *)
+    let generator =
+        here ++ comprehension expr >>:
+        fun (arg_loc, value) -> [ { arg_loc ; arg_name = None ; value } ] in
+    in_ '(' (list_of arg ||| generator) ')' |? "arguments"
 
 (* The name of a variable, given as a parameter: *)
 let var_name what e =
@@ -612,6 +648,9 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
         let key =
             quiet (nay (with_colons -- sp -- nay (item ':'))) -+ expr +- sp +-
             item ':' +- nl_sp in
+        (in_ '[' (
+            (comprehension expr) |||
+            (key >>= fun k -> comprehension ~key:k expr)) ']') |||
         (here ++ in_ '[' (list_of (
             (key ++ expr >>: fun (k, v) -> k, Some v) |||
             (expr >>: fun e -> e, None))) ']' >>:
@@ -785,12 +824,6 @@ let () = set_stmt (
             if is_keyword s || is_in functions s ||
                is_constructor s && not (is_reserved s) then fail else return ()) --
         item '(' in
-    (* The variable of a foreach, unnamed: a name then, after a space, what
-     * starts its items rather than continues an expression: *)
-    let foreach_var =
-        quiet (variable +- char_if "space" (fun c -> c = ' ' || c = '\t') +-
-               sp +- check (char_if "" (fun c ->
-                   is_word c || c = '[' || c = '(' || c = '"'))) in
     (* A keyword of other languages, followed by what would continue its
      * statement rather than an expression: *)
     let foreign_start =
@@ -798,7 +831,7 @@ let () = set_stmt (
             [ [ "while" ; "until" ; "loop" ; "do" ],
                 "loop with repeat, which a break ends: \
                  repeat { if !cond { break } ... }" ;
-              [ "for" ], "loop with foreach x items { ... } or repeat var=i count=n { ... }" ;
+              [ "foreach" ], "loop with for x in items { ... }" ;
               [ "switch" ; "match" ], "tell values apart with case" ;
               [ "let" ; "var" ; "const" ], "declare with x = value" ;
               [ "return" ], "a block is worth its last expression" ;
@@ -880,23 +913,9 @@ let () = set_stmt (
             Repeat { var = Option.map (var_name "variable name") (p "var") ;
                      count = p "count" ; every = p "every" ; for_ = p "for" ;
                      body }) |||
-        (keyword "foreach" -+
-         (optional ~def:None (sp -+ foreach_var >>: Option.some) ++ here ++
-          params ~unnamed:false "foreach" [ "var" ; "every" ; "for" ] ++ here >>=
-          (* After the parameters too, if any, not to read it twice: *)
-          fun (((v1, l1), p), l2) ->
-            optional ~def:None (
-                if v1 = None && l1 <> l2 then sp -+ foreach_var >>: Option.some
-                else fail) >>: fun v2 -> (v1, p), v2) +- sp ++
-         expr ++ body >>: fun ((((v1, p), v2), items), body) ->
-            let var =
-                match v1, v2, Option.map (var_name "variable name") (p "var") with
-                | None, None, v -> v
-                | (Some _ as v), None, None | None, (Some _ as v), None ->
-                    Option.map check_var v
-                | _ -> reject "Variable name of foreach given twice" in
-            Foreach { var ; items ; every = p "every" ; for_ = p "for" ;
-                      body }) |||
+        (for_head expr ++ params ~unnamed:false "for" [ "every" ; "for" ] ++ body >>:
+            fun (((var, items), p), body) ->
+                For { var ; items ; every = p "every" ; for_ = p "for" ; body }) |||
         (keyword "retry" -+ params "retry" [ "max" ] ++ body >>:
             fun (p, body) -> Retry { max = p "max" ; body }) |||
         (keyword "catch" -+ body >>: fun body -> Catch body) |||
@@ -1100,13 +1119,21 @@ let parse_patterns text =
     (reads "repeat var=i count=3 every=1ms for=1s { print(i) }")
   "repeat count=(n * 2) every=(1s / n) {\n}\n" \
     (reads "repeat every=1s / n count=n*2 {}")
-  "foreach t [3, 5, 6] {\n  print(t)\n}\n" \
-    (reads "foreach t [3, 5, 6] { print(t) }")
-  "foreach t every=1s ts {\n}\nforeach t for=1m ts {\n}\nforeach t ts {\n}\n" \
-    (reads "foreach t every=1s ts {}\nforeach for=1m t (ts) {}\nforeach var=t ts {}")
-  "foreach t ts {\n}\nforeach a - b {\n}\n" (reads "foreach t\tts {}\nforeach a - b {}")
-  "foreach every=(1s / n) for=1m ttls {\n}\n" (reads "foreach for=1m every=1s / n ttls {}")
-  "foreach x a.b[(i + 1)] {\n}\n" (reads "foreach var=\"x\" a.b[i + 1] {}")
+  "for t in [3, 5, 6] {\n  print(t)\n}\n" \
+    (reads "for t in [3, 5, 6] { print(t) }")
+  "for t in ts every=1s {\n}\nfor t in ts for=1m {\n}\n" \
+    (reads "for t in ts every=1s {}\nfor  t\tin (ts) for=1m {}")
+  "for t in a - b {\n}\n" (reads "for t in a - b {}")
+  "for t in ttls every=(1s / n) for=1m {\n}\n" (reads "for t in ttls for=1m every=1s / n {}")
+  "for x in a.b[(i + 1)] {\n}\n" (reads "for x in a.b[i + 1] {}")
+  "x = [(y * 2) for y in a]\n" (reads "x = [y * 2 for y in a]")
+  "x = [y for y in a if is_ip6(y)]\n" (reads "x = [ y\n  for y in a\n  if is_ip6(y) ]")
+  "x = [(y + z) for y in a if y for z in b if (z > y)]\n" \
+    (reads "x = [y + z for y in a if y for z in b if z > y]")
+  "x = [y.key: (y.value + 1) for y in m]\n" (reads "x = [y.key: y.value + 1 for y in m]")
+  "x = [[z for z in y] for y in a]\n" (reads "x = [[z for z in y] for y in a]")
+  "x = any([is_ip6(y) for y in a])\n" (reads "x = any(is_ip6(y) for y in a)")
+  "x = [(i * 2) for i in range(3)]\n" (reads "x = [i * 2 for i in range(3)]")
   "x[1][(i + 1)] += 2\nx[0] := [1]\n" (reads "x[1][i+1] += 2\nx[0]:=[1]")
   "x = [1: \"a\", (2 + 3): \"b\"]\n" (reads "x = [1:\"a\", 2+3 : \"b\",]")
   "x = [true: 1, 1.2.3.4: 2, AA:BB:CC:DD:EE:FF: 3, y: [4]]\n" \
@@ -1205,7 +1232,8 @@ let parse_patterns text =
     "x = [::1: \"lo\", 2001:db8::1: \"a\"]\ny = a[1:2] + a[x:] + (2001:db8::1 in 2001:db8::/32)" ; \
     "x = #1ee7 # a comment\nx = #f" ; "x = \"a ${x + 1} b \\${not} \\x41$\"" ; \
     "x = y =~ /IP/UDP(dport = 53)" ; "wait dur=1s * n" ; \
-    "repeat every=1s / n count=n*2 {}" ; "foreach t every=1s * 2 [1, 2] {}" ; \
+    "repeat every=1s / n count=n*2 {}" ; "for t in [1, 2] every=1s * 2 {}" ; \
+    "x = [a: b + 1 for a in [1, 2] if a > 1 for b in c]" ; \
     "on max=3 timeout=1s ../UDP { n += 1; m := 2 }" ; \
     "on for=1s ../UDP {}\non linger=2s * n ../UDP {}" ; \
     "expect UDP(TimeExceeded/IP.ttl = 3, /IP.src == 1.2.3.4) {}" ; \
@@ -1244,13 +1272,15 @@ let parse_patterns text =
   "line 1, column 19: Expected pattern in statement" (reads "expect timeout=5s {\n}")
   "line 1, column 13: Unknown parameter cnt for repeat (expected var, count, every, for)" \
     (reads "repeat cnt=3 {\n}")
-  "line 1, column 11: Expected '{' in block" (reads "foreach {}")
-  "line 1, column 19: Expected '{' in block" (reads "foreach var=t ttls")
-  "line 1, column 16: Unknown parameter count for foreach (expected var, every, for)" \
-    (reads "foreach count=3 ttls {}")
-  "line 1, column 22: Variable name of foreach given twice" \
-    (reads "foreach t var=u ts {}")
-  "line 1, column 21: MATCH is a reserved name" (reads "foreach MATCH [1] {}")
+  "line 1, column 12: Expected '{' in block" (reads "for x in {}")
+  "line 1, column 14: Expected '{' in block" (reads "for t in ttls")
+  "line 1, column 22: Unknown parameter count for for (expected every, for)" \
+    (reads "for t in ttls count=3 {}")
+  "line 1, column 10: MATCH is a reserved name" (reads "for MATCH in [1] {}")
+  "line 1, column 7: A for binds a single variable; over a map, it is a record of fields key and value" \
+    (reads "for k, v in m {}")
+  "line 1, column 14: A for binds a single variable; over a map, it is a record of fields key and value" \
+    (reads "x = [k for k, v in m]")
   "line 1, column 18: Parameter max of retry given twice" \
     (reads "retry max=1 max=2 {\n}")
   "line 1, column 10: Parameter depth of break given twice" (reads "break 2 3")
@@ -1265,8 +1295,8 @@ let parse_patterns text =
   "line 2, column 8: on is a keyword, it cannot name a variable" (reads "x = 1\non := 2")
   "line 1, column 7: while is no keyword: loop with repeat, which a break ends: repeat { if !cond { break } ... }" \
     (reads "while x < 3 {\n}")
-  "line 2, column 5: for is no keyword: loop with foreach x items { ... } or repeat var=i count=n { ... }" \
-    (reads "x = 1\nfor i in [1, 2] {}")
+  "line 2, column 9: foreach is no keyword: loop with for x in items { ... }" \
+    (reads "x = 1\nforeach i [1, 2] {}")
   "line 1, column 8: return is no keyword: a block is worth its last expression" (reads "return 1")
   "line 2, column 17: elif is no keyword: use elsif" (reads "x = 1\nif x { 1 } elif x { 2 }")
   "line 1, column 11: print is a reserved name" (reads "print += 3")
@@ -1285,6 +1315,9 @@ let parse_patterns text =
   "line 1, column 8: Expected pattern in statement" (reads "expect 2s {}")
   "line 1, column 11: Unknown function pirnt, do you mean print?" (reads "pirnt(\"x\")")
   "line 1, column 7: Unknown function foo" (reads "foo(1)")
+  "line 1, column 11: Unknown function len: use length(a)" (reads "x = len(a)")
+  "line 1, column 29: Unknown function enumerate: loop with repeat var=i count=length(a) { ... a[i] ... }" \
+    (reads "x = [i for i in enumerate(a)]")
   "line 1, column 15: Unknown function foo" (reads "x := 1; foo(1); y := 2")
   "line 1, column 4: Unknown layer foo" (reads "foo(1)/Raw(\"x\")")
   "line 1, column 4: Unknown layer foo" (reads "foo(1) {}")
@@ -1298,8 +1331,9 @@ let parse_patterns text =
     (reads "catch {\n  if foo(1) { x := 1 } else { x := 2 }\n}")
   "line 1, column 10: A layer is selected by the layers below it, not by carets: /IP is the first IP, TimeExceeded/IP the one on top of TimeExceeded" (reads "x = a[^IP]")
   "line 1, column 6: _ is a reserved name" (reads "_ = 1")
-  "line 1, column 14: _ is a reserved name" (reads "foreach var=_ [1] {}")
-  "line 1, column 15: IP is a reserved name" (reads "foreach var=IP [1] {}")
+  "line 1, column 6: _ is a reserved name" (reads "for _ in [1] {}")
+  "line 1, column 7: IP is a reserved name" (reads "for IP in [1] {}")
+  "line 1, column 14: IP is a reserved name" (reads "x = [y for IP in [1]]")
   "line 1, column 11: _ is a reserved name" (reads "case var=_ 1 else {}")
   "line 1, column 8: Expected constructor in expression" (reads "case x {}")
   "line 1, column 10: Expected '{' in block" (reads "case x IP")
