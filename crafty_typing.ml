@@ -542,6 +542,8 @@ type env =
       declared_as : (int, A.expr) Hashtbl.t ;
       (* Where variables are first read, by id: *)
       reads : (int, A.location) Hashtbl.t ;
+      (* The variables declared, with where and whether they hide another: *)
+      declared : (var * A.location * bool) list ref ;
       (* The type of the variables declared there, when wider than that of
        * their value, as their assignments tell: *)
       widened : (A.location, Type.t) Hashtbl.t ;
@@ -2500,6 +2502,7 @@ and stmt errors env (s : A.stmt) =
         if List.mem name env.declared_here then
             error loc "%s is already declared in this block (:= changes it)" name ;
         let v = new_var name typ in
+        env.declared := (v, loc, bound env name) :: !(env.declared) ;
         { env with vars = v :: env.vars ;
                    declared_here = name :: env.declared_here }, v in
     let declare env name e = declare_typ env name e.typ in
@@ -3226,7 +3229,7 @@ let check ?(warnings=ref []) (program : A.program) =
                     stack_text = [] ; loops = [] ; layer_ctx = None ;
                     may_wait = true ; errors = ref [] ; warnings = ref [] ;
                     declared_at = Hashtbl.create 7 ; declared_as = Hashtbl.create 7 ;
-                    reads = Hashtbl.create 7 ;
+                    reads = Hashtbl.create 7 ; declared = ref [] ;
                     widened ; widening = ref false ; held_by = Hashtbl.create 7 ;
                     reports = Hashtbl.create 3 ; provisional = false ;
                     unknown = Hashtbl.create 3 } in
@@ -3248,6 +3251,16 @@ let check ?(warnings=ref []) (program : A.program) =
                                       empty arrays in %s: nothing is added to them" name)
             :: !(env.errors)
     ) env.unknown ;
+    (* A variable never read is most often an [=] meant as a [:=]: *)
+    List.iter (fun ((v : var), loc, hides) ->
+        if not (Hashtbl.mem env.reads v.id || String.starts_with v.name "_") then
+            env.warnings :=
+                (loc, Printf.sprintf "%s is never read%s" v.name
+                          (if hides then
+                              ", and hides another "^ v.name ^" (:= changes it)"
+                          else " (name it _"^ v.name ^" if that is meant)")) ::
+                !(env.warnings)
+    ) !(env.declared) ;
     warnings := in_order !(env.warnings) ;
     let errors = !self_errors @ !(env.errors) in
     if errors = [] then (cache_constants p ; Ok p) else Error (in_order errors)
@@ -3265,7 +3278,8 @@ let check_patterns (ps : A.patterns) =
                 stack_text = [] ; loops = [] ; layer_ctx = None ; may_wait = false ;
                 errors = ref [] ; warnings = ref [] ; declared_at = Hashtbl.create 1 ;
                 declared_as = Hashtbl.create 1 ;
-                reads = Hashtbl.create 1 ; widened = Hashtbl.create 1 ;
+                reads = Hashtbl.create 1 ; declared = ref [] ;
+                widened = Hashtbl.create 1 ;
                 widening = ref false ; held_by = Hashtbl.create 1 ;
                 reports = Hashtbl.create 1 ; provisional = false ;
                 unknown = Hashtbl.create 1 } in
@@ -3300,6 +3314,12 @@ let check_patterns (ps : A.patterns) =
 *)
 
 (*$= warns & ~printer:identity
+  "line 2, column 18: x is never read, and hides another x (:= changes it)" \
+    (warns "x = 0\nrepeat count=2 { x = x + 1 }\nprint(x)")
+  "line 1, column 1: p is never read (name it _p if that is meant)" \
+    (warns "p = /IP(dst=1.2.3.4)/UDP(dst=1)/Raw(\"a\")")
+  "" \
+    (warns "_x = 1\nx = 2\nx := 3\nprint(x)")
   "line 1, column 33: IP.ttl is any of 2 layers, this one included: it reads TimeExceeded/IP.ttl, not /IP.ttl" \
     (warns "expect /IP/ICMP/TimeExceeded/IP(IP.ttl == 1) {}")
   "" \
