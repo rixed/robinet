@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 e0e977a207fb9c5efb19099a919678fc) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 3def3cb239f54c8fc9bdb64383be7612) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -351,10 +351,11 @@ and the layer selectors of [Patterns](#patterns). Arrays, bytes and strings
 slice as in Python. `a[i] := v` and `m[k] += 1` change an item, adding the key
 to a map if need be.
 
-**Blocks, `if` and `case` are expressions**:
+**Blocks, `if`, `case` and `expect` are expressions**:
 
     y = if cond 1 else 2
     ttl = case var=h MATCH[1] IP { h.ttl } else { 0 }
+    resp = expect timeout=1s Raw { Got(MATCH[Raw].data) } else { Lost }
     rtt = { t0 = now() ; Request("ping") ; expect Reply {} ; now() - t0 }
 
 ### Self-driven vs manual stacks
@@ -422,6 +423,7 @@ what their engine computes (checksums).
 -   `expect timeout=d PATTERN { ... } | PATTERN { ... } else { ... }`: waits for
     the first packet that matches any pattern, then runs its block; after the
     timeout (none by default), runs `else`, or without one fails with `Timeout`.
+    Its value is that of the block it ran.
 -   `on for=d linger=d timeout=d max=n PATTERN { ... } | PATTERN { ... }`: the
     enclosing block goes on; each matching packet runs the block of its pattern,
     repeatedly (`max` times or unlimited) until its lifetime or that of the

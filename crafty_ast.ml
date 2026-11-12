@@ -211,6 +211,10 @@ and expr_desc =
      * (or else [subject], if a variable) is what that constructor holds: *)
     | Case of { var : string option ; subject : expr ; arms : arm list ;
                 else_ : block option }
+    (* The block of the first of those patterns to match, never empty, or
+     * [else_] once [timeout] passed: *)
+    | Expect of { timeout : expr option ; cases : (patterns * block) list ;
+                  else_ : block option }
 
 and arm = { arm_loc : location ; ctor : string ; body : block }
 
@@ -281,10 +285,6 @@ and stmt_desc =
      * the next iteration of the last: *)
     | Break of { depth : expr option ; continue : bool }
     | Wait of expr
-    (* The block of the first of those patterns to match, never empty, or
-     * [else_] once [timeout] passed: *)
-    | Expect of { timeout : expr option ; cases : (patterns * block) list ;
-                  else_ : block option }
     (* The block of the patterns of each match, never empty: *)
     | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
               max : expr option ; cases : (patterns * block) list }
@@ -549,6 +549,14 @@ let rec print_expr_at ?(bare=false) ~all ~indent p oc e =
             Printf.fprintf oc "%s%s " (if i = 0 then " " else " | ") a.ctor ;
             block oc a.body) arms ;
         Option.may (fun b -> String.print oc " else " ; block oc b) else_
+    | Expect { timeout ; cases ; else_ } ->
+        String.print oc "expect" ;
+        Option.may (Printf.fprintf oc " timeout=%a" sub) timeout ;
+        List.iteri (fun i (p, body) ->
+            Printf.fprintf oc "%s%a " (if i = 0 then " " else " | ")
+                (print_patterns ~all ~indent) p ;
+            block oc body) cases ;
+        Option.may (fun b -> String.print oc " else " ; block oc b) else_
 
 and print_args ~all ~indent oc args =
     print_list (fun oc a ->
@@ -628,10 +636,6 @@ and print_stmt ~all indent oc s =
     | Wait dur ->
         if all then (String.print oc "wait" ; param "dur" (Some dur))
         else Printf.fprintf oc "wait %a" expr dur
-    | Expect { timeout ; cases ; else_ } ->
-        String.print oc "expect" ; param "timeout" timeout ;
-        print_cases cases ;
-        print_else else_
     | On { for_ ; linger ; timeout ; max ; cases } ->
         String.print oc "on" ; param "for" for_ ; param "linger" linger ;
         param "timeout" timeout ; param "max" max ;

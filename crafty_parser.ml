@@ -106,6 +106,13 @@ let rejection_mark = "\001"
 let reject fmt =
     Printf.ksprintf (fun s -> raise (Reject (rejection_mark ^ s))) fmt
 
+(* A rejection of what is at [loc] rather than where it is noticed, which
+ * is still where it competes with the other errors: *)
+let reject_at (loc : location) fmt =
+    Printf.ksprintf (fun s ->
+        raise (Reject (Printf.sprintf "%s%d:%d%s%s" rejection_mark loc.line
+                           loc.column rejection_mark s))) fmt
+
 let loc_of (pos : ParsersPositions.file_position) =
     { line = pos.line ; column = pos.column }
 
@@ -465,15 +472,17 @@ let list_of p =
 let in_ opening p closing =
     item opening -- nl_sp -+ p +- nl_sp +- item closing
 
-let check_var n =
-    if List.mem n self_declared then reject "%s cannot be changed" n ;
-    if is_reserved n then reject "%s is a reserved name" n ;
+(* The name of a variable at [loc]: *)
+let check_var loc n =
+    if List.mem n self_declared then reject_at loc "%s cannot be changed" n ;
+    if is_reserved n then reject_at loc "%s is a reserved name" n ;
     n
 
 (* [for v in items], of a loop or a comprehension: *)
 let for_head expr =
     let var =
-        (identifier >>= fun s -> if is_keyword s then fail else return s) >>: check_var in
+        here ++ (identifier >>= fun s -> if is_keyword s then fail else return s) >>:
+        fun (loc, n) -> check_var loc n in
     keyword "for" -- sp -+ var +- sp +- (
         keyword "in" |||
         (item ',' >>: fun _ ->
@@ -509,8 +518,7 @@ let args expr =
 (* The name of a variable, given as a parameter: *)
 let var_name what e =
     match e.desc with
-    | Var n -> check_var n
-    | String [ Text n ] -> check_var n
+    | Var n | String [ Text n ] -> check_var e.loc n
     | String [] -> reject "The %s cannot be empty" what
     | _ -> reject "The %s must be a name" what
 
@@ -528,8 +536,8 @@ let params_of expr ?(unnamed=true) ?(pattern=false) form names =
     let equal = if unnamed && not pattern then item '=' else quiet (item '=') in
     (* A reserved name is no expression, but what the variable is misnamed: *)
     let reserved =
-        (identifier >>= fun s -> if is_reserved s then return s else fail) >>:
-        fun s -> reject "%s is a reserved name" s in
+        here ++ (identifier >>= fun s -> if is_reserved s then return s else fail) >>:
+        fun (loc, s) -> reject_at loc "%s is a reserved name" s in
     let named =
         param_name +- sp +- equal +- nay (item '=') +- sp >>= fun n ->
             (if String.lowercase_ascii n = "var" then expr ||| reserved else expr) >>:
@@ -591,7 +599,7 @@ let make_layer expr =
 (* [self] is the grammar being built: that of normal expressions, or that of
  * conditions, where [=] compares. [expr] is that of normal expressions, used
  * within brackets. *)
-let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
+let make_expr ~cond ~self ~expr ~pattern ~patterns ~block ~stmt =
     let layer = make_layer expr in
     let body = sp -+ block in
     (* A branch of an [if]: a statement on the same line, a block being the
@@ -634,6 +642,21 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
             fun p -> Option.map (var_name "variable name") (p "var")) +- sp ++
         expr ++ (nl_sp -+ arms |? "constructor") >>:
         fun ((var, subject), (arms, else_)) -> Case { var ; subject ; arms ; else_ } in
+    (* Its cases, separated as those of a [case], and no operator [|] after
+     * them, where a case is missing: *)
+    let expect =
+        let sep = nl_sp -- item '|' -- nl_sp in
+        let else_ = (sep ||| nl_sp) -+ keyword "else" -+ body in
+        params_of expr ~pattern:true "expect" [ "timeout" ] +- sp ++
+        repeat ~min:1 ~sep (patterns ++ body) ++
+        optional_greedy ~def:None (else_ >>: Option.some) +-
+        quiet (nay (sp -- item '|')) >>:
+        fun ((p, cases), else_) ->
+            let timeout = p "timeout" in
+            if else_ <> None && timeout = None then
+                reject "The else of expect runs once its timeout passed: \
+                        expect needs one" ;
+            Expect { timeout ; cases ; else_ } in
     let field = identifier +- sp +- item ':' +- nl_sp ++ expr in
     let atom =
         (here ++ literal >>: fun (loc, l) -> { loc ; desc = Lit l }) |||
@@ -670,6 +693,7 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
         (here ++ block >>: fun (loc, b) -> { loc ; desc = Block b }) |||
         (here ++ (keyword "if" -+ if_) >>: fun (loc, desc) -> { loc ; desc }) |||
         (here ++ (keyword "case" -+ case) >>: fun (loc, desc) -> { loc ; desc }) |||
+        (here ++ (keyword "expect" -+ expect) >>: fun (loc, desc) -> { loc ; desc }) |||
         (* A stack rather than arguments: *)
         (here +- quiet (identifier >>= fun s ->
             if String.lowercase_ascii s = "encode" then return () else fail) ++
@@ -804,8 +828,8 @@ let patterns =
              (quiet (item '(') -- nl_sp -+ patterns +- nl_sp +- item ')') |? "pattern") >>:
         List.concat)
 let () =
-    set_expr (make_expr ~cond:false ~self:expr ~expr ~pattern ~block ~stmt) ;
-    set_cond_expr (make_expr ~cond:true ~self:cond_expr ~expr ~pattern ~block ~stmt)
+    set_expr (make_expr ~cond:false ~self:expr ~expr ~pattern ~patterns ~block ~stmt) ;
+    set_cond_expr (make_expr ~cond:true ~self:cond_expr ~expr ~pattern ~patterns ~block ~stmt)
 
 (** {2 Statements} *)
 
@@ -915,10 +939,11 @@ let () = set_stmt (
                     | None -> reject "%s" (not_a_message ~block:true anchor layers)
                     | body -> Stack { anchor ; layers ; body }) |||
         (nay call_of_no_function -+ expr >>: fun e -> Expr e) |||
-        (variable ++ maybe_next (
-            item '=' -- nay (item '=' ||| item '~') -- nl_sp -+ expr) >>:
-            fun (v, e) ->
-                Declare ((if List.mem v self_declared then v else check_var v), e)) |||
+        (* Names are checked once past the [=], whatever the value: *)
+        ((here ++ variable +- maybe_next (item '=' -- nay (item '=' ||| item '~')) +-
+          nl_sp >>: fun (loc, v) ->
+            if List.mem v self_declared then v else check_var loc v) ++ expr >>:
+            fun (v, e) -> Declare (v, e)) |||
         (* The packet of a stack, as it leaves: what starts like a stack
          * rather than an expression, up to the end of the statement: *)
         (let assign =
@@ -930,22 +955,23 @@ let () = set_stmt (
                 if not (is_keyword s) && Layer_name.of_string s <> None
                 then return () else fail) in
          check (quiet (variable -- sp -- assign -- nl_sp -- stack_start)) -+
-         variable ++ maybe_next assign +- nl_sp ++
+         (here ++ variable >>: fun (loc, v) -> check_var loc v) ++
+         maybe_next assign +- nl_sp ++
          anchor ++ repeat ~min:1 ~sep:(maybe_next (slash -- nl_sp)) layer +-
          stmt_end >>:
-            fun (((v, declare), anchor), layers) ->
+            fun (((var, declare), anchor), layers) ->
                 let top = (List.last layers).layer_name in
                 if ends top then
-                    Capture { var = check_var v ; declare ; anchor ; layers }
+                    Capture { var ; declare ; anchor ; layers }
                 else
                     reject "%s" (not_a_message anchor layers)) |||
         (* Quiet, not to expect indices after any name: *)
-        (variable ++ repeat_greedy ~sep:none (
+        (here ++ variable ++ repeat_greedy ~sep:none (
             quiet (item '[') -- nl_sp -+ expr +- nl_sp +- item ']') >>=
-         fun (v, is) ->
+         fun ((loc, v), is) ->
             maybe_next (
-                (assign_op +- nl_sp ++ expr >>:
-                    fun (op, e) -> Assign (check_var v, is, op, e)) |||
+                ((assign_op +- nl_sp >>: fun op -> check_var loc v, op) ++ expr >>:
+                    fun ((v, op), e) -> Assign (v, is, op, e)) |||
                 (if is = [] then fail else
                  item '=' -- nay (item '=' ||| item '~') >>:
                     fun _ -> reject "An item is not declared (:= changes it)"))) |||
@@ -973,14 +999,6 @@ let () = set_stmt (
                     | Some d -> Wait d
                     | None -> reject "%s needs a duration" k in
          wait "wait" ||| wait "sleep") |||
-        (keyword "expect" -+ params ~pattern:true "expect" [ "timeout" ] +- sp ++
-         cases ++ optional_greedy ~def:None (else_ >>: Option.some) >>:
-            fun ((p, cases), else_) ->
-                let timeout = p "timeout" in
-                if else_ <> None && timeout = None then
-                    reject "The else of expect runs once its timeout passed: \
-                            expect needs one" ;
-                Expect { timeout ; cases ; else_ }) |||
         (keyword "on" -+
          params ~pattern:true "on" [ "for" ; "linger" ; "timeout" ; "max" ] +- sp ++
          cases >>: fun (p, cases) ->
@@ -1079,7 +1097,12 @@ let parse_with ?ambiguous p text =
     | Error (NoSolution None) ->
         Error { where = { line = 1 ; column = 1 } ; message = "Syntax error" ; kind = None }
     | Error (NoSolution (Some e)) ->
-        Error { where = loc_of e.where ; message = message_of e.what ; kind = None }
+        let where, message =
+            match String.split_on_char rejection_mark.[0] (message_of e.what) with
+            | [ at ; message ] ->
+                Scanf.sscanf at "%d:%d" (fun line column -> { line ; column }), message
+            | _ -> loc_of e.where, message_of e.what in
+        Error { where ; message ; kind = None }
     | Error (Ambiguous rs) ->
         Error (match ambiguous with
               | Some f -> f (List.map (fun (r, _, _) -> r) rs)
@@ -1336,14 +1359,14 @@ let parse_patterns text =
   "line 1, column 14: Expected ':' in expression" (reads "x = {a: 1, b 2}")
   "line 2, column 1: Expected '}' in block" \
     (reads "expect Raw(\"x\") { print(\"ok\")\n")
-  "line 1, column 19: Expected pattern in statement" (reads "expect timeout=5s {\n}")
+  "line 1, column 19: Expected pattern in expression" (reads "expect timeout=5s {\n}")
   "line 1, column 13: Unknown parameter cnt for repeat (expected var, count, every, for)" \
     (reads "repeat cnt=3 {\n}")
   "line 1, column 12: Expected '{' in block" (reads "for x in {}")
   "line 1, column 14: Expected '{' in block" (reads "for t in ttls")
   "line 1, column 22: Unknown parameter count for for (expected every, for)" \
     (reads "for t in ttls count=3 {}")
-  "line 1, column 10: MATCH is a reserved name" (reads "for MATCH in [1] {}")
+  "line 1, column 5: MATCH is a reserved name" (reads "for MATCH in [1] {}")
   "line 1, column 7: A for binds a single variable; over a map, it is a record of fields key and value" \
     (reads "for k, v in m {}")
   "line 1, column 14: A for binds a single variable; over a map, it is a record of fields key and value" \
@@ -1355,7 +1378,7 @@ let parse_patterns text =
     (reads "on 1s Raw(\"x\") {\n}")
   "line 1, column 18: Expected '=' in statement" (reads "repeat count=3 x {\n}")
   "line 1, column 7: IP is not a terminal layer, therefore IP is not a complete message that could be sent: it needs a terminal layer on top (Raw)." (reads "x = IP")
-  "line 1, column 7: ip is a reserved name" (reads "ip = 3")
+  "line 1, column 1: ip is a reserved name" (reads "ip = 3")
   "line 1, column 30: expect is a keyword, it cannot name a variable" \
     (reads "expect = int(getenv(\"FIRST\"))")
   "line 1, column 10: wait is a keyword, it cannot name a variable" (reads "wait += 1")
@@ -1366,12 +1389,15 @@ let parse_patterns text =
     (reads "x = 1\nforeach i [1, 2] {}")
   "line 1, column 8: return is no keyword: a block is worth its last expression" (reads "return 1")
   "line 2, column 17: elif is no keyword: use elsif" (reads "x = 1\nif x { 1 } elif x { 2 }")
-  "line 1, column 11: print is a reserved name" (reads "print += 3")
+  "line 1, column 1: print is a reserved name" (reads "print += 3")
   "line 1, column 7: An item is not declared (:= changes it)" (reads "x[0] = 1")
   "line 1, column 14: Items without keys in a map" (reads "x = [1: 2, 3]")
-  "line 1, column 10: MATCH is a reserved name" (reads "MATCH = 1")
-  "line 1, column 19: LAST is a reserved name" (reads "repeat var=LAST {}")
-  "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
+  "line 1, column 1: MATCH is a reserved name" (reads "MATCH = 1")
+  "line 2, column 3: answer is a reserved name" \
+    (reads "x = 1\n  answer = expect timeout=1s Raw { 1 } else { 2 }")
+  "line 1, column 1: answer is a reserved name" (reads "answer = expect timeout=1s Raw { 1 }\nx = 1")
+  "line 1, column 12: LAST is a reserved name" (reads "repeat var=LAST {}")
+  "line 1, column 12: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
   "line 1, column 10: Unknown layer HTTPS, do you mean HTTP?" (reads "/IP/HTTPS {}")
   "line 1, column 8: Unknown layer UPD, do you mean UDP?" (reads "/IP/UPD {}")
   "line 1, column 11: Unknown layer Rae, do you mean Raw?" (reads "expect Rae {}")
@@ -1379,7 +1405,7 @@ let parse_patterns text =
   "line 1, column 22: Unknown layer Rae, do you mean Raw?" (reads "expect timeout=1s Rae {}")
   "line 1, column 7: Unknown layer Rae, do you mean Raw?" (reads "on Rae {}")
   "line 1, column 11: Unknown layer Rae, do you mean Raw?" (reads "expect Rae {} | Raw {}")
-  "line 1, column 8: Expected pattern in statement" (reads "expect 2s {}")
+  "line 1, column 8: Expected pattern in expression" (reads "expect 2s {}")
   "line 1, column 11: Unknown function pirnt, do you mean print?" (reads "pirnt(\"x\")")
   "line 1, column 7: Unknown function foo" (reads "foo(1)")
   "line 1, column 16: a if c else b is no expression: use c ? a : b" \
@@ -1403,19 +1429,19 @@ let parse_patterns text =
   "line 2, column 12: Unknown function foo" \
     (reads "catch {\n  if foo(1) { x := 1 } else { x := 2 }\n} else {}")
   "line 1, column 10: A layer is selected by the layers below it, not by carets: /IP is the first IP, TimeExceeded/IP the one on top of TimeExceeded" (reads "x = a[^IP]")
-  "line 1, column 6: _ is a reserved name" (reads "_ = 1")
-  "line 1, column 6: _ is a reserved name" (reads "for _ in [1] {}")
-  "line 1, column 7: IP is a reserved name" (reads "for IP in [1] {}")
-  "line 1, column 14: IP is a reserved name" (reads "x = [y for IP in [1]]")
-  "line 1, column 11: _ is a reserved name" (reads "case var=_ 1 else {}")
+  "line 1, column 1: _ is a reserved name" (reads "_ = 1")
+  "line 1, column 5: _ is a reserved name" (reads "for _ in [1] {}")
+  "line 1, column 5: IP is a reserved name" (reads "for IP in [1] {}")
+  "line 1, column 12: IP is a reserved name" (reads "x = [y for IP in [1]]")
+  "line 1, column 10: _ is a reserved name" (reads "case var=_ 1 else {}")
   "line 1, column 8: Expected constructor in expression" (reads "case x {}")
   "line 1, column 10: Expected '{' in block" (reads "case x IP")
-  "line 2, column 15: MATCH is a reserved name" (reads "x = 1\ncase var=MATCH x IP {}")
+  "line 2, column 10: MATCH is a reserved name" (reads "x = 1\ncase var=MATCH x IP {}")
   "line 2, column 18: Expected expression in statement" (reads "x = 1\ncase x else {} | IP {}")
-  "line 1, column 8: Expected pattern in statement" (reads "expect {}")
-  "line 1, column 22: Expected pattern in statement" (reads "expect Raw(\"a\") {} | {}")
-  "line 1, column 14: Expected pattern in statement" (reads "expect Raw | {}")
-  "line 1, column 15: Expected pattern in statement" (reads "expect (Raw | ) {}")
+  "line 1, column 8: Expected pattern in expression" (reads "expect {}")
+  "line 1, column 22: Expected pattern in expression" (reads "expect Raw(\"a\") {} | {}")
+  "line 1, column 14: Expected pattern in expression" (reads "expect Raw | {}")
+  "line 1, column 15: Expected pattern in expression" (reads "expect (Raw | ) {}")
   "line 1, column 13: Expected ')' in pattern" (reads "expect (Raw {}")
   "line 1, column 5: wait needs a duration" (reads "wait")
   "line 1, column 6: sleep needs a duration" (reads "sleep")

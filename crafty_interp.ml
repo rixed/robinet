@@ -45,15 +45,15 @@
    [catch] leaves its block on its first error, which goes to the first of
    its handlers that names it (or to its [else]), if any, and no further. [if]
    runs the block of the first condition that holds, if any, and [case] that
-   of its value's constructor. A block, an [if] or a [case] that is the
-   value of a declaration, an assignment or a statement runs as a block of
-   its own, which ends with that value; within another expression, the
-   typer lets it only compute, and it is evaluated at once. An error
+   of its value's constructor. A block, an [if], a [case] or an [expect]
+   that is the value of a declaration, an assignment or a statement runs as
+   a block of its own, which ends with that value; within another
+   expression, the typer lets it only compute, and it is evaluated at once. An error
    reaching the program's block ends the program.
 
    [expect] waits for the first of its patterns to match, then runs the
    block of that pattern once; after its timeout, if any, it runs its [else]
-   block, or else fails.
+   block, or else fails. Its value is that of the block it ran.
    A packet sent, by any block, is then [LAST]. [on] lets its block go on, and runs the block of the pattern of every
    match until its timeout, its [max] or a [break] out of it; a block ends
    only once its statements are done and its [on]s are over. The packet
@@ -793,6 +793,9 @@ let rec eval output (env : env) (e : T.expr) =
     | T.Case { subject ; arms ; else_ } ->
         let env, b = branch env (eval subject) arms else_ in
         eval_block output env b
+    (* Which the typer lets be only the value of a declaration, an
+     * assignment or a statement: *)
+    | T.Expect _ -> assert false
 
 (* The block of a [case] for that value, and the environment to run it in: *)
 and branch env v (arms : T.arm list) else_ =
@@ -1039,12 +1042,13 @@ let rec run_block ?(enter=fun _ env -> Some env) t parent env (stmts : T.block)
     Option.may (fun env -> loop env stmts) (enter b env) ;
     b
 
-(* Computes [e] in block [b], then [k] with its value; a block, an [if] or a
- * [case] runs as a block within [b]: *)
+(* Computes [e] in block [b], then [k] with its value; a block, an [if], a
+ * [case] or an [expect] runs as a block within [b]: *)
 and exec_value t b env (e : T.expr) k =
     let run env body =
         ignore (run_block t b env body ~fail:b.fail ~break_:b.break_ k) in
-    let eval e = guard b (fun () -> eval t.output env e) in
+    let value e = eval t.output env e in
+    let eval e = guard b (fun () -> value e) in
     match e.desc with
     | T.Block body -> run env body
     | T.If { cond ; then_ ; else_ } ->
@@ -1053,6 +1057,29 @@ and exec_value t b env (e : T.expr) k =
     | T.Case { subject ; arms ; else_ } ->
         Option.may (fun v -> let env, body = branch env v arms else_ in run env body)
             (eval subject)
+    | T.Expect { timeout ; cases ; else_ } ->
+        Option.may (fun timeout ->
+            let armed = ref true and unregister = ref ignore and missed = ref None in
+            let disarm () = armed := false ; !unregister () in
+            let fire f = if !armed && b.live then (disarm () ; f ()) in
+            unregister :=
+                register t b env
+                    (List.map (fun (c : T.case) ->
+                        c.patterns, fun packet -> fire (fun () ->
+                            run (bind_lazy env c.match_ (fun () -> match_value packet))
+                                c.body)) cases)
+                    ~failed:(fun kind where message -> fire (fun () ->
+                        b.fail Crafty_parser.{ where ; message ; kind }))
+                    ~missed:(fun l -> missed := Some l) ;
+            b.cleanups <- disarm :: b.cleanups ;
+            Option.may (fun timeout ->
+                Simulation.delay t.power timeout (fun () -> fire (fun () ->
+                    match else_ with
+                    | Some body -> run env body
+                    | None ->
+                        ignore (guard b (fun () ->
+                            nothing_matched e.loc timeout missed)))) ()) timeout)
+            (guard b (fun () -> timeout_of value "expect" timeout))
     | _ -> Option.may k (eval e)
 
 (* Runs that statement in block [b], then [k] with the environment for the
@@ -1154,33 +1181,6 @@ and exec t b env (s : T.stmt) k =
                 let d = Crafty_tree.busy_for stack in
                 if Interval.compare d Interval.zero <= 0 then k env else wait d in
             wait (Interval.psec 1))
-    | T.Expect { timeout ; cases ; else_ } ->
-        guard (fun () -> timeout_of eval "expect" timeout) |>
-        Option.may (fun timeout ->
-            let armed = ref true and unregister = ref ignore and missed = ref None in
-            let disarm () = armed := false ; !unregister () in
-            let fire f = if !armed && b.live then (disarm () ; f ()) in
-            unregister :=
-                register t b env
-                    (List.map (fun (c : T.case) ->
-                        c.patterns, fun packet -> fire (fun () ->
-                            let inner =
-                                bind_lazy env c.match_ (fun () -> match_value packet) in
-                            ignore (run_block t b inner c.body ~fail:b.fail
-                                        ~break_:b.break_ (fun _ -> k env)))) cases)
-                    ~failed:(fun kind where message -> fire (fun () ->
-                        b.fail Crafty_parser.{ where ; message ; kind }))
-                    ~missed:(fun l -> missed := Some l) ;
-            b.cleanups <- disarm :: b.cleanups ;
-            Option.may (fun timeout ->
-                Simulation.delay t.power timeout (fun () -> fire (fun () ->
-                    match else_ with
-                    | Some body ->
-                        ignore (run_block t b env body ~fail:b.fail
-                                    ~break_:b.break_ (fun _ -> k env))
-                    | None ->
-                        ignore (guard (fun () ->
-                            nothing_matched s.stmt_loc timeout missed)))) ()) timeout)
     | T.On { for_ ; linger ; timeout ; max ; cases } ->
         let duration what = Option.map (fun (e : T.expr) ->
             match eval e with
@@ -2276,6 +2276,14 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  repeat count=2 { Raw(\"ping\")\n    expect timeout=1s Raw(\"pong\") { print(\"pong\") }\n    else { print(\"lost\") } }\n  print(\"after\") }")
   "1s: Nothing matched within 1s\n1s: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  catch { expect timeout=1s Raw(\"pong\") {} } Closed {} | Timeout { print(ERROR) } }")
+  "500ms: pong\n1s500ms3ps: lost\n1s500ms3ps: done" \
+    (runs ~inject:[ 0.5, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  repeat count=2 { Raw(\"ping\")\n    r = expect timeout=1s Raw { MATCH[Raw].data } else { \"lost\" }\n    print(r) } }")
+  "500ms1ps: 2\n500ms1ps: done" \
+    (runs ~inject:[ 0.5, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  n := expect Raw(\"ping\") { 1 } | Raw { wait 0s\n    2 }\n  print(n) }")
+  "1s: failed: line 2, column 7: Nothing matched within 1s" \
+    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  x = expect timeout=1s Raw { 1 }\n  print(x) }")
   "500ms: false false\n500ms: done" \
     (runs ~inject:[ 0.5, reply "pong!" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw {\n    print(\"${MATCH[IP].dst == MATCH[Raw].data} ${MATCH[Raw].data == MATCH[IP].dst}\") } }")
@@ -3100,7 +3108,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     "line 2, column 9: PORTS gives no port" ; \
     "line 3, column 1: PORTS is already declared" ]) \
     (policed "if true { BUDGET = {max_syns: 3} }\nPORTS = {tcp: []}\nPORTS = {udp: [[1, 2]]}")
-  "line 1, column 24: BUDGET cannot be changed" (policed "BUDGET := {max_syns: 3}")
+  "line 1, column 1: BUDGET cannot be changed" (policed "BUDGET := {max_syns: 3}")
   "5.995s: done\n1000 frames" \
     (policed ~max_syns:1000 ~max_syn_rate:200. "\
       BUDGET = {max_syns: 1000, max_syns_per_secs: 200}\n\
@@ -3182,7 +3190,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
               print(PERMISSIONS.local_ips)")
   "0.000s: done\n1 frames" \
     (policed "/IP(src=OWN_IPS[0], dst=1.2.3.4)/UDP(src=1000, dst=7)/Raw(\"x\")")
-  "line 1, column 12: OWN_IPS is a reserved name" (policed "OWN_IPS = 1")
+  "line 1, column 1: OWN_IPS is a reserved name" (policed "OWN_IPS = 1")
   "0.000s: 10.0.0.1 [10.0.0.1, 2001:db8::1]\n0.000s: done\n0 frames" \
     (policed ~addresses:[ "2001:db8::1/64" ; "10.0.0.1/24" ] "print(\"${OWN_IP} ${OWN_IPS}\")")
   "0.000s: [Accept 10.0.0.1/32, Accept 10.20.4.1/32]\n0.000s: done\n0 frames" \
@@ -3190,7 +3198,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
        "PERMISSIONS = {local_ips: [Accept(OWN_IP), Accept(10.20.4.1)]}\nprint(PERMISSIONS.local_ips)")
   "0.000s: failed: line 1, column 7: OWN_IP is not set: the program has no address\n0 frames" \
     (policed ~addresses:[] "print(OWN_IP)")
-  "line 1, column 11: OWN_IP is a reserved name" (policed "OWN_IP = 1")
+  "line 1, column 1: OWN_IP is a reserved name" (policed "OWN_IP = 1")
   "line 1, column 28: A rule is Accept(CIDR) or Deny(CIDR)" \
     (policed "PERMISSIONS = {local_ips: [Ok(10.0.0.0/8)]}")
   "line 1, column 36: A rule is about a literal CIDR or IP address, OWN_IP or OWN_IPS" \

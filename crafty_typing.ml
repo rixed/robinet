@@ -96,6 +96,8 @@ and desc =
     (* The branch of the arm of the constructor of [subject]'s value, else
      * [else_], which is [None] when the arms are for every constructor: *)
     | Case of { subject : expr ; arms : arm list ; else_ : block option }
+    | Expect of { timeout : expr option ; cases : case list ;
+                  else_ : block option }
     (* A constant within a loop (see [cache_constants]), and its value once
      * it was computed: *)
     | Memo of { value : expr ; mutable cached : Crafty_value.value option }
@@ -163,8 +165,6 @@ and stmt_desc =
      * with the next iteration (or match) of the last with [continue]: *)
     | Break of { depth : int ; continue : bool }
     | Wait of expr
-    | Expect of { timeout : expr option ; cases : case list ;
-                  else_ : block option }
     (* Without [for_], it ends [linger] after the statements of its block: *)
     | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
               max : expr option ; cases : case list }
@@ -392,6 +392,10 @@ let rec diverges (b : block) =
         | Case { arms ; else_ ; _ } ->
             List.for_all (fun a -> diverges a.branch) arms &&
             Option.map_default diverges true else_
+        (* With no [else], it fails once its timeout passed: *)
+        | Expect { cases ; else_ ; _ } ->
+            List.for_all (fun (c : case) -> diverges c.body) cases &&
+            Option.map_default diverges true else_
         | _ -> false)
     | _ -> false
 
@@ -424,6 +428,19 @@ let rec coerce e typ =
         with_desc (
             match arms, else_ with
             | Some arms, Some else_ -> Some (Case { subject ; arms ; else_ })
+            | _ -> None)
+    | Expect { timeout ; cases ; else_ } ->
+        let cases =
+            all_some (List.map (fun (c : case) ->
+                Option.map (fun body -> { c with body }) (coerce_tail c.body typ))
+                cases) in
+        let else_ =
+            match else_ with
+            | None -> Some None
+            | Some b -> Option.map Option.some (coerce_tail b typ) in
+        with_desc (
+            match cases, else_ with
+            | Some cases, Some else_ -> Some (Expect { timeout ; cases ; else_ })
             | _ -> None)
     | _ -> if converts e.typ typ then Some (convert e typ) else None
 
@@ -1910,6 +1927,28 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             let arm_bs, else_bs = List.split_at (List.length arms) bs in
             mk typ (Case { subject ; arms = with_branches arm_bs ;
                            else_ = List.Exceptionless.hd else_bs })
+    | A.Expect { timeout ; cases ; else_ } ->
+        if not env.may_wait then
+            error loc "expect cannot be in a block within an expression, but for \
+                       the value of a declaration, an assignment or a statement" ;
+        if not tail then
+            error loc "expect cannot be within an expression, but be the value \
+                       of a declaration, an assignment or a statement" ;
+        let timeout = timeout_of env "expect" timeout in
+        let cases =
+            List.map (fun (ps, body) ->
+                let patterns = List.map (pattern env) ps in
+                let match_ = new_var "MATCH" packet_type in
+                patterns, match_, branch ~env:{ env with vars = match_ :: env.vars } body)
+                cases in
+        let else_ = Option.map branch else_ in
+        let typ, bs =
+            join loc "expect" (List.map (fun (_, _, b) -> b) cases @ Option.map_default (fun b -> [ b ]) [] else_) in
+        let case_bs, else_bs = List.split_at (List.length cases) bs in
+        let cases =
+            List.map2 (fun (patterns, match_, _) body -> { patterns ; match_ ; body })
+                cases case_bs in
+        mk typ (Expect { timeout ; cases ; else_ = List.Exceptionless.hd else_bs })
 
 (* An operand, named if a variable, with where its type comes from: *)
 and describe env e =
@@ -2471,7 +2510,6 @@ and stmt errors env (s : A.stmt) =
                 | A.Break { continue = false ; _ } -> Some "break"
                 | A.Break { continue = true ; _ } -> Some "continue"
                 | A.Wait _ -> Some "wait"
-                | A.Expect _ -> Some "expect"
                 | A.On _ -> Some "on" | A.Spawn _ -> Some "spawn"
                 | A.Expr _ | A.Declare _ | A.Assign _ -> None in
             Option.may (fun what ->
@@ -2702,10 +2740,6 @@ and stmt errors env (s : A.stmt) =
             env, Some (mk (Break { depth ; continue }))
         | A.Wait dur ->
             env, Some (mk (Wait (expect "The duration of wait" (expr env dur) Type.Interval)))
-        | A.Expect { timeout ; cases = cs ; else_ } ->
-            let timeout = timeout_of env "expect" timeout in
-            env, Some (mk (Expect { timeout ; cases = cases cs ;
-                                    else_ = Option.map (block errors env) else_ }))
         | A.On { for_ ; linger ; timeout ; max ; cases = cs } ->
             if for_ <> None && linger <> None then
                 error loc "An on lasts either for its own duration (for), \
@@ -2738,9 +2772,6 @@ let rec declarations (b : block) =
         | Catch { body ; handlers } ->
             declarations body @
             List.concat_map (fun h -> declarations h.handler) handlers
-        | Expect { cases ; else_ ; _ } ->
-            List.concat_map (fun (c : case) -> declarations c.body) cases @
-            Option.map_default declarations [] else_
         | On { cases ; _ } ->
             List.concat_map (fun (c : case) -> declarations c.body) cases
         | Repeat { var ; body ; _ } -> var :: declarations body
@@ -2754,6 +2785,10 @@ and expr_declarations e =
     | Case { subject ; arms ; else_ } ->
         expr_declarations subject @
         List.concat_map (fun a -> (match a.held with Some v -> [ v ] | None -> []) @ declarations a.branch) arms @
+        Option.map_default declarations [] else_
+    | Expect { timeout ; cases ; else_ } ->
+        Option.map_default expr_declarations [] timeout @
+        List.concat_map (fun (c : case) -> declarations c.body) cases @
         Option.map_default declarations [] else_
     | Field (e, _) | Unop (_, e) | Convert e | Select { packet = e ; _ }
     | Memo { value = e ; _ } ->
@@ -2792,7 +2827,6 @@ let stmt_exprs s =
     | Assign { path ; value ; _ } -> List.map snd path @ [ value ]
     | Repeat { count ; items ; every ; for_ ; _ } -> opts [ count ; items ; every ; for_ ]
     | Retry { max ; _ } -> opts [ max ]
-    | Expect { timeout ; _ } -> opts [ timeout ]
     | On { for_ ; linger ; timeout ; max ; _ } -> opts [ for_ ; linger ; timeout ; max ]
     | Spawn { for_ ; _ } -> opts [ for_ ]
     | Catch _ | Break _ -> []
@@ -2815,6 +2849,7 @@ let sub_exprs e =
     | Construct (_, e) -> Option.map_default (fun e -> [ e ]) [] e
     | If { cond ; _ } -> [ cond ]
     | Case { subject ; _ } -> [ subject ]
+    | Expect { timeout ; _ } -> Option.map_default (fun e -> [ e ]) [] timeout
     | Block _ | Lit _ | Var _ | Packet_field _ -> []
 
 (* The blocks directly within [s] and [e]: *)
@@ -2824,8 +2859,6 @@ let stmt_blocks s =
     | Spawn { body ; _ } ->
         [ body ]
     | Catch { body ; handlers } -> body :: List.map (fun h -> h.handler) handlers
-    | Expect { cases ; else_ ; _ } ->
-        List.map (fun (c : case) -> c.body) cases @ Option.map_default (fun b -> [ b ]) [] else_
     | On { cases ; _ } -> List.map (fun (c : case) -> c.body) cases
     | Send _ | Expr _ | Declare _ | Wait _ | Assign _ | Break _ -> []
 
@@ -2835,15 +2868,24 @@ let expr_blocks e =
     | If { then_ ; else_ ; _ } -> [ then_ ; else_ ]
     | Case { arms ; else_ ; _ } ->
         List.map (fun a -> a.branch) arms @ Option.map_default (fun b -> [ b ]) [] else_
+    | Expect { cases ; else_ ; _ } ->
+        List.map (fun (c : case) -> c.body) cases @ Option.map_default (fun b -> [ b ]) [] else_
     | _ -> []
 
-(* The conditions of the patterns of [s]: *)
+(* The conditions of the patterns of [s] and [e]: *)
+let case_conds =
+    List.concat_map (fun (c : case) ->
+        List.concat_map (fun p ->
+            List.filter_map (fun pl -> pl.cond) p.pat_layers) c.patterns)
+
 let stmt_conds s =
     match s.stmt with
-    | Expect { cases ; _ } | On { cases ; _ } ->
-        List.concat_map (fun (c : case) ->
-            List.concat_map (fun p ->
-                List.filter_map (fun pl -> pl.cond) p.pat_layers) c.patterns) cases
+    | On { cases ; _ } -> case_conds cases
+    | _ -> []
+
+let expr_conds e =
+    match e.desc with
+    | Expect { cases ; _ } -> case_conds cases
     | _ -> []
 
 (** Calls [f] on every statement of [b], outer ones first, including those
@@ -2941,6 +2983,9 @@ let exfiltrations (b : block) =
         | Case { arms ; else_ ; _ } ->
             List.exists (fun a -> block_taints a.branch) arms ||
             Option.map_default block_taints false else_
+        | Expect { cases ; else_ ; _ } ->
+            List.exists (fun (c : case) -> block_taints c.body) cases ||
+            Option.map_default block_taints false else_
         | _ -> List.exists (fun e -> is_packet e || taints e) (sub_exprs e)
     and block_taints b =
         match List.last b with
@@ -2956,6 +3001,8 @@ let exfiltrations (b : block) =
             List.iter (fun a -> Option.may (fun v -> flows v subject) a.held) arms
         | Comprehension { clauses ; _ } ->
             List.iter (function Bind (v, items) -> flows v items | Filter _ -> ()) clauses
+        | Expect { cases ; _ } ->
+            List.iter (fun (c : case) -> mark packets c.match_) cases
         | _ -> ()) ;
         List.iter bind_cases (sub_exprs e) in
     while !changed do
@@ -2966,7 +3013,7 @@ let exfiltrations (b : block) =
             | Declare (v, e) -> flows v e
             | Assign { var ; value ; _ } -> flows var value
             | Repeat { var ; items = Some e ; _ } -> flows var e
-            | Expect { cases ; _ } | On { cases ; _ } ->
+            | On { cases ; _ } ->
                 List.iter (fun (c : case) -> mark packets c.match_) cases
             | _ -> ()) b
     done ;
@@ -3084,7 +3131,8 @@ let rec is_constant e =
     | String _ | Field _ | Index _ | Slice _ | Call _ | Unop _ | Binop _
     | Record _ | Array _ | Map _ | Comprehension _ | Convert _ | Construct _ | Memo _ ->
         List.for_all is_constant (sub_exprs e)
-    | Var _ | Packet_field _ | Select _ | Encode _ | Block _ | If _ | Case _ ->
+    | Var _ | Packet_field _ | Select _ | Encode _ | Block _ | If _ | Case _
+    | Expect _ ->
         false
 
 (* Has each constant that is not a scalar, within a loop, computed the first
@@ -3114,6 +3162,7 @@ let cache_constants (b : block) =
             e.desc <- Memo { value = { e with desc = e.desc } ; cached = None }
         | _ ->
             List.iter (in_expr looping) (sub_exprs e) ;
+            List.iter (in_expr true) (expr_conds e) ;
             List.iter (in_block looping) (expr_blocks e) in
     in_block false b
 
@@ -3126,7 +3175,7 @@ let cache_constants (b : block) =
           let n = ref 0 in
           let rec count e =
               (match e.desc with Memo _ -> incr n | _ -> ()) ;
-              List.iter count (sub_exprs e) in
+              List.iter count (sub_exprs e @ expr_conds e) in
           iter_stmts (fun s -> List.iter count (stmt_exprs s @ stmt_conds s)) b ;
           !n
 *)
@@ -3436,7 +3485,7 @@ let check_patterns (ps : A.patterns) =
     (types "x = 1 + \"a\"")
   "line 1, column 5: Cannot apply + to a string and an ip" \
     (types "x = \"a\" + 1.2.3.4")
-  "line 1, column 8: ACK is a reserved name" \
+  "line 1, column 1: ACK is a reserved name" \
     (types "ACK = 1")
   "line 2, column 1: x is already declared in this block (:= changes it)" \
     (types "x = 1\nx = 2")
@@ -3468,7 +3517,7 @@ let check_patterns (ps : A.patterns) =
     (types "x = mean([1.2.3.4])")
   "line 1, column 21: Argument p of percentile must be a number, not a string" \
     (types "x = percentile([1], \"a\")")
-  "line 1, column 10: count is a reserved name" (types "count = 1")
+  "line 1, column 1: count is a reserved name" (types "count = 1")
   "line 1, column 5: sort changes its array and has no value; sorted(a) is a sorted copy" \
     (types "x = sort([1])")
   "line 1, column 6: sort needs a variable, or an item of one" (types "sort([1])")
@@ -3741,6 +3790,14 @@ let check_patterns (ps : A.patterns) =
     (types "x = 1 + if true { /IP(dst=1.2.3.4)/UDP(dst=53)/Raw(\"x\") ; 1 } else { 2 }")
   "line 1, column 13: wait cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \
     (types "print(\"${ { wait 1s ; 1 } }\")")
+  "x: float" (types "x = expect timeout=1s /IP { 1 } | /IP6 { 2.5 } else { 0 }")
+  "I: int, x: string" (types "repeat { x = expect /IP { \"a\" } | /IP6 { break } }")
+  "line 1, column 5: The branches of this expect are of different types: an int and a string" \
+    (types "x = expect timeout=1s /IP { 1 } else { \"a\" }")
+  "line 1, column 9: expect cannot be within an expression, but be the value of a declaration, an assignment or a statement" \
+    (types "x = 1 + expect /IP { 1 }")
+  "line 1, column 7: expect cannot be within an expression, but be the value of a declaration, an assignment or a statement" \
+    (types "print(expect /IP { \"a\" })")
   "line 1, column 1: An on lasts either for its own duration (for), keeping its block waiting, or until its block ends, which linger delays: not both" \
     (types "on for=1s linger=1s /IP {}")
   "line 1, column 6: The subject of case must be a variant, such as a layer of a packet, not an int" \
