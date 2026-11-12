@@ -67,22 +67,23 @@ endif
 %.cmx %.annot &: %.ml
 	$(OCAMLOPT) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) -c $<
 
-# Tests with qtest
+# Tests with qtest, compiled without -annot, which takes most of the time on
+# a file that large
 
 all_tests.byte: all_tests.cmo $(ARCHIVE)
 	$(OCAMLC)   -o $@ -package "$(REQUIRES) qcheck" $(ARCHIVE) -linkpkg $(OCAMLFLAGS) $<
 
 all_tests.cmo: all_tests.ml $(LIB_SOURCES_CMO)
-	$(OCAMLC) -package "$(REQUIRES) qcheck" $(OCAMLFLAGS) -w -33 -c -impl $<
+	$(OCAMLC) -package "$(REQUIRES) qcheck" $(filter-out -annot,$(OCAMLFLAGS)) -w -33 -c -impl $<
 
 all_tests.opt: all_tests.cmx $(XARCHIVE)
 	$(OCAMLOPT) -I . -o $@ -package "$(REQUIRES) qcheck" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
 
 all_tests.cmx: all_tests.ml $(LIB_SOURCES_CMX)
-	$(OCAMLOPT) -package "$(REQUIRES) qcheck" $(OCAMLOPTFLAGS) -w -33 -c -impl $<
+	$(OCAMLOPT) -package "$(REQUIRES) qcheck" $(filter-out -annot,$(OCAMLOPTFLAGS)) -w -33 -c -impl $<
 
-all_tests.ml: $(LIB_SOURCES)
-	$(QTEST) --shuffle --preamble 'open Batteries;; open Bitstring;; open Tools;; open SimTypes' -o $@ extract $^
+all_tests.ml: $(LIB_SOURCES) tests/qtest_preamble.ml
+	$(QTEST) --shuffle --preamble-file tests/qtest_preamble.ml -o $@ extract $(LIB_SOURCES)
 
 check: all_tests.opt $(EXTRA_TESTS)
 	$(RM) oUnit-anon.cache
