@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 710bfca52c737bed3713cfc1421cbbab) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 a76d4e90a7c28e71ccb183e5a1ee54dd) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -23,7 +23,9 @@ let introduction = {crafty_manual|### A first program
           }
         }
       }
-      print("${answers} answers out of 3")
+      # An "if", as a block, is worth the value of the branch it runs:
+      verdict = if answers == 3 { "all back" } else { "some lost" }
+      print("${answers} answers out of 3: ${verdict}")
     }
 
     % sudo crafty --udp 40000-40010 --fw intro.cfty
@@ -31,7 +33,7 @@ let introduction = {crafty_manual|### A first program
     ping 0
     ping 1
     ping 2
-    3 answers out of 3
+    3 answers out of 3: all back
     Done after 0.3s, status: OK.
 
 A stack is layers and their options, separated by slashes, like file paths. An

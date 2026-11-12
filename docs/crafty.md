@@ -31,7 +31,9 @@ internals are accessible.
       }
     }
   }
-  print("${answers} answers out of 3")
+  # An "if", as a block, is worth the value of the branch it runs:
+  verdict = if answers == 3 { "all back" } else { "some lost" }
+  print("${answers} answers out of 3: ${verdict}")
 }
 ```
 
@@ -41,7 +43,7 @@ internals are accessible.
 ping 0
 ping 1
 ping 2
-3 answers out of 3
+3 answers out of 3: all back
 Done after 0.3s, status: OK.
 ```
 

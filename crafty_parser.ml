@@ -755,11 +755,16 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
             | Some (`Match p) -> { loc = l.loc ; desc = Matches (l, p) } in
     let conjunction = left_assoc (op "&&" And) comparison in
     let disjunction = left_assoc (op "||" Or) conjunction in
-    (* [c ? a : b], an [if] of one expression per branch: *)
+    (* [c ? a : b], an [if] of one expression per branch; Python's
+     * [a if c else b] is refused: *)
     let ternary = fix (fun ternary ->
+        let python =
+            maybe_next (keyword "if") -- sp -- disjunction -- sp -- keyword "else" >>:
+            fun () -> reject "a if c else b is no expression: use c ? a : b" in
         disjunction ++ optional_greedy ~def:None (
-            maybe_next (item '?') -- nl_sp -+ ternary +- nl_sp +- item ':' +- nl_sp ++
-            ternary >>: Option.some) >>:
+            (maybe_next (item '?') -- nl_sp -+ ternary +- nl_sp +- item ':' +- nl_sp ++
+             ternary >>: Option.some) |||
+            python) >>:
         fun (cond, branches) ->
             match branches with
             | None -> cond
@@ -1333,6 +1338,12 @@ let parse_patterns text =
   "line 1, column 8: Expected pattern in statement" (reads "expect 2s {}")
   "line 1, column 11: Unknown function pirnt, do you mean print?" (reads "pirnt(\"x\")")
   "line 1, column 7: Unknown function foo" (reads "foo(1)")
+  "line 1, column 16: a if c else b is no expression: use c ? a : b" \
+    (reads "x = 1 if c else 2")
+  "line 1, column 21: a if c else b is no expression: use c ? a : b" \
+    (reads "x = [a if a > 0 else 0 for a in b]")
+  "line 1, column 21: a if c else b is no expression: use c ? a : b" \
+    (reads "print(\"${1 if c else 2}\")")
   "line 1, column 11: Unknown function len: use length(a)" (reads "x = len(a)")
   "line 1, column 29: Unknown function enumerate: loop with repeat var=i count=length(a) { ... a[i] ... }" \
     (reads "x = [i for i in enumerate(a)]")
