@@ -2178,6 +2178,8 @@ and binop env loc op a b =
           when op = A.Mul ->
             let a = as_bytes a and b = as_bytes b in
             mk (if b.typ = Type.Int then a.typ else b.typ) (Binop (op, a, b))
+        | Type.String, Type.Int | Type.Int, Type.String when op = A.Mul ->
+            mk Type.String (Binop (op, a, b))
         (* Numbers offset times by that many seconds: *)
         | Type.Time, Type.Time when op = A.Sub ->
             mk Type.Interval (Binop (op, a, b))

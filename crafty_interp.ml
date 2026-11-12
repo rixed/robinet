@@ -514,6 +514,12 @@ let arith ~check_words loc op a b =
         let len = Array.length a in
         check_words loc (if len = 0 || n <= max_int / len then len * n else max_int) ;
         Array (Array.init (len * n) (fun i -> a.(i mod len)))
+    | A.Mul, String s, Int n | A.Mul, Int n, String s ->
+        if n < 0 then error loc "Cannot repeat %d times" n ;
+        let len = String.length s in
+        let wsz = Sys.word_size / 8 in
+        check_words loc (if len = 0 || n <= max_int / len then len * n / wsz else max_int) ;
+        String (String.repeat s n)
     | A.Div, Interval _, Float 0. -> error loc "Division by zero"
     | A.Div, Interval a, Float b -> Interval (Interval.div a b)
     | A.Div, Interval a, Interval b -> Float (Interval.to_secs a /. Interval.to_secs b)
@@ -2067,6 +2073,10 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "x = 0\nprint(\"${#01 * 2} ${3 * #0102} ${[1, 2] * 2} ${length(#00 * x)}\")")
   "0s: failed: line 1, column 7: Cannot repeat -1 times" \
     (runs "print(#01 * -1)")
+  "0s: abcabcabc  abab\n0s: done" \
+    (runs "x = 0\nprint(\"${\"abc\" * 3} ${\"a\" * x} ${2 * \"ab\"}\")")
+  "0s: failed: line 1, column 7: Cannot repeat -1 times" \
+    (runs "print(\"a\" * -1)")
   "0s: 1.0 6 11 small\n0s: done" \
     (runs "x = if 1 > 0 { 1 } else { 2.5 }\ny = { z = 2 ; z * 3 }\nprint(\"${x} ${y} ${1 + if y > 5 { 10 } else { 20 }} ${if y > 9 { \"big\" } else { \"small\" }}\")")
   "1s: 2\n1s: 3\n1s: done" \
@@ -3143,6 +3153,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (policed "BUDGET = {max_ram: 8000}\nx = [0] * 1000000000000000000\nprint(\"b\")")
   "0.000s: stopped\n0 frames" \
     (policed "BUDGET = {max_ram: 8000}\nx = #00 * 1001\nprint(\"b\")")
+  "0.000s: stopped\n0 frames" \
+    (policed "BUDGET = {max_ram: 8000}\nx = \"abcdefgh\" * 1000000\nprint(\"b\")")
   "0.000s: stopped\n0 frames" \
     (policed "BUDGET = {max_ram: 8000}\nx = array(init=0, len=1001)\nprint(\"b\")")
   "0.000s: stopped\n0 frames" \

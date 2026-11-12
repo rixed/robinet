@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 3def3cb239f54c8fc9bdb64383be7612) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 48da3933ee0587eea600b13d4108f4f3) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -332,7 +332,8 @@ A program may declare them, once each, at its top level, with literals only:
 Operators, from the tightest binding to the loosest:
 
 1.  `!x`, `-x`.
-2.  `*`, `/`, `%`: on numbers. An array (or a byte) times an int repeats it.
+2.  `*`, `/`, `%`: on numbers. An array, a byte or a string times an int repeats
+    it.
 3.  `+`, `-`: on numbers; a time minus a time is an interval, a time plus an
     interval (or a number of seconds) is a time. `+` also concatenates arrays
     (`[1] + [2, 3]`) and appends or prepends an item (`[1, 2] + 3`,
