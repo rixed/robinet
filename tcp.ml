@@ -186,10 +186,16 @@ struct
             | Sack_permitted -> "sackOK"
             | Sack blocks ->
                 Printf.sprintf "sack %d %s" (List.length blocks)
-                    (String.concat " " (List.map (fun (l, r) ->
+                    (String.concat "" (List.map (fun (l, r) ->
                         Printf.sprintf "{%lu:%lu}" l r) blocks))
             | Timestamps (v, e) -> Printf.sprintf "TS val %lu ecr %lu" v e
-            | Other bits -> "opt " ^ hex_of_bitstring bits
+            | Other bits ->
+                (* Its kind, then its data past the length: *)
+                let s = string_of_bitstring bits in
+                Printf.sprintf "unknown-%d%s" (Char.code s.[0])
+                    (if String.length s > 2 then
+                        " 0x"^ String.lowercase_ascii (hexstring ~sep:"" (String.lchop ~n:2 s))
+                     else "")
 
         let list_to_string opts =
             String.concat "," (List.map to_string opts)
@@ -198,9 +204,9 @@ struct
           "mss 1380,nop,nop,TS val 2355191939 ecr 0,nop,wscale 7" \
             (list_to_string (unpack (bitstring_of_string \
               "\x02\x04\x05\x64\x01\x01\x08\x0a\x8c\x61\x60\x83\x00\x00\x00\x00\x01\x03\x03\x07")))
-          "sackOK,sack 2 {1:2} {3:4},eol" \
+          "sackOK,sack 2 {1:2}{3:4},eol" \
             (list_to_string [ Sack_permitted ; Sack [ 1l, 2l ; 3l, 4l ] ; Eol empty_bitstring ])
-          "nop,opt 020800" \
+          "nop,unknown-2 0x00" \
             (list_to_string (unpack (bitstring_of_string "\x01\x02\x08\x00")))
          *)
 

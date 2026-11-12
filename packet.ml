@@ -520,35 +520,39 @@ module Pdu = struct
             try Ip.Addr.to_dotted_string (Ip.Addr.of_bitstring bits)
             with _ -> "?"
 
-        (* As tcpdump has them, ECN ones last: *)
-        let tcp_flags (f : Tcp.Pdu.flags) =
-            (if f.syn then "S" else "") ^ (if f.fin then "F" else "") ^
-            (if f.rst then "R" else "") ^ (if f.psh then "P" else "") ^
-            (if f.urg then "U" else "") ^ (if f.ack then "." else "") ^
-            (if f.ece then "E" else "") ^ (if f.cwr then "W" else "")
+        let mac_of_bits bits = String.lowercase_ascii (hexstring ~sep:":" (str bits))
 
-        (** A summary in the manner of tcpdump, addresses and ports first. *)
+        (* As tcpdump has them: *)
+        let tcp_flags (f : Tcp.Pdu.flags) =
+            match (if f.fin then "F" else "") ^ (if f.syn then "S" else "") ^
+                  (if f.rst then "R" else "") ^ (if f.psh then "P" else "") ^
+                  (if f.ack then "." else "") ^ (if f.urg then "U" else "") ^
+                  (if f.ece then "E" else "") ^ (if f.cwr then "W" else "") with
+            | "" -> "none"
+            | s -> s
+
+        (** A summary in the manner of tcpdump -n. *)
         let oneline t =
             let b = Stdlib.Buffer.create 80 in
             let add fmt = Printf.bprintf b fmt in
             let rec layer_3 = function
                 | Vlan v :: rest ->
-                    add "vlan %d " v.Vlan.Pdu.id ;
+                    add "vlan %d, " v.Vlan.Pdu.id ;
                     layer_3 rest
                 | Arp a :: _ ->
                     let tha = ip_of_bits a.Arp.Pdu.target_proto
                     and sha = ip_of_bits a.sender_proto in
                     if a.operation = Arp.Op.request then
-                        add "ARP who-has %s tell %s" tha sha
+                        add "ARP, Request who-has %s tell %s" tha sha
                     else if a.operation = Arp.Op.reply then
-                        add "ARP %s is-at %s" sha
-                            (Eth.Addr.to_hexstring (Eth.Addr.o a.sender_hw))
+                        add "ARP, Reply %s is-at %s" sha (mac_of_bits a.sender_hw)
                     else
-                        add "ARP %s" (Arp.Op.to_string a.operation)
+                        add "ARP, %s" (Arp.Op.to_string a.operation)
                 | Ip ip :: rest ->
                     let fragment = ip.Ip.Pdu.more_frags || ip.frag_offset > 0 in
+                    add "IP " ;
                     if ip.frag_offset > 0 then
-                        add "%s > %s IP proto %d len %d"
+                        add "%s > %s: ip-proto-%d %d"
                             (Ip.Addr.to_dotted_string ip.src)
                             (Ip.Addr.to_dotted_string ip.dst)
                             (ip.proto :> int) (Payload.length ip.payload)
@@ -560,8 +564,9 @@ module Pdu = struct
                     if ip.options <> [] then
                         add " (options %s)" (Ip.Pdu.Opt.list_to_string ip.options)
                 | Ip6 ip :: rest ->
+                    add "IP6 " ;
                     if Ip6.Pdu.is_later_fragment ip then
-                        add "%s > %s IP proto %d len %d"
+                        add "%s > %s: ip-proto-%d %d"
                             (Ip.Addr.to_dotted_string ip.src)
                             (Ip.Addr.to_dotted_string ip.dst)
                             (ip.proto :> int) (Payload.length ip.payload)
@@ -571,43 +576,52 @@ module Pdu = struct
                         add " (%s)" (Ip6.Extension.list_to_string ip.extensions)
                 | Eth e :: _ ->
                     (* Only when what it carries could not be decoded: *)
-                    add "%s > %s proto 0x%04x len %d"
-                        (Eth.Addr.to_hexstring e.Eth.Pdu.src)
-                        (Eth.Addr.to_hexstring e.dst)
-                        (e.proto :> int) (Payload.length e.payload)
+                    add "%s > %s, ethertype 0x%04x, length %d"
+                        (mac_of_bits (e.Eth.Pdu.src :> bitstring))
+                        (mac_of_bits (e.dst :> bitstring))
+                        (e.proto :> int) (14 + Payload.length e.payload)
                 | _ ->
                     add "?"
             and layer_4 src dst proto payload rest =
                 let src = Ip.Addr.to_dotted_string src
                 and dst = Ip.Addr.to_dotted_string dst in
-                (match rest with
-                | Udp u :: _ ->
-                    add "%s:%d > %s:%d UDP len %d" src (u.Udp.Pdu.src_port :> int)
-                        dst (u.dst_port :> int) (Payload.length u.payload)
-                | Tcp t :: _ ->
-                    add "%s:%d > %s:%d TCP [%s] seq %lu ack %lu win %d"
-                        src (t.Tcp.Pdu.src_port :> int) dst (t.dst_port :> int)
-                        (tcp_flags t.flags) (t.seq_num :> int32)
-                        (t.ack_num :> int32) t.win_size ;
-                    if t.options <> [] then
-                        add " options [%s]" (Tcp.Pdu.Opt.list_to_string t.options) ;
-                    add " len %d" (Payload.length t.payload)
-                | Icmp i :: _ ->
-                    add "%s > %s ICMP %s" src dst
-                        (Icmp.MsgType.to_string i.Icmp.Pdu.msg_type) ;
-                    (match i.payload with
-                    | Icmp.Pdu.Ids (id, seq, p) ->
-                        add " id %d seq %d len %d" id seq (Payload.length p)
-                    | _ -> ())
-                | Icmp6 i :: _ ->
-                    add "%s > %s ICMP6 %s" src dst (Icmp6.Pdu.to_string i)
-                | _ ->
-                    add "%s > %s IP proto %d len %d" src dst (proto :> int)
-                        (Payload.length payload)) ;
-                (* What the transport carries, when it is known: *)
                 match rest with
-                | _ :: (Dns _ | Dhcp _ as l) :: _ -> add " %s" (name_of_layer l)
-                | _ -> () in
+                | Udp u :: rest ->
+                    let len = Payload.length u.Udp.Pdu.payload in
+                    add "%s.%d > %s.%d: " src (u.src_port :> int)
+                        dst (u.dst_port :> int) ;
+                    (match rest with
+                    | Dns d :: _ -> add "%s" (Dns.Pdu.summary len d)
+                    | Dhcp d :: _ ->
+                        add "BOOTP/DHCP, %s, length %d"
+                            (if d.Dhcp.Pdu.op = Dhcp.BootRequest then "Request" else "Reply")
+                            len
+                    | _ -> add "UDP, length %d" len)
+                | Tcp t :: _ ->
+                    let f = t.Tcp.Pdu.flags and len = Payload.length t.payload in
+                    add "%s.%d > %s.%d: Flags [%s]"
+                        src (t.src_port :> int) dst (t.dst_port :> int) (tcp_flags f) ;
+                    if len > 0 || f.syn || f.fin || f.rst then (
+                        add ", seq %lu" (t.seq_num :> int32) ;
+                        if len > 0 then
+                            add ":%lu" (Int32.add (t.seq_num :> int32) (Int32.of_int len))) ;
+                    if f.ack then add ", ack %lu" (t.ack_num :> int32) ;
+                    add ", win %d" t.win_size ;
+                    if t.options <> [] then
+                        add ", options [%s]" (Tcp.Pdu.Opt.list_to_string t.options) ;
+                    add ", length %d" len
+                | Icmp i :: _ ->
+                    add "%s > %s: ICMP %s" src dst
+                        (String.lowercase_ascii (Icmp.MsgType.to_string i.Icmp.Pdu.msg_type)) ;
+                    (match i.payload with
+                    | Icmp.Pdu.Ids (id, seq, _) -> add ", id %d, seq %d" id seq
+                    | _ -> ()) ;
+                    add ", length %d" (Payload.length payload)
+                | Icmp6 i :: _ ->
+                    add "%s > %s: ICMP6, %s" src dst (Icmp6.Pdu.to_string i)
+                | _ ->
+                    add "%s > %s: ip-proto-%d %d" src dst (proto :> int)
+                        (Payload.length payload) in
             (match without_pcap t with
             | (Eth _ :: (Vlan _ | Arp _ | Ip _ | Ip6 _) :: _ as l)
             | (Sll _ :: (Arp _ | Ip _ | Ip6 _) :: _ as l) ->
@@ -616,7 +630,7 @@ module Pdu = struct
             Stdlib.Buffer.contents b
 
         (*$= oneline & ~printer:identity
-          "10.0.0.1:1000 > 1.2.3.4:53 UDP len 2" \
+          "IP 10.0.0.1.1000 > 1.2.3.4.53: UDP, length 2" \
             (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip4 \
                 (Eth.Addr.of_string "02:00:00:00:00:01") \
                 (Eth.Addr.of_string "02:00:00:00:00:02") \
@@ -625,7 +639,7 @@ module Pdu = struct
                     (Udp.Pdu.(pack (make ~src_port:(Udp.Port.o 1000) \
                         ~dst_port:(Udp.Port.o 53) \
                         (Bitstring.bitstring_of_string "hi"))))))))))))
-          "10.0.0.1 > 1.2.3.4 IP proto 99 len 1 (options RR ptr=4 0.0.0.0, NOP)" \
+          "IP 10.0.0.1 > 1.2.3.4: ip-proto-99 1 (options RR ptr=4 0.0.0.0, NOP)" \
             (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip4 \
                 (Eth.Addr.of_string "02:00:00:00:00:01") \
                 (Eth.Addr.of_string "02:00:00:00:00:02") \
@@ -633,7 +647,7 @@ module Pdu = struct
                     (Ip.Proto.o 99) (Ip.Addr.of_string "10.0.0.1") \
                     (Ip.Addr.of_string "1.2.3.4") \
                     (Bitstring.bitstring_of_string "x")))))))))
-          "10.0.0.1:1000 > 1.2.3.4:80 TCP [S] seq 1 ack 0 win 1024 options [mss 1460,nop,wscale 7] len 0" \
+          "IP 10.0.0.1.1000 > 1.2.3.4.80: Flags [S], seq 1, win 1024, options [mss 1460,nop,wscale 7], length 0" \
             (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip4 \
                 (Eth.Addr.of_string "02:00:00:00:00:01") \
                 (Eth.Addr.of_string "02:00:00:00:00:02") \
@@ -643,7 +657,7 @@ module Pdu = struct
                         ~seq_num:(Tcp.SeqNum.o 1l) \
                         ~options:Opt.[ Mss 1460 ; Nop ; Wscale 7 ] \
                         Bitstring.empty_bitstring)))))))))))
-          "2001:db8::1:1000 > 2001:db8::2:80 UDP len 1 (HBH [PadN 4], frag id 7 off 0+)" \
+          "IP6 2001:db8::1.1000 > 2001:db8::2.80: UDP, length 1 (HBH [PadN 4], frag id 7 off 0+)" \
             (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip6 \
                 (Eth.Addr.of_string "02:00:00:00:00:01") \
                 (Eth.Addr.of_string "02:00:00:00:00:02") \
@@ -653,7 +667,7 @@ module Pdu = struct
                     (Ip.Addr.of_string "2001:db8::1") (Ip.Addr.of_string "2001:db8::2") \
                     (Udp.Pdu.(pack (make ~src_port:(Udp.Port.o 1000) \
                         (Bitstring.bitstring_of_string "x"))))))))))))
-          "fe80::1 > ff02::1:ff00:2 ICMP6 Neighbor Solicitation who has fe80::2" \
+          "IP6 fe80::1 > ff02::1:ff00:2: ICMP6, Neighbor Solicitation who has fe80::2" \
             (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip6 \
                 (Eth.Addr.of_string "02:00:00:00:00:01") \
                 (Eth.Addr.of_string "33:33:ff:00:00:02") \
@@ -661,7 +675,7 @@ module Pdu = struct
                     (Ip.Addr.of_string "fe80::1") (Ip.Addr.of_string "ff02::1:ff00:2") \
                     (Icmp6.Pdu.(pack (make_neighbor_solicit \
                         (Ip.Addr.of_string "fe80::2"))))))))))))
-          "2001:db8::1 > 2001:db8::2 IP proto 17 len 3 (frag id 7 off 8)" \
+          "IP6 2001:db8::1 > 2001:db8::2: ip-proto-17 3 (frag id 7 off 8)" \
             (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip6 \
                 (Eth.Addr.of_string "02:00:00:00:00:01") \
                 (Eth.Addr.of_string "02:00:00:00:00:02") \
@@ -669,7 +683,7 @@ module Pdu = struct
                     ~extensions:Ip6.Extension.[ Fragment { offset = 1 ; more = false ; id = 7l } ] \
                     (Ip.Addr.of_string "2001:db8::1") (Ip.Addr.of_string "2001:db8::2") \
                     (Bitstring.bitstring_of_string "abc")))))))))
-          "02:00:00:00:00:01 > FF:FF:FF:FF:FF:FF proto 0x88b5 len 3" \
+          "02:00:00:00:00:01 > ff:ff:ff:ff:ff:ff, ethertype 0x88b5, length 17" \
             (oneline (of_frame (Eth.Pdu.(pack (make (Eth.Proto.o 0x88b5) \
                 (Eth.Addr.of_string "02:00:00:00:00:01") Eth.Addr.broadcast \
                 (Bitstring.bitstring_of_string "abc"))))))

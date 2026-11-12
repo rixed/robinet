@@ -263,6 +263,45 @@ struct
         | {| _ |} ->
             Error (lazy "Not DNS")
 
+    (** In the manner of tcpdump, for a message of [len] bytes. *)
+    let summary len t =
+        if t.is_query then
+            Printf.sprintf "%d%s %s (%d)" t.id (if t.rec_desired then "+" else "")
+                (String.concat " " (List.map (fun (name, qtype, _) ->
+                    QType.to_string qtype ^"? "^ name) t.questions))
+                len
+        else
+            let answer (_, qtype, _, _, data) =
+                QType.to_string qtype ^
+                if (qtype = QType.a && Bytes.length data = 4) ||
+                   (qtype = QType.aaaa && Bytes.length data = 16) then
+                    " "^ Ip.Addr.to_dotted_string
+                        (Ip.Addr.of_bitstring (bitstring_of_string (Bytes.to_string data)))
+                else "" in
+            Printf.sprintf "%d%s%s%s %d/%d/%d%s (%d)" t.id
+                (match t.status with
+                 | 0 -> "" | 1 -> " FormErr" | 2 -> " ServFail" | 3 -> " NXDomain"
+                 | 4 -> " NotImp" | 5 -> " Refused" | n -> Printf.sprintf " Resp%d" n)
+                (if t.is_auth then "*" else "") (if t.rec_avlb then "" else "-")
+                (List.length t.answer_rrs) (List.length t.authority_rrs)
+                (List.length t.additional_rrs)
+                (match t.answer_rrs with
+                 | [] -> ""
+                 | rrs -> " "^ String.concat ", " (List.map answer rrs))
+                len
+
+    (*$= summary & ~printer:identity
+      "12345+ A? google.com. (28)" \
+        (summary 28 { (make_query "google.com") with id = 12345 })
+      "12345* 2/0/0 CNAME, A 142.250.80.46 (60)" \
+        (summary 60 { (make_answer 12345 [ "google.com", QType.a, qclass_inet ] \
+           [ "google.com.", QType.cname, qclass_inet, 60l, Bytes.of_string "\000" ; \
+             "google.com.", QType.a, qclass_inet, 60l, Bytes.of_string "\142\250\080\046" ]) \
+           with rec_avlb = true })
+      "1 NXDomain*- 0/0/0 (23)" \
+        (summary 23 { (make_answer 1 [ "x.com", QType.a, qclass_inet ] []) with status = 3 })
+     *)
+
     let pack_n16 v str o =
         Bytes.set str o (Char.chr ((v lsr 8) land 0xff)) ;
         Bytes.set str (o+1) (Char.chr (v land 0xff))
