@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 48da3933ee0587eea600b13d4108f4f3) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 7a3749a4d3f35ba0de4c7110e91dd2de) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -793,6 +793,8 @@ let examples = {crafty_manual|### Resolve, then ping
           }
           print("${received} replies out of 5")
         }
+      } | Answer {
+        assert(false, msg="DNS error ${MATCH[Answer].status}")
       }
     }
 

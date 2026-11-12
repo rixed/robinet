@@ -842,6 +842,8 @@ What a layer carries when not decoded further. Sent as given.
       }
       print("${received} replies out of 5")
     }
+  } | Answer {
+    assert(false, msg="DNS error ${MATCH[Answer].status}")
   }
 }
 ```
