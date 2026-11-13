@@ -911,12 +911,15 @@ type t =
 let capture_timeout = Interval.sec 1.
 
 (* Calls [k] with the packet that the interface emits as [e], once it is
- * captured on its way out, decoded [along] the layers it was sent through,
- * or else fails [b] at [loc] once [capture_timeout] passed without
- * [holding] it: *)
-let await t b loc e along holding k =
+ * captured on its way out, decoded along the layers of [stack] it was sent
+ * through, or else fails [b] at [loc]: as soon as a node of [stack] tells it
+ * will never send it, or once [capture_timeout] passed without one holding
+ * it: *)
+let await t b loc e stack k =
     let rec w = e, (fun frame ->
-        if b.live then (disarm () ; k (Crafty_tree.captured ~along t.tree frame)))
+        if b.live then (
+            disarm () ;
+            k (Crafty_tree.captured ~along:(Crafty_tree.along stack) t.tree frame)))
     and disarm () =
         t.awaited := List.filter ((!=) w) !(t.awaited) ;
         Crafty_tree.forget e in
@@ -924,13 +927,20 @@ let await t b loc e along holding k =
     b.cleanups <- disarm :: b.cleanups ;
     let rec timer () =
         if List.memq w !(t.awaited) && b.live then (
-            if holding () then Simulation.delay t.power capture_timeout timer ()
-            else (
+            match Crafty_tree.failure stack with
+            | Some msg ->
+                disarm () ;
+                ignore (guard b (fun () -> error_as A.Error_name.Cannot_connect loc "%s" msg))
+            | None when Crafty_tree.holding stack ->
+                Simulation.delay t.power capture_timeout timer ()
+            | None ->
                 disarm () ;
                 ignore (guard b (fun () ->
                     error_as A.Error_name.Timeout loc "The packet sent was not seen leaving within %s"
-                        (Interval.to_short_string capture_timeout))))) in
-    Simulation.delay t.power capture_timeout timer ()
+                        (Interval.to_short_string capture_timeout)))) in
+    Simulation.delay t.power capture_timeout timer () ;
+    Crafty_tree.on_ready stack (fun () ->
+        if Crafty_tree.failure stack <> None then timer ())
 
 (* Tells the first that waits for [frame], captured on its way out: *)
 let emitted t frame =
@@ -1170,9 +1180,7 @@ and exec t b env (s : T.stmt) k =
                 else bind env v x in
             match capture, emitted with
             | Some v, Some e ->
-                await t b s.stmt_loc e (Crafty_tree.along stack)
-                      (fun () -> Crafty_tree.holding stack)
-                      (fun p -> k (set env v (packet_value p)))
+                await t b s.stmt_loc e stack (fun p -> k (set env v (packet_value p)))
             | Some _, None -> assert false (* the typer said so *)
             | None, _ ->
             let rec wait d =
@@ -1184,8 +1192,13 @@ and exec t b env (s : T.stmt) k =
                 Simulation.delay t.power d ask () ;
                 Crafty_tree.on_ready stack ask
             and check () =
-                let d = Crafty_tree.busy_for stack in
-                if Interval.compare d Interval.zero <= 0 then k env else wait d in
+                match Crafty_tree.failure stack with
+                | Some msg ->
+                    ignore (guard (fun () ->
+                        error_as A.Error_name.Cannot_connect s.stmt_loc "%s" msg))
+                | None ->
+                    let d = Crafty_tree.busy_for stack in
+                    if Interval.compare d Interval.zero <= 0 then k env else wait d in
             wait (Interval.psec 1))
     | T.On { for_ ; linger ; timeout ; max ; cases } ->
         let duration what = Option.map (fun (e : T.expr) ->
@@ -2745,7 +2758,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "b 0.000s: GET /index.html [{name: Host, value: b}]\na 0.000s: HTTP/1.1 200 [{name: Content-Length, value: 17}] #68656c6c6f202f696e6465782e68746d6c\nb 0.000s: POST /two [{name: Host, value: b}, {name: Content-Length, value: 4}]\na 0.000s: HTTP/1.1 200 [{name: Content-Length, value: 10}] #68656c6c6f202f74776f\na 0.000s: done Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=5000, dst=80)#3{Raw#2}}}\nb 1.000s: done Eth#8{IP(src=10.0.0.2, dst=10.0.0.1)#7{TCP(src=80, dst=5000)#7}}" \
     (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  Raw(\"GET /index.html HTTP/1.1\\r\\nHo\")\n  Raw(\"st: b\\r\\n\\r\\n\")\n  HTTP/HttpRequest(\"/two\", method=\"POST\", headers=[{name: \"Host\", value: \"b\"}])/Raw(\"body\")\n  repeat count=2 {\n    expect timeout=1s HTTP/HttpAnswer { a = MATCH[HttpAnswer]\n      print(\"${a.version} ${a.code} ${a.headers} ${MATCH[Raw].data}\") } } }" \
          "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest {\n  r = MATCH[HttpRequest]\n  print(\"${r.method} ${r.url} ${r.headers}\")\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP/HttpAnswer(200)/Raw(\"hello ${r.url}\") }")
-  "a 0.000s: done Eth{IP(src=10.0.0.1, dst=10.0.0.2){TCP(src=5000, dst=80){Raw}}}\nb 0.000s: segment /a\nb 0.000s: segment /b\nb 0.000s: stream /a\nb 0.000s: stream /b\nb 1.000s: done Eth#6{IP(src=10.0.0.2, dst=10.0.0.1)#5{TCP(src=80, dst=5000)#5}}" \
+  "a 0.000s: done Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=5000, dst=80)#1{Raw}}}\nb 0.000s: segment /a\nb 0.000s: segment /b\nb 0.000s: stream /a\nb 0.000s: stream /b\nb 1.000s: done Eth#6{IP(src=10.0.0.2, dst=10.0.0.1)#5{TCP(src=80, dst=5000)#5}}" \
     (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80)/Raw(\"GET /a HTTP/1.1\\r\\n\\r\\nGET /b HTTP/1.1\\r\\n\\r\\n\")" \
          "on for=1s /IP/TCP(dst == 80)/HTTP/HttpRequest { print(\"stream ${MATCH[HttpRequest].url}\") }\non for=1s /IP/TCP!(dst == 80)/HTTP/HttpRequest { print(\"segment ${MATCH[HttpRequest].url}\") }")
 *)
@@ -2839,7 +2852,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
            p = Raw(\"late\")\n\
            print(\"left ${string(p[Raw].data)}\") }" \
         "wait 1500ms\non for=3s /IP/TCP(dst == 80)/Raw {}")
-  "a 1.000s: failed: line 1, column 42: The packet sent was not seen leaving within 1s Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=5000, dst=9)#1{Raw}}}" \
+  "a 0.000s: failed: line 1, column 42: Cannot connect to 10.0.0.2 port 9: connection refused Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=5000, dst=9)#1{Raw}}}" \
     (with_host ~sent:true "/IP(dst=10.0.0.2)/TCP(src=5000, dst=9) { p = Raw(\"anyone?\") }")
 *)
 (* The stats of a TCP stream, as data is echoed, then of each stream as it
@@ -2894,9 +2907,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1460] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hi\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hi\"\na 0.000s: -1 -1 65535\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Raw#1}}}\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckFin \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckFin \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7, wscale=-1) {\n  Raw(\"hi\")\n  expect timeout=1s Raw {\n    s = stats()\n    print(\"${s.rcv_wscale} ${s.snd_wscale} ${s.rcv_wnd}\") } }")
-  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4001>22 Syn opts=[mss 1460,nop,wscale 7] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 22>4001 AckRst \"\"\na 0.000s: reset\na 0.000s: done Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4001, dst=22)#1{Raw}}}" \
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4001>22 Syn opts=[mss 1460,nop,wscale 7] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 22>4001 AckRst \"\"\na 0.000s: reset\na 0.000s: Cannot connect to 10.0.0.2 port 22: connection refused\na 0.000s: done Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4001, dst=22)#1{Raw}}}" \
     (with_host ~frames:true \
-        "/IP(dst=10.0.0.2)/TCP(src=4001, dst=22) {\n  Raw(#1ee7)\n  expect timeout=1s ../TCP!(flags & RST) { print(\"reset\") } }")
+        "/IP(dst=10.0.0.2)/TCP(src=4001, dst=22) {\n  on max=1 ../TCP!(flags & RST) { print(\"reset\") }\n  catch { Raw(#1ee7) } CannotConnect { print(ERROR) } }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na 0.000s: connected!\na 0.000s: done Eth#2" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  ../TCP!(flags=SYN, seq_num=123)/Raw()\n  expect timeout=1s ../TCP!(flags == SYN | ACK) {\n    ../TCP!(flags=ACK, seq_num=124, ack_num=MATCH[TCP].seq_num + 1)/Raw()\n    print(\"connected!\") } }")
@@ -2906,6 +2919,22 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckRst \"\"\na 0.000s: 101\na 0.000s: done Eth#2" \
     (with_host ~frames:true \
         "/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=100)/Raw()\nexpect timeout=1s /IP/TCP!(src == 7, flags & RST) { print(MATCH[TCP].ack_num) }")
+*)
+(* An ICMP error about the SYN refuses the connection, but not one quoting
+ * another sequence number, nor one once the connection is established: *)
+(*$= & ~printer:identity
+  "a 0.000s: Cannot connect to 10.0.0.2 port 80: host unreachable\na 0.000s: done Eth#1{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4000, dst=80){Raw}}}\nb 0.000s: done Eth#1" \
+    (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  catch { Raw(\"hi\") } CannotConnect { print(ERROR) } }" \
+         "expect timeout=1s /IP/TCP!(dst == 80, flags & SYN) {\n  /IP(dst=MATCH[IP].src)/ICMP/DestUnreachable(code=HOST_UNREACHABLE)/IP(src=MATCH[IP].src, dst=MATCH[IP].dst)/TCP(src=MATCH[TCP].src, dst=MATCH[TCP].dst, seq_num=MATCH[TCP].seq_num, flags=SYN)/Raw() }")
+  "a 0.000s: Cannot connect to 2001:db8::2 port 80: port unreachable\na 0.000s: done Eth#2{IP6(src=2001:db8::1, dst=2001:db8::2)#1{TCP(src=4000, dst=80){Raw}}}\nb 0.000s: done Eth#2" \
+    (two ~arp:true ~v6:true "/IP6(dst=2001:db8::2)/TCP(src=4000, dst=80) {\n  catch { Raw(\"hi\") } CannotConnect { print(ERROR) } }" \
+         "expect timeout=1s /IP6/TCP!(dst == 80, flags & SYN) {\n  /IP6(dst=MATCH[IP6].src)/ICMP6/DestUnreachable(code=PORT_UNREACHABLE6)/IP6(src=MATCH[IP6].src, dst=MATCH[IP6].dst)/TCP(src=MATCH[TCP].src, dst=MATCH[TCP].dst, seq_num=MATCH[TCP].seq_num, flags=SYN)/Raw() }")
+  "b 0.000s: done Eth#1\na 15.000s: Cannot connect to 10.0.0.2 port 80: connection timed out\na 15.000s: done Eth#1{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4000, dst=80){Raw}}}" \
+    (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  catch { Raw(\"hi\") } CannotConnect { print(ERROR) } }" \
+         "expect timeout=1s /IP/TCP!(dst == 80, flags & SYN) {\n  /IP(dst=MATCH[IP].src)/ICMP/DestUnreachable(code=HOST_UNREACHABLE)/IP(src=MATCH[IP].src, dst=MATCH[IP].dst)/TCP(src=MATCH[TCP].src, dst=MATCH[TCP].dst, seq_num=MATCH[TCP].seq_num + 1, flags=SYN)/Raw() }")
+  "b 0.000s: hi\na 0.500s: established true\na 0.500s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=4000, dst=80)#2{Raw}}}\nb 0.500s: again\nb 1.000s: done Eth#6{IP(src=10.0.0.2, dst=10.0.0.1)#6{TCP(src=80, dst=4000)#6}}" \
+    (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  Raw(\"hi\")\n  wait 500ms\n  Raw(\"again\")\n  print(\"established ${stats().established}\") }" \
+         "on for=1s /IP/TCP(dst == 80)/Raw { print(MATCH[Raw].data) }\non max=1 /IP/TCP!(dst == 80)/Raw(data == \"hi\") {\n  /IP(dst=MATCH[IP].src)/ICMP/DestUnreachable(code=HOST_UNREACHABLE)/IP(src=MATCH[IP].src, dst=MATCH[IP].dst)/TCP(src=MATCH[TCP].src, dst=MATCH[TCP].dst, seq_num=MATCH[TCP].seq_num - 1, flags=SYN)/Raw() }")
 *)
 (* IPv6, with neighbor discovery: ping, a UDP echo server, in fragments too,
  * a closed port, a TCP echo server; datagrams and segments captured as they
@@ -3384,15 +3413,17 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
                  ~lookup:(fun _ _ -> Error no_route) in
   assert_bool status (String.exists status "Cannot send to 10.9.9.9") ;
   assert_equal [ "10.9.9.9", no_route ] told ;
-  (* A route gone after the SYN, which TCP then retransmits: *)
+  (* A route gone after the SYN, which TCP then retransmits until it gives
+   * up on the connection: *)
   let gone = ref false in
   let status, told, _ =
-      routed_run (ports ^ "/IP(dst=10.9.9.9)/TCP(dst=80) {\n  Raw(\"x\")\n  wait dur=5s\n}")
+      routed_run (ports ^ "/IP(dst=10.9.9.9)/TCP(dst=80) {\n  Raw(\"x\")\n}")
           ~lookup:(fun sim ->
               Simulation.delay sim.SimTypes.root.power (Clock.Interval.msec 500.)
                   (fun () -> gone := true) () ;
               fun _ -> if !gone then Error no_route else via ()) in
-  assert_equal ~printer:identity "done" status ;
+  assert_equal ~printer:identity
+      "line 3, column 3: Cannot connect to 10.9.9.9 port 80: connection timed out" status ;
   assert_equal [ "10.9.9.9", no_route ] told ;
   (* A route that flaps is told each time it goes away, or changes reason: *)
   let answers = ref [ Error "a" ; Error "a" ; via () ; Error "a" ; Error "b" ] in

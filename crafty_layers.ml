@@ -152,6 +152,12 @@ type ops =
       (* Self-driven, whether it still has some of what it was given that it
        * may yet send (TCP: not sent yet, or not acked): *)
       holding : unit -> bool ;
+      (* Why it will never send what it was given, once it knows (TCP: the
+       * connection could not be made): *)
+      failure : unit -> string option ;
+      (* Told an ICMP error about what it sent, with the quote of its own
+       * layer and what the error says (TCP gives up connecting): *)
+      icmp_error : unpacked -> string -> unit ;
       (* Whether what it passes up are messages of their own, which a
        * pattern can match each of (HTTP's, out of a TCP stream): *)
       messages : bool ;
@@ -231,7 +237,7 @@ let manual pack =
       listen = ignore ; drive = ignore ; close = (fun k -> k ()) ; reset = ignore ;
       busy_for = Tools.never_busy ;
       buffered = false ; on_ready = ignore ; holding = (fun () -> false) ;
-      messages = false ;
+      failure = (fun () -> None) ; icmp_error = (fun _ _ -> ()) ; messages = false ;
       stats = (fun () -> []) }
 
 let bytes_value bits = V.bytes_of_string (string_of_bitstring bits)
@@ -802,10 +808,14 @@ let unpack_tcp hints bits =
 *)
 
 (* A connection: robinet's TRX, what was written before it was established,
- * whether it is to be closed, and what removes the node once it is: *)
+ * what answered the handshake with a refusal (a RST, an ICMP error), why the
+ * connection could not be made, whether it is to be closed, and what removes
+ * the node once it is: *)
 type tcp_stream =
     { trx : Tcp.TRX.t ;
       mutable pending : bitstring list ;
+      mutable refusal : string option ;
+      mutable failure : string option ;
       mutable closing : bool ;
       mutable on_closed : (unit -> unit) option }
 
@@ -813,7 +823,8 @@ type tcp_state = Idle | Listening | Stream of tcp_stream
 
 (* A node without a connection is idle, or listening if a self-driven
  * pattern made it, until a SYN comes; the first packet sent self-driven
- * connects it, and waits for the connection, as what follows does. A
+ * connects it, and waits for the connection, as what follows does; what is
+ * sent to a connection that could not be made fails as [Cannot_connect]. A
  * manual segment takes the sequence and ack numbers of the connection if not
  * given, and the connection then accounts for it. The connection's data is
  * seen in self-driven mode, as it comes in order, and each segment in manual
@@ -847,6 +858,7 @@ let tcp_node ctx =
      * what fills the send buffer does: *)
     let busy_for () =
         match !state with
+        | Stream s when not (Tcp.TRX.is_established s.trx || s.trx.closed) -> s.trx.rto
         | Stream s when List.fold_left (fun n b -> n + Tools.bytelength b) 0 s.pending
                         >= s.trx.snd_buf ->
             s.trx.rto
@@ -868,6 +880,13 @@ let tcp_node ctx =
             wake ()
         | None ->
             Tcp.TRX.abort s.trx ;
+            s.failure <-
+                Some (Printf.sprintf "Cannot connect to %s port %d: %s"
+                        (match ctx.below_key "dst" with
+                         | Some (V.Ip a) -> Ip.Addr.to_dotted_string a
+                         | _ -> "?")
+                        (port "dst" :> int)
+                        (s.refusal |? "connection timed out")) ;
             s.pending <- [] ;
             removed s ;
             wake () in
@@ -884,7 +903,8 @@ let tcp_node ctx =
         Tools.(t.tcp_trx.trx.ins --> sink (fun bits ->
             if bitstring_length bits > 0 then received := bits :: !received
             else ended := true)) ;
-        let s = { trx = t ; pending = [] ; closing = false ; on_closed = None } in
+        let s = { trx = t ; pending = [] ; refusal = None ; failure = None ;
+                  closing = false ; on_closed = None } in
         t.cnx_established_cont <- Some (established s) ;
         state := Stream s ;
         s in
@@ -948,6 +968,9 @@ let tcp_node ctx =
       send = (fun fields _ payload ->
         let s = stream fields in
         if bitstring_length payload > 0 then
+            match s.failure with
+            | Some msg -> V.fail_as Error_name.Cannot_connect "%s" msg
+            | None ->
             if s.trx.closed then V.fail_as Error_name.Closed "This TCP connection is closed"
             else if Tcp.TRX.is_established s.trx then Tcp.TRX.tx s.trx payload
             else s.pending <- payload :: s.pending) ;
@@ -960,6 +983,10 @@ let tcp_node ctx =
         | _ -> ()) ;
         match !state with
         | Stream s ->
+            (match List.assoc "flags" u.values with
+            | V.Int f when f land 4 <> 0 && not (Tcp.TRX.is_established s.trx) ->
+                s.refusal <- Some "connection refused"
+            | _ -> ()) ;
             received := [] ;
             ended := false ;
             Tools.rx s.trx.tcp_trx.trx u.bits ;
@@ -1008,6 +1035,18 @@ let tcp_node ctx =
         | Stream s ->
             s.pending <> [] || s.trx.to_send <> [] ||
             not (Tcp.TRX.Streambuf.is_empty s.trx.unacked_tx)) ;
+      failure = (fun () -> match !state with Stream s -> s.failure | _ -> None) ;
+      (* An error about our SYN, before anything came back, refuses the
+       * connection, as on Linux: *)
+      icmp_error = (fun quote why ->
+        match !state, List.assoc_opt "seq_num" quote.values with
+        | Stream s, Some (V.Int seq)
+          when s.trx.sent_pld > 0 && s.trx.rcvd_pld = 0 && not s.trx.closed &&
+               seq = int_of_seq_num s.trx.isn ->
+            s.refusal <- Some why ;
+            Tcp.TRX.abort s.trx ;
+            Tcp.TRX.establish_cnx s.trx false
+        | _ -> ()) ;
       stats = (fun () ->
         match !state with
         | Idle | Listening -> []

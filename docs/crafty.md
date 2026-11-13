@@ -58,12 +58,14 @@ The layers of a stack are streams: `UDP` picks its source port once (from
 `--udp`), and every message sent and every pattern on top of it belong to that
 stream.
 
+### Errors
+
 An error leaves the enclosing blocks one after the other, until a `catch`
 handles it or a `retry` runs its block again; uncaught errors end the program.
 Only these errors can be caught: `Timeout` (of `expect` or `on`), `Closed` (a
-TCP connection), `NoRoute`, `Unset` (`getenv`, `arg`), `Invalid` (converting a
-string or bytes), `Unresolved` (`resolve`, `hostname`) and `Assertion`
-(`assert`).
+TCP connection), `CannotConnect` (writing to a TCP connection refused or timed
+out), `NoRoute`, `Unset` (`getenv`, `arg`), `Invalid` (converting a string or
+bytes), `Unresolved` (`resolve`, `hostname`) and `Assertion` (`assert`).
 
 ```
 n = 1

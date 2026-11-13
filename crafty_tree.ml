@@ -486,6 +486,12 @@ let busy_for stack =
 let on_ready stack k =
     List.iter (fun e -> e.node.ops.on_ready k) (senders stack)
 
+(** Why a node of that stack will never send what it was sent, once one
+ * knows: *)
+let failure stack =
+    List.fold_left (fun f e -> if f <> None then f else e.node.ops.failure ())
+        None (senders stack)
+
 (** Whether a node of that stack still holds some of what it was sent, that
  * it may yet send: *)
 let holding stack =
@@ -588,6 +594,51 @@ let quoted_key (l : L.layer) (u : L.unpacked) =
     (* Such as IP, ICMP, TimeExceeded, then the quoted IP: *)
     up 3 l u
 
+(* The layers on top of [u], of layer [l], as far as [depth] of them decode,
+ * the bottom first: *)
+let rec layers_on_top depth (l : L.layer) (u : L.unpacked) =
+    if depth = 0 then [] else
+    match List.find_map_opt (fun (ul : L.layer) ->
+              Option.map (fun uu -> ul, uu) (ul.unpack u.up_hints u.payload))
+              (L.on_top l u.upper) with
+    | Some (ul, uu) -> (ul, uu) :: layers_on_top (depth - 1) ul uu
+    | None -> []
+
+(* What an ICMP error says, as the constant of its code ("port unreachable"),
+ * but for those about the MTU, which do not refuse anything: *)
+let icmp_error_reason (icmp : L.layer) (err : L.layer) (u : L.unpacked) =
+    match List.assoc_opt "code" u.values with
+    | Some (Int code) when
+            err.name <> L.N.PacketTooBig &&
+            not (icmp.name = L.N.ICMP && err.name = L.N.DestUnreachable &&
+                 code = Icmp.Unreachable.fragmentation_needed) ->
+        Some (match List.find_opt (fun (_, c) -> c = A.Int code) err.constants with
+              | Some (name, _) ->
+                  String.lowercase_ascii (String.rchop ~n:(if String.ends_with name "6" then 1 else 0) name) |>
+                  String.map (fun c -> if c = '_' then ' ' else c)
+              | None -> Printf.sprintf "%s code %d" (L.N.to_string err.name) code)
+    | _ -> None
+
+(* Of an ICMP error carried by [u], about the stream of [n], tells the node
+ * on top of [n] that sent the segment it quotes. Only TCP acts on it; a UDP
+ * stream the program opened, as a connected socket, could fail its next
+ * write likewise. *)
+let tell_icmp_error n (u : L.unpacked) =
+    match layers_on_top 4 n.layer u with
+    | [ icmp, _ ; err, eu ; _ ; ql, qu ] when ql.L.quoted ->
+        (match icmp_error_reason icmp err eu, L.find ~below:n.layer ql.name,
+               Hashtbl.find_option n.children ql.name with
+        | Some why, Some l, Some s ->
+            List.fold_right (fun i key ->
+                Option.bind key (fun key ->
+                    Option.map (fun v -> (i, v) :: key)
+                        (List.assoc_opt l.fields.(i).name qu.values))
+            ) (L.key_fields l) (Some []) |>
+            Option.may (fun key ->
+                Option.may (fun c -> c.ops.icmp_error qu why) (Siblings.find_option s key))
+        | _ -> ())
+    | _ -> ()
+
 (** Whether a received layer, of that of [n], is of the stream of [n], or an
  * ICMP error about it: of the root, any is. *)
 let of_stream n (u : L.unpacked) =
@@ -670,10 +721,16 @@ and up_to w node seen packet pending (ul : L.layer) =
     | None -> ()
     | Some uu ->
         let key = incoming_key ul uu in
-        (* An ICMP error goes to the stream it is about, whoever sends it: *)
+        (* An ICMP error goes to the stream it is about, whoever sends it,
+         * and that stream tells the node that sent what it quotes: *)
         let find s =
+            let about = lazy (Option.bind (quoted_key ul uu) (Siblings.find_option s)) in
+            (match uu.upper with
+            | L.Only (L.N.ICMP | L.N.ICMP6) ->
+                Option.may (fun c -> tell_icmp_error c uu) (Lazy.force about)
+            | _ -> ()) ;
             match Siblings.find_option s key with
-            | None -> Option.bind (quoted_key ul uu) (Siblings.find_option s)
+            | None -> Lazy.force about
             | c -> c in
         match Option.bind streams find with
         | Some c -> enter w c seen packet uu pending

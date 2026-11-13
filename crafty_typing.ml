@@ -3605,9 +3605,9 @@ let check_patterns (ps : A.patterns) =
   "line 1, column 23: Timeout is caught twice" \
     (types "catch {} Timeout {} | Closed|Timeout {}")
   "e: string" (types "catch {} else { e = ERROR }")
-  "line 1, column 1: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, NoRoute, Unset, Invalid, Unresolved, Assertion)" \
+  "line 1, column 1: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, CannotConnect, NoRoute, Unset, Invalid, Unresolved, Assertion)" \
     (types "retry Timout {}")
-  "line 1, column 10: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, NoRoute, Unset, Invalid, Unresolved, Assertion)" \
+  "line 1, column 10: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, CannotConnect, NoRoute, Unset, Invalid, Unresolved, Assertion)" \
     (types "catch {} Closed | Timout {}")
   "line 1, column 1: retry needs the errors it retries on, as in retry Timeout|Closed max=3 { ... }" \
     (types "retry {}")
