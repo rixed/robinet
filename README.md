@@ -60,3 +60,7 @@ and the examples such as [this one](https://github.com/rixed/robinet/blob/master
 
 - robinet: [amd64](https://raw.githubusercontent.com/rixed/robinet/artifacts/linux_amd64/robinet), [arm64](https://raw.githubusercontent.com/rixed/robinet/artifacts/linux_arm64/robinet)
 - crafty: [amd64](https://raw.githubusercontent.com/rixed/robinet/artifacts/linux_amd64/crafty), [arm64](https://raw.githubusercontent.com/rixed/robinet/artifacts/linux_arm64/crafty)
+
+7. What can be done with this?
+
+- [Cloudy-With-A-Chance-Of-Latency](https://CloudyWithAChanceOfLatency.net) - A monitoring toolbox for autonomous agents (and humans too)
