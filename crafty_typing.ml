@@ -895,13 +895,15 @@ let combine ~program:a ~cli:b =
 *)
 
 (** The permissions a program runs with, all set: the [cli]'s rules before the
- * [program]'s, or before the defaults where it sets none: accepting its own
- * addresses, and any remote one; the [cli]'s flags over the [program]'s, false
- * by default. *)
+ * [program]'s, or before the defaults where it sets none: accepting any remote
+ * address; local rules always end accepting its own addresses; the [cli]'s
+ * flags over the [program]'s, false by default. *)
 let resolve_permissions ~program ~cli =
     let rules cli prog default = Some ((cli |? []) @ (prog |? default))
     and flag cli prog = Some (cli |? (prog |? false)) in
-    { local_ips = rules cli.local_ips program.local_ips [ Firewall.Accept, Own_ips ] ;
+    let own = Firewall.Accept, Own_ips in
+    { local_ips = Option.map (fun rs -> if List.mem own rs then rs else rs @ [ own ])
+                             (rules cli.local_ips program.local_ips []) ;
       remote_ips = rules cli.remote_ips program.remote_ips
                          (List.map (fun (v, c) -> v, Addresses c)
                                    Firewall.accept_all_addresses) ;
@@ -2939,12 +2941,17 @@ and iter_expr_stmts f e =
  * [mac], those are not checked. *)
 let denied_literals ~local ~remote ~mac (b : block) =
     let errors = ref [] in
-    let deny (e : expr) what addr =
-        errors := (e.loc, Printf.sprintf "%s %s is not permitted" what addr) :: !errors in
-    let ip e what rules ip =
+    let deny ?(hint="") (e : expr) what addr =
+        errors := (e.loc, Printf.sprintf "%s %s is not permitted%s" what addr hint) :: !errors in
+    let ip e what ~is_local ip =
         Option.may (fun rules ->
             if Firewall.(verdict (of_address_rules rules) ip) = Firewall.Deny then
-                deny e what (Ip.Addr.to_dotted_string ip)) rules in
+                let a = Ip.Addr.to_dotted_string ip in
+                let hint =
+                    if is_local then
+                        Printf.sprintf "; add Accept(%s) to PERMISSIONS.local_ips to spoof it" a
+                    else "" in
+                deny ~hint e what a) (if is_local then local else remote) in
     let layer l =
         let quoted = l.layer.L.quoted in
         let q = if quoted then "Quoted source" else "Source"
@@ -2952,9 +2959,9 @@ let denied_literals ~local ~remote ~mac (b : block) =
         List.iter (fun (i, e) ->
             match l.layer.L.name, l.layer.L.fields.(i).L.name, e.desc with
             | (A.Layer_name.IP | IP6), "src", Lit (A.Ip a) ->
-                ip e (q ^" address") (if quoted then remote else local) a
+                ip e (q ^" address") ~is_local:(not quoted) a
             | (A.Layer_name.IP | IP6), "dst", Lit (A.Ip a) ->
-                ip e (r ^" address") (if quoted then local else remote) a
+                ip e (r ^" address") ~is_local:quoted a
             | A.Layer_name.Eth, "src", Lit (A.Mac m) ->
                 Option.may (fun mac ->
                     if not (Eth.Addr.eq m mac) then
@@ -3136,9 +3143,9 @@ let exfiltrations (b : block) =
   "" (denied "/IP(dst=192.0.2.1)/UDP(dst=7)/Raw()")
   "line 1, column 9: Destination address 192.0.2.66 is not permitted" \
     (denied "/IP(dst=192.0.2.66)/UDP(dst=7)/Raw()")
-  "line 1, column 41: Source address 172.16.0.1 is not permitted" \
+  "line 1, column 41: Source address 172.16.0.1 is not permitted; add Accept(172.16.0.1) to PERMISSIONS.local_ips to spoof it" \
     (denied "/IP(dst=192.0.2.1) { if true { /IP!(src=172.16.0.1, dst=192.0.2.1)/UDP(dst=7)/Raw() } }")
-  "line 1, column 78: Quoted destination address 172.16.0.2 is not permitted" \
+  "line 1, column 78: Quoted destination address 172.16.0.2 is not permitted; add Accept(172.16.0.2) to PERMISSIONS.local_ips to spoof it" \
     (denied "/IP!(src=10.0.0.1, dst=192.0.2.1)/ICMP/DestUnreachable/IP(src=192.0.2.1, dst=172.16.0.2)/UDP(src=1, dst=2)/Raw()")
   "line 1, column 11: Source MAC 02:00:00:00:00:99 is not permitted" \
     (denied "/Eth!(src=02:00:00:00:00:99, dst=ff:ff:ff:ff:ff:ff)/Raw()")

@@ -340,7 +340,7 @@ A program may declare them, once each, at its top level, with literals only:
 ```
 BUDGET = {max_duration: 30s, max_syns: 30}
 PORTS = {tcp: [[40000, 40100]], udp: [[5000, 5000]]}
-PERMISSIONS = {local_ips: [Accept(OWN_IP), Accept(10.20.4.1)],  # spoofs 10.20.4.1
+PERMISSIONS = {local_ips: [Accept(10.20.4.1)],  # spoofs 10.20.4.1
                remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
 ```
 
@@ -350,8 +350,8 @@ PERMISSIONS = {local_ips: [Accept(OWN_IP), Accept(10.20.4.1)],  # spoofs 10.20.4
 - crafty runs with what both the program and the command line allow.
 - `PERMISSIONS`:
   - `local_ips`, `remote_ips`: rules `Accept(x)` or `Deny(x)`, `x` being a
-    CIDR or `OWN_IP(S)`; the first that matches an address decides, and none matching denies. Unset, `local_ips` is
-    `[Accept(OWN_IPS)]` and `remote_ips` accepts any. Sending from an address
+    CIDR or `OWN_IP(S)`; the first that matches an address decides, and none matching denies. `local_ips` always ends
+    with `Accept(OWN_IPS)`; unset, `remote_ips` accepts any. Sending from an address
     takes `local_ips` accepting it.
   - `mac_spoofing`: allows sending from another MAC than the interface's.
   - `exfiltration`: allows sending a payload made of the payload of a received

@@ -778,15 +778,18 @@ let () =
         (* Whether or not the program was over by the time it was denied: *)
         | _ when !denied <> None ->
             let cause, bits = Option.get !denied in
-            let what =
+            let what, hint =
                 match cause with
-                | Firewall.Inside ip -> "local address "^ Ip.Addr.to_dotted_string ip
-                | Outside ip -> "remote address "^ Ip.Addr.to_dotted_string ip
-                | Mac m -> "source MAC "^ Eth.Addr.to_hexstring m
-                | Tcp_flags f -> "TCP flags "^ Tcp.Pdu.string_of_flags f
-                | Uninspectable -> "uninspectable frame" in
-            Printf.sprintf "stopped: %s not permitted, in %s" what
-                (Packet.Pdu.Printer.oneline (Packet.of_frame bits)), 4
+                | Firewall.Inside ip ->
+                    let a = Ip.Addr.to_dotted_string ip in
+                    "local address "^ a,
+                    Printf.sprintf "; add Accept(%s) to PERMISSIONS.local_ips to spoof it" a
+                | Outside ip -> "remote address "^ Ip.Addr.to_dotted_string ip, ""
+                | Mac m -> "source MAC "^ Eth.Addr.to_hexstring m, ""
+                | Tcp_flags f -> "TCP flags "^ Tcp.Pdu.string_of_flags f, ""
+                | Uninspectable -> "uninspectable frame", "" in
+            Printf.sprintf "stopped: %s not permitted, in %s%s" what
+                (Packet.Pdu.Printer.oneline (Packet.of_frame bits)) hint, 4
         | Crafty_interp.Done, _ -> "OK", 0
         | Failed e, _ -> "failed: "^ IO.to_string Crafty_interp.print_error e, 1
         | Stopped, Some l -> "stopped: "^ Policer.string_of_limit l, 3

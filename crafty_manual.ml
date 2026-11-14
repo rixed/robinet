@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 b30852c8ee6159f388d575747c8a6db9) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 67815e2366d92d983291278226f7de3a) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -310,7 +310,7 @@ A program may declare them, once each, at its top level, with literals only:
 
     BUDGET = {max_duration: 30s, max_syns: 30}
     PORTS = {tcp: [[40000, 40100]], udp: [[5000, 5000]]}
-    PERMISSIONS = {local_ips: [Accept(OWN_IP), Accept(10.20.4.1)],  # spoofs 10.20.4.1
+    PERMISSIONS = {local_ips: [Accept(10.20.4.1)],  # spoofs 10.20.4.1
                    remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
 
 -   `BUDGET`'s fields are the budget options of crafty, named alike.
@@ -320,7 +320,7 @@ A program may declare them, once each, at its top level, with literals only:
 -   `PERMISSIONS`:
     -   `local_ips`, `remote_ips`: rules `Accept(x)` or `Deny(x)`, `x` being a
         CIDR or `OWN_IP(S)`; the first that matches an address decides, and none
-        matching denies. Unset, `local_ips` is `[Accept(OWN_IPS)]` and
+        matching denies. `local_ips` always ends with `Accept(OWN_IPS)`; unset,
         `remote_ips` accepts any. Sending from an address takes `local_ips`
         accepting it.
     -   `mac_spoofing`: allows sending from another MAC than the interface's.
