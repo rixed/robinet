@@ -308,12 +308,21 @@ exception Already_told
 
 let error loc fmt = Printf.ksprintf (fun s -> raise (Error (loc, s))) fmt
 
+let layer_type = match packet_type with Type.Array t -> t | _ -> assert false
+
+(* The kinds of layer of a packet that a value of type [t] can be, if one: *)
+let layer_kinds (t : Type.t) =
+    match t, layer_type with
+    | Variant cs, Variant ls when cs <> [] && List.for_all (fun c -> List.mem c ls) cs ->
+        Some (List.map fst cs)
+    | _ -> None
+
 (* Packets and their layers are named, rather than spelled out: *)
 let tname =
-    let layer = match packet_type with Type.Array t -> t | _ -> assert false in
     Type.to_string ~name:(fun t ->
         if t = packet_type then Some "packet" else
-        if t = layer then Some "layer" else None)
+        if t = layer_type then Some "layer" else
+        Option.map (fun cs -> "layer ("^ String.concat " | " cs ^")") (layer_kinds t))
 
 (* The name of a type with its article: *)
 let a_type t =
@@ -566,6 +575,9 @@ type env =
       widening : bool ref ;
       (* The constructor of what the variables of a case hold, by id: *)
       held_by : (int, string) Hashtbl.t ;
+      (* The layers, from the bottom, that each pattern of a [MATCH] fixed,
+       * by id: *)
+      matched : (int, L.layer list list) Hashtbl.t ;
       (* The type of what each report reports, and where first: *)
       reports : (string, Type.t * A.location) Hashtbl.t ;
       (* Whether an empty array literal is of {!unknown_items} when nothing
@@ -1591,6 +1603,52 @@ let rec const_int e =
         | _ -> None)
     | _ -> None
 
+(** {2 What matched} *)
+
+(* The layers decoded on top of [l]: any but a terminal one can have its
+ * payload left in a [Raw]: *)
+let decoded_over (l : L.layer) =
+    let ls = List.filter (fun (u : L.layer) -> u.received_as = None) (L.uppers l) in
+    if l.terminal || List.memq L.raw ls then ls else ls @ [ L.raw ]
+
+(* The names of the layers, from the bottom, of each packet that a pattern
+ * fixing those [known] layers can match, decoded up to any of the layers on
+ * top: *)
+let match_stacks known =
+    let rec up rev =
+        rev :: List.concat_map (fun u -> up (u :: rev)) (decoded_over (List.hd rev)) in
+    if known = [] then [] else
+    List.map (List.rev_map (fun (l : L.layer) -> lname l.name)) (up (List.rev known))
+
+(* The layers, from the bottom, that pattern [p] fixes: *)
+let pattern_known env (p : pattern) =
+    List.take p.depth (List.rev_map fst env.stack) @
+    List.map (fun pl -> pl.pl_layer) p.pat_layers
+
+(* Each stack of names that the [MATCH] [a] can be, with what it matched as
+ * in messages, if [a] is one: *)
+let match_of env a =
+    match a.desc with
+    | Var v ->
+        Option.map (fun knowns ->
+            List.concat_map match_stacks knowns,
+            String.concat " or " (List.map (fun known ->
+                string_of_layers (List.rev_map (fun l -> l, L.Driven) known)) knowns))
+            (Hashtbl.find_opt env.matched v.id)
+    | _ -> None
+
+(* The [MATCH] of a block, for a packet that matched one of [patterns]: *)
+let match_var env patterns =
+    let v = new_var "MATCH" packet_type in
+    Hashtbl.replace env.matched v.id (List.map (pattern_known env) patterns) ;
+    v
+
+(* The variant [t] with only the constructors [cs]: *)
+let narrow (t : Type.t) cs =
+    match t with
+    | Variant ds -> Type.Variant (List.filter (fun (c, _) -> List.mem c cs) ds)
+    | t -> t
+
 (* With [tail], [e] is the value of a declaration, an assignment or a
  * statement, which can wait if its block can. Without [used], the value of
  * a block, [if] or [case] is that of a statement: void. *)
@@ -1629,12 +1687,17 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         layer_field env loc path absolute f
     | A.Field (r, f) ->
         let r = expr env r in
-        (match r.typ with
+        (* A layer that can only be of one kind reads as its record: *)
+        let rt =
+            match layer_kinds r.typ, r.typ with
+            | Some [ _ ], Type.Variant [ _, t ] -> t
+            | _ -> r.typ in
+        (match rt with
         | Type.Record fs ->
             let has f = List.exists (fun (n, _) -> same_name n f) fs in
             let f =
                 if has f then f else
-                List.filter (fun l -> packet_record l = r.typ) L.all |>
+                List.filter (fun l -> packet_record l = rt) L.all |>
                 List.map (fun l -> L.unalias l f) |> List.find_opt has |? f in
             (match List.findi (fun _ (n, _) -> same_name n f) fs with
             | _, ("ts", _) when is_last_eth r ->
@@ -1654,24 +1717,24 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                         | _ -> "" in
                     let hint = field_hint layer f in
                     error loc "No field %s in %s (only %s)%s" f (L.to_string layer)
-                        (tname r.typ) (if hint = "" then quoted else hint)
+                        (tname rt) (if hint = "" then quoted else hint)
                 | _ ->
                     (* A layer of a packet, of a kind that [case] told: *)
                     let ctor =
                         match r.desc with
                         | Var v -> Hashtbl.find_opt env.held_by v.id
-                        | _ -> None in
+                        | _ -> Option.bind (layer_kinds r.typ) List.Exceptionless.hd in
                     let ls =
                         List.filter (fun (l : L.layer) ->
-                            packet_record l = r.typ &&
+                            packet_record l = rt &&
                             Option.map_default ((=) (lname l.name)) true ctor) L.all in
                     let hint =
                         match List.unique (List.map (fun l -> field_hint l f) ls) with
                         | [ h ] -> h
                         | _ -> A.did_you_mean (List.map fst fs) f in
-                    (match List.unique (List.map L.to_string ls) with
-                    | [ n ] -> error loc "No field %s in %s (only %s)%s" f n (tname r.typ) hint
-                    | _ -> error loc "No field %s in %s%s" f (tname r.typ) hint)))
+                    (match List.unique (List.map (fun (l : L.layer) -> lname l.name) ls) with
+                    | [ n ] -> error loc "No field %s in %s (only %s)%s" f n (tname rt) hint
+                    | _ -> error loc "No field %s in %s%s" f (tname rt) hint)))
         | Type.Variant cs as t ->
             no_constructor env r ;
             let have =
@@ -1694,13 +1757,42 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 Option.map (fun n -> List.find (fun (l : L.layer) -> l.name = n) L.all)
                            (List.last path) in
             let t = Option.map_default (fun n -> List.assoc (lname n) cs) t (List.last path) in
-            mk t (Select { packet = a ; layer ; path = List.map (Option.map lname) path ;
-                           absolute })
+            let path = List.map (Option.map lname) path in
+            let t =
+                match match_of env a with
+                | None -> t
+                | Some (stacks, text) ->
+                    let kinds =
+                        List.filter_map (fun s ->
+                            match path_positions s ~absolute path with
+                            | i :: _ -> Some (List.nth s i)
+                            | [] -> None) stacks |> List.unique in
+                    if kinds = [] then
+                        error loc "No %s in MATCH, which matched %s"
+                            (string_of_path ~absolute path) text ;
+                    narrow t kinds in
+            mk t (Select { packet = a ; layer ; path ; absolute })
         | t -> no_constructor env a ; error loc "Cannot select a layer of %s" (a_type t))
     | A.Index (a, i) ->
         let a = expr env a in
         (match a.typ with
-        | Type.Array t -> mk t (Index (a, expect "An index" (expr env i) Type.Int))
+        | Type.Array t ->
+            let i = expect "An index" (expr env i) Type.Int in
+            let t =
+                match match_of env a, const_int i with
+                | Some (stacks, text), Some n ->
+                    let kinds =
+                        List.filter_map (fun s ->
+                            let k = if n < 0 then List.length s + n else n in
+                            if k < 0 then None else List.at_opt s k) stacks |>
+                        List.unique in
+                    if kinds = [] then
+                        error loc "No layer %d in MATCH, which matched %s: it has \
+                                   %d at most" n text
+                            (List.fold_left (fun m s -> max m (List.length s)) 0 stacks) ;
+                    narrow t kinds
+                | _ -> t in
+            mk t (Index (a, i))
         | Type.Map (k, v) -> mk v (Index (a, expect "A key" (expr ~expected:k env i) k))
         | t -> no_constructor env a ; error loc "Cannot index %s" (a_type t))
     | A.Slice (a, from, to_) ->
@@ -1960,7 +2052,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         let cases =
             List.map (fun (ps, body) ->
                 let patterns = List.map (pattern env) ps in
-                let match_ = new_var "MATCH" packet_type in
+                let match_ = match_var env patterns in
                 patterns, match_, branch ~env:{ env with vars = match_ :: env.vars } body)
                 cases in
         let else_ = Option.map branch else_ in
@@ -2550,7 +2642,7 @@ and stmt errors env (s : A.stmt) =
     let cases ?(loops=[]) cs =
         List.map (fun (ps, body) ->
             let patterns = List.map (pattern env) ps in
-            let match_ = new_var "MATCH" packet_type in
+            let match_ = match_var env patterns in
             let body =
                 block errors { env with vars = match_ :: env.vars ;
                                         loops = loops @ env.loops } body in
@@ -3095,8 +3187,8 @@ let exfiltrations (b : block) =
   "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nx = randbytes(1)\nexpect Raw { x := x + MATCH[Raw].data[1:] }\nRaw(x) }")
   "2:18" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { Raw(\"${MATCH}\") } }")
   "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { p = MATCH\nq = p[Raw]\nRaw(q.data) } }")
-  "2:45" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { case var=r MATCH[-1] Raw { Raw(r.data) } else {} } }")
-  "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { case var=r MATCH[-1] UDP { Raw(\"${r.src}\") } else {} } }")
+  "2:45" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { case var=r MATCH[-1] Raw { Raw(r.data) } } }")
+  "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { case var=r MATCH[2] UDP { Raw(\"${r.src}\") } } }")
   "3:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { d = encode(Raw(MATCH[Raw].data))\nRaw(d) } }")
   "2:18" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { Raw(encode(Raw(MATCH[Raw].data))) } }")
   "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nd = randbytes(1)\nexpect Raw { d := encode(Raw(MATCH[Raw].data)) }\nRaw(d[:1]) }")
@@ -3272,6 +3364,7 @@ let check ?(warnings=ref []) (program : A.program) =
                     declared_at = Hashtbl.create 7 ; declared_as = Hashtbl.create 7 ;
                     reads = Hashtbl.create 7 ; declared = ref [] ;
                     widened ; widening = ref false ; held_by = Hashtbl.create 7 ;
+                    matched = Hashtbl.create 7 ;
                     reports = Hashtbl.create 3 ; provisional = false ;
                     unknown = Hashtbl.create 3 } in
         let p = block env.errors env program in
@@ -3322,6 +3415,7 @@ let check_patterns (ps : A.patterns) =
                 reads = Hashtbl.create 1 ; declared = ref [] ;
                 widened = Hashtbl.create 1 ;
                 widening = ref false ; held_by = Hashtbl.create 1 ;
+                matched = Hashtbl.create 1 ;
                 reports = Hashtbl.create 1 ; provisional = false ;
                 unknown = Hashtbl.create 1 } in
     try
@@ -3455,6 +3549,8 @@ let check_patterns (ps : A.patterns) =
     (types "repeat { on Raw(\"x\") { break 2 } }")
   "x: int, y: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect Raw(\"a\") { x = length(MATCH) } | ../ICMP { y = MATCH[IP].src } }")
+  "x: ip, y: int, z: int, I: {code: int, length: int}, l: (TimeExceeded {code: int, length: int})" \
+    (types "expect /IP/ICMP/TimeExceeded { x = MATCH[1].src\n  y = MATCH[2].type\n  z = case MATCH[3] TimeExceeded { 1 }\n  l = MATCH[ICMP/_] }")
   "x: int, y: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Raw(\"a\")\n  { x = LAST[UDP].src }\n  Raw(\"b\")\n  expect ../UDP(IP.src == LAST[IP].dst) { y = LAST[IP].src } }")
   "t: float, x: float, p: {a: int}, y: int" \
@@ -3472,7 +3568,7 @@ let check_patterns (ps : A.patterns) =
   "x: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Raw(\"hi\")\n  expect Raw(\"ho\") { x = MATCH[IP].src } }")
   "x: int, c: int, l: {code: int, length: int}" \
-    (types "expect /IP/ICMP/TimeExceeded/IP/UDP { x = MATCH[ICMP/_/IP].id\n  c = case var=l MATCH[ICMP/_] TimeExceeded { l.code } else { 0 } }")
+    (types "expect /IP/ICMP/TimeExceeded/IP/UDP { x = MATCH[ICMP/_/IP].id\n  c = case var=l MATCH[ICMP/_] TimeExceeded { l.code } }")
   "x: int" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(dst == 53, IP.ttl < 3, /IP.src = 1.2.3.4, Eth.proto == 0x800) { x = MATCH[UDP].src } }")
   "id: int" \
@@ -3494,11 +3590,11 @@ let check_patterns (ps : A.patterns) =
     (types "repeat { x = if I > 3 { break } else { I } }")
   "x: int" (types "if 1 { wait 1s }\nx = 1\nif x > 0 { print(\"a\") } else { x := 2 }")
   "x: ip, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, record_route: ip[], rr_slots: int, src: ip, tos: int, tot_len: int, ttl: int}, b: {data: byte[], length: int}, y: byte[]" \
-    (types "expect /IP { x = case MATCH[1] IP { MATCH[IP].src } | else { 0.0.0.0 }\n  case var=b MATCH[2] Raw { y = b.data } }")
+    (types "expect /IP { x = case MATCH[1] IP { MATCH[IP].src }\n  case var=b MATCH[2] Raw { y = b.data } }")
   "x: int, I: {dst: mac, length: int, proto: int, src: mac, ts: time}, I: {code: int, length: int, type: int}, I: {id: int, length: int}, I: {payload: byte[], seq: int}, I: {payload: byte[], seq: int}, I: {code: int, length: int, mtu: int}, I: {code: int, length: int}, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, record_route: ip[], rr_slots: int, src: ip, tos: int, tot_len: int, ttl: int}, I: {checksum: int, dst: int, length: int, src: int}, I: {ack_num: int, checksum: int, dst: int, flags: int, length: int, mss: int, options: byte[], sack_ok: bool, seq_num: int, src: int, ts_ecr: int, ts_val: int, urg_ptr: int, win_size: int, wscale: int}, I: {id: int, length: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {data: byte[], length: int}, I: {dst: ip, flow_label: int, frag_id: int, frag_offset: int, hop_limit: int, is_fragment: bool, length: int, more_frags: bool, proto: int, src: ip, traffic_class: int}, I: {code: int, length: int, type: int}, I: {code: int, length: int, mtu: int}, I: {length: int}, I: {headers: {name: string, value: string}[], length: int, method: string, url: string, version: string}, I: {code: int, headers: {name: string, value: string}[], length: int, version: string}, I: {final: bool, length: int, mask: int, masked: bool, opcode: int}, I: {options: byte[], src_lla: mac}, I: {flags: int, hop_limit: int, lifetime: int, managed: bool, mtu: int, options: byte[], other_config: bool, prefixes: {autonomous: bool, on_link: bool, preferred: int, prefix: cidr, valid: int}[], reachable: int, retrans: int, src_lla: mac}, I: {dst: ip, length: int, options: byte[], target: ip, target_lla: mac}" \
-    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } | IP6 { 14 } | ICMP6 { 15 } | PacketTooBig { 16 } | HTTP { 17 } | HttpRequest { 18 } | HttpAnswer { 19 } | WebSocket { 20 } | RouterSolicit { 21 } | RouterAdvert { 22 } | Redirect { 23 } }")
+    (types "expect /Eth { x = case MATCH[-1] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } | IP6 { 14 } | ICMP6 { 15 } | PacketTooBig { 16 } | HTTP { 17 } | HttpRequest { 18 } | HttpAnswer { 19 } | WebSocket { 20 } | RouterSolicit { 21 } | RouterAdvert { 22 } | Redirect { 23 } }")
   "x: int, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, record_route: ip[], rr_slots: int, src: ip, tos: int, tot_len: int, ttl: int}, y: int" \
-    (types "expect /IP { x = case MATCH[1] IP { wait 1s\n  1 } | else { 2 }\n  y = { expect Raw {}\n  3 } }")
+    (types "expect /IP { x = case MATCH[1] IP { wait 1s\n  1 }\n  y = { expect Raw {}\n  3 } }")
 *)
 
 (* A constructor makes a variant of its own; where variants meet, as values
@@ -3699,8 +3795,24 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(IP.scr == 1.2.3.4) {} }")
   "line 2, column 5: Unknown variable anwsers, do you mean answers?" \
     (types "answers = 1\nx = anwsers")
-  "line 1, column 21: No field src in a layer: case tells its constructors apart, and Eth, IP, IP6, TCP, UDP have one" \
-    (types "on for=1s /IP { x = MATCH[0].src }")
+  "line 2, column 5: No field src in a layer: case tells its constructors apart, and Eth, IP, IP6, TCP, UDP have one" \
+    (types "on for=1s /IP { p = MATCH\nx = p[0].src }")
+  "line 1, column 36: No field src in a layer (IP | IP6): case tells its constructors apart, and IP, IP6 have one" \
+    (types "on for=1s /IP/UDP | /IP6/UDP { x = MATCH[1].src }")
+  "line 1, column 21: No field ttl in Eth (only {dst: mac, length: int, proto: int, src: mac, ts: time}): IP has one, on top of it" \
+    (types "on for=1s /IP { x = MATCH[0].ttl }")
+  "line 1, column 22: No TCP in MATCH, which matched /IP/UDP" \
+    (types "expect /IP/UDP { x = MATCH[TCP].src }")
+  "line 2, column 29: No ICMP/_ in MATCH, which matched /IP/UDP/Raw or /IP6/UDP" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) {\nexpect Raw | /IP6/UDP { x = MATCH[ICMP/_] } }")
+  "line 1, column 36: No TimeExceeded/IP/DNS in MATCH, which matched /IP/ICMP/TimeExceeded" \
+    (types "expect /IP/ICMP/TimeExceeded { x = MATCH[TimeExceeded/IP/DNS].id }")
+  "line 1, column 22: No layer 9 in MATCH, which matched /IP/UDP: it has 5 at most" \
+    (types "expect /IP/UDP { x = MATCH[9] }")
+  "line 1, column 22: No field src in a layer (DNS | Raw)" \
+    (types "expect /IP/UDP { x = MATCH[3].src }")
+  "line 1, column 40: TCP is none of IP" \
+    (types "expect /IP/UDP { case MATCH[1] IP {} | TCP {} }")
   "line 1, column 21: Cannot apply + to MATCH (a packet) and an int" \
     (types "on for=1s /IP { x = MATCH + 1 }")
   "line 1, column 39: No field unused in TimeExceeded (only {code: int, length: int})\n  The packet it quotes is on top of it: MATCH[TimeExceeded/IP].id is the id of the quoted IP, MATCH[/IP] the IP of the error." \
@@ -3745,9 +3857,9 @@ let check_patterns (ps : A.patterns) =
   "line 1, column 37: No field id in ICMP (only {code: int, length: int, type: int}): Echo has one, on top of it, and IP has one, below it" \
     (types "on for=1s /IP/ICMP/Echo/Reply { x = MATCH[ICMP].id }")
   "line 1, column 66: No field seq in Echo (only {id: int, length: int}): Request and Reply have one, on top of it" \
-    (types "on for=1s /IP/ICMP/Echo/Reply { case var=l MATCH[0] Echo { print(l.seq) } else {} }")
+    (types "on for=1s /IP/ICMP/Echo/Reply { case var=l MATCH[3] Echo { print(l.seq) } }")
   "line 1, column 64: No field ttl in DNS (only {id: int, length: int})" \
-    (types "on for=1s /IP/UDP/DNS/Answer { case var=l MATCH[0] DNS { print(l.ttl) } else {} }")
+    (types "on for=1s /IP/UDP/DNS/Answer { case var=l MATCH[3] DNS { print(l.ttl) } }")
   "x: byte[]" \
     (types "expect /IP/UDP/Raw(payload == \"echo\") { x = MATCH[Raw].payload }")
   "line 1, column 31: Unknown field or variable len: the field of Echo below is Echo.length" \
@@ -3877,18 +3989,18 @@ let check_patterns (ps : A.patterns) =
     (types "on for=1s linger=1s /IP {}")
   "line 1, column 6: The subject of case must be a variant, such as a layer of a packet, not an int" \
     (types "case 3 IP {}")
-  "line 1, column 36: Foo is none of Answer, DNS, DestUnreachable, Echo, Eth, HTTP, HttpAnswer, HttpRequest, ICMP, ICMP6, IP, IP6, PacketTooBig, Query, Raw, Redirect, Reply, Request, RouterAdvert, RouterSolicit, TCP, TimeExceeded, UDP, WebSocket" \
-    (types "expect /IP { case MATCH[0] IP {} | Foo {} }")
-  "line 1, column 36: IP already has a block in this case" \
-    (types "expect /IP { case MATCH[0] IP {} | ip {} }")
-  "line 1, column 18: This case needs an else, or a block for each of Answer, DNS, DestUnreachable, Echo, Eth, HTTP, HttpAnswer, HttpRequest, ICMP, ICMP6, IP6, PacketTooBig, Query, Raw, Redirect, Reply, Request, RouterAdvert, RouterSolicit, TimeExceeded, UDP, WebSocket, to have a value" \
-    (types "expect /IP { x = case MATCH[1] IP { 1 } | TCP { 2 } }")
-  "line 1, column 18: The branches of this case are of different types: a string and an int" \
-    (types "expect /IP { x = case MATCH[1] Raw { \"a\" } | IP { 1 } | else { 2 } }")
-  "line 1, column 18: This case has a block for each of Answer, DNS, DestUnreachable, Echo, Eth, HTTP, HttpAnswer, HttpRequest, ICMP, ICMP6, IP, IP6, PacketTooBig, Query, Raw, Redirect, Reply, Request, RouterAdvert, RouterSolicit, TCP, TimeExceeded, UDP, WebSocket: its else is never run" \
-    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } | IP6 { 14 } | ICMP6 { 15 } | PacketTooBig { 16 } | HTTP { 17 } | HttpRequest { 18 } | HttpAnswer { 19 } | WebSocket { 20 } | RouterSolicit { 21 } | RouterAdvert { 22 } | Redirect { 23 } | else { 0 } }")
+  "line 1, column 38: Foo is none of Answer, DNS, DestUnreachable, Echo, Eth, HTTP, HttpAnswer, HttpRequest, ICMP, ICMP6, IP, IP6, PacketTooBig, Query, Raw, Redirect, Reply, Request, RouterAdvert, RouterSolicit, TCP, TimeExceeded, UDP, WebSocket" \
+    (types "expect /Eth { case MATCH[-1] IP {} | Foo {} }")
+  "line 1, column 38: IP already has a block in this case" \
+    (types "expect /Eth { case MATCH[-1] IP {} | ip {} }")
+  "line 1, column 19: This case needs an else, or a block for each of Answer, DNS, DestUnreachable, Echo, Eth, HTTP, HttpAnswer, HttpRequest, ICMP, ICMP6, IP6, PacketTooBig, Query, Raw, Redirect, Reply, Request, RouterAdvert, RouterSolicit, TimeExceeded, UDP, WebSocket, to have a value" \
+    (types "expect /Eth { x = case MATCH[-1] IP { 1 } | TCP { 2 } }")
+  "line 1, column 19: The branches of this case are of different types: a string and an int" \
+    (types "expect /Eth { x = case MATCH[-1] Raw { \"a\" } | IP { 1 } | else { 2 } }")
+  "line 1, column 19: This case has a block for each of Answer, DNS, DestUnreachable, Echo, Eth, HTTP, HttpAnswer, HttpRequest, ICMP, ICMP6, IP, IP6, PacketTooBig, Query, Raw, Redirect, Reply, Request, RouterAdvert, RouterSolicit, TCP, TimeExceeded, UDP, WebSocket: its else is never run" \
+    (types "expect /Eth { x = case MATCH[-1] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } | IP6 { 14 } | ICMP6 { 15 } | PacketTooBig { 16 } | HTTP { 17 } | HttpRequest { 18 } | HttpAnswer { 19 } | WebSocket { 20 } | RouterSolicit { 21 } | RouterAdvert { 22 } | Redirect { 23 } | else { 0 } }")
   "line 1, column 38: Unknown variable l" \
-    (types "expect /IP { case MATCH[1] Raw { x = l.data } }")
+    (types "expect /IP { case MATCH[2] Raw { x = l.data } }")
 *)
 
 (* The examples of the spec that use only v1 features: *)

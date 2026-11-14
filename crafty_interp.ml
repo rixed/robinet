@@ -652,17 +652,19 @@ let rec eval output (env : env) (e : T.expr) =
     | T.Field (r, i) ->
         (* Void only in the fields of BUDGET, PORTS and PERMISSIONS that are
          * not set, in those of a packet sent that only its capture tells,
-         * and in the stats of a summary of no values: *)
+         * and in the stats of a summary of no values. A layer that can
+         * only be of one kind is read as its record: *)
         (match eval r, r.typ with
-        | Record vs, A.Type.Record fs ->
+        | (Record vs, (A.Type.Record fs as rt))
+        | (Variant (_, Record vs), A.Type.Variant [ _, (A.Type.Record fs as rt) ]) ->
             (match vs.(i), List.nth fs i with
-            | Void, (n, _) when T.is_summary r.typ ->
+            | Void, (n, _) when T.is_summary rt ->
                 error e.loc "No %s in the summary of no values" n
             | Void, (n, t) when t <> A.Type.Void ->
-                if r.typ = T.budget_type || r.typ = T.ports_type ||
-                   r.typ = T.permissions_type then
+                if rt = T.budget_type || rt = T.ports_type ||
+                   rt = T.permissions_type then
                     error e.loc "%s is not set, by the program or the command line" n ;
-                let l = List.find (fun l -> T.packet_record l = r.typ) Crafty_layers.all in
+                let l = List.find (fun l -> T.packet_record l = rt) Crafty_layers.all in
                 error e.loc "%s.%s is not known: %s" (T.lname l.name) n T.only_captured
             | v, _ -> v)
         | _ -> assert false)
@@ -2414,7 +2416,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (*$= runs & ~printer:identity
   "500ms: other\n500ms: ip 10.0.0.2\n500ms: udp 53\n500ms: other\n500ms: Raw\n1s500ms: 64\n1s500ms: done" \
     (runs ~inject:[ 0.5, reply "pong" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw(\"pong\") {\n    for I in MATCH { print(case I IP { \"ip ${I.src}\" } | UDP { \"udp ${I.src}\" } | else { \"other\" }) }\n    case var=l MATCH[3] Raw { print(\"Raw\") }\n    case MATCH[3] IP { print(\"not reached\") }\n    ttl = case var=h MATCH[1] IP { wait 1s\n      h.ttl } | else { 0 }\n    print(ttl) } }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw(\"pong\") {\n    for I in MATCH { print(case I IP { \"ip ${I.src}\" } | UDP { \"udp ${I.src}\" } | else { \"other\" }) }\n    case var=l MATCH[3] Raw { print(\"Raw\") }\n    p = MATCH\n    case p[3] IP { print(\"not reached\") }\n    ttl = case var=h MATCH[1] IP { wait 1s\n      h.ttl }\n    print(ttl) } }")
 *)
 (* on runs its block for every match, and its block waits for it: *)
 (*$= runs & ~printer:identity

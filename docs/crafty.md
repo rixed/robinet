@@ -431,7 +431,7 @@ layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 
 **`MATCH`** is the packet that matched, as an array of layers: `MATCH[IP].src`,
 `MATCH[Raw].data`, with paths as in conditions (`MATCH[/IP]`,
-`MATCH[ICMP/_/IP]`). `MATCH[0]` and `MATCH[ICMP/_]` are layers of any kind,
+`MATCH[ICMP/_/IP]`). `MATCH[1]` and `MATCH[ICMP/_]` are layers of any allowed kinds,
 which `case` tells apart:
 
 ```

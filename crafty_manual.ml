@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 c69deedfbd1943716b051ac3f8e5924f) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 d88b5d895d0c3ddb0b58ba3d1f409613) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -399,8 +399,8 @@ layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 
 **`MATCH`** is the packet that matched, as an array of layers: `MATCH[IP].src`,
 `MATCH[Raw].data`, with paths as in conditions (`MATCH[/IP]`,
-`MATCH[ICMP/_/IP]`). `MATCH[0]` and `MATCH[ICMP/_]` are layers of any kind,
-which `case` tells apart:
+`MATCH[ICMP/_/IP]`). `MATCH[1]` and `MATCH[ICMP/_]` are layers of any allowed
+kinds, which `case` tells apart:
 
     for l in MATCH {
       print(case l IP { "IP from ${I.src}" } | UDP { "UDP to ${I.dst}" } else { "other" })
