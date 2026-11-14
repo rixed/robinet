@@ -699,7 +699,7 @@ let rec eval output (env : env) (e : T.expr) =
                     (T.string_of_path ~absolute path))
         | _ -> assert false)
     | T.Call (T.Stats, []) ->
-        let stats = Crafty_tree.stats (List.hd env.stack).node in
+        let stats = Crafty_tree.stack_stats (List.hd env.stack).node in
         (match e.typ with
         | A.Type.Record fields ->
             Record (Array.of_list (List.map (fun (n, _) -> List.assoc n stats) fields))
@@ -2886,6 +2886,10 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (with_host ~setup:(fun h _ -> h.Host.trx.Host.udp_server_start (Udp.Port.o 7) (fun udp -> \
         Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
         "/IP(dst=10.0.0.2) {\n  UDP(src=4000, dst=7) {\n    Raw(randbytes(3000))\n    expect timeout=1s Raw {} }\n  s = stats()\n  print(\"fragmented ${s.fragmented}, frags out ${s.frags_out}, in ${s.frags_in}, reassembled ${s.reassembled}, timeouts ${s.reasm_timeouts}\") }")
+  "a 0.001s: out 1 3000, in 1 3000, frags out 3, in 3\na 0.001s: done Eth#4" \
+    (with_host ~setup:(fun h _ -> h.Host.trx.Host.udp_server_start (Udp.Port.o 7) (fun udp -> \
+        Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
+        "/IP(dst=10.0.0.2)/UDP(src=4000, dst=7) {\n  Raw(randbytes(3000))\n  expect timeout=1s Raw {}\n  s = stats()\n  print(\"out ${s.packets_out} ${s.bytes_out}, in ${s.packets_in} ${s.bytes_in}, frags out ${s.frags_out}, in ${s.frags_in}\") }")
 *)
 (*$T
   let out = with_host ~setup:tcp_echo ~closed:true \

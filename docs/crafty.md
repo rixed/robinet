@@ -491,7 +491,7 @@ what their engine computes (checksums).
 - `report(x, name=s)`: prints the summary of `x` according to `--format`.
 - `assert(cond, msg=s)`: fails if `cond` is false.
 - `now()`: the current time.
-- `stats()`: the stats of the stream at the top of the current stack, so far:
+- `stats()`: the stats so far of the streams of the current stack. Every stream counts
   `packets_out`, `packets_in`, `bytes_out`, `bytes_in` (the payloads at that
   layer). A self-driven TCP connection counts its segments, retransmissions
   included, and adds, as Linux's `tcp_info`: `bytes_acked`, `bytes_received`

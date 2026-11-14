@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 e3e183819bf17719769f50e487c983c0) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 23b9c9d0c6626dcf2096c509ef35357c) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -456,19 +456,19 @@ what their engine computes (checksums).
 -   `report(x, name=s)`: prints the summary of `x` according to `--format`.
 -   `assert(cond, msg=s)`: fails if `cond` is false.
 -   `now()`: the current time.
--   `stats()`: the stats of the stream at the top of the current stack, so far:
-    `packets_out`, `packets_in`, `bytes_out`, `bytes_in` (the payloads at that
-    layer). A self-driven TCP connection counts its segments, retransmissions
-    included, and adds, as Linux's `tcp_info`: `bytes_acked`, `bytes_received`
-    (in order), `retrans`, `dupacks`, `timeouts`, `holes_in` (gaps opened in
-    what was received), `ooo_in` (segments filling a gap within `min_rtt` of the
-    one beyond it), `dup_in` (segments with only data already receiveds),
-    `srtt`, `rttvar`, `min_rtt`, `rtt_samples`, `rto`, `snd_mss`, `rcv_mss`,
-    `cwnd`, `ssthresh` (2\^31-1 before any loss), `snd_wnd` (the peer's window),
-    `rcv_wnd`, `snd_wscale` and `rcv_wscale` (the window shifts the peer and we
-    offered, -1 if none) and `established`. An IP or IP6 stream adds
-    `fragmented`, `frags_out`, `frags_in`, `reassembled` and `reasm_timeouts`
-    (incomplete after 30s, or 60s for IP6).
+-   `stats()`: the stats so far of the streams of the current stack. Every
+    stream counts `packets_out`, `packets_in`, `bytes_out`, `bytes_in` (the
+    payloads at that layer). A self-driven TCP connection counts its segments,
+    retransmissions included, and adds, as Linux's `tcp_info`: `bytes_acked`,
+    `bytes_received` (in order), `retrans`, `dupacks`, `timeouts`, `holes_in`
+    (gaps opened in what was received), `ooo_in` (segments filling a gap within
+    `min_rtt` of the one beyond it), `dup_in` (segments with only data already
+    receiveds), `srtt`, `rttvar`, `min_rtt`, `rtt_samples`, `rto`, `snd_mss`,
+    `rcv_mss`, `cwnd`, `ssthresh` (2\^31-1 before any loss), `snd_wnd` (the
+    peer's window), `rcv_wnd`, `snd_wscale` and `rcv_wscale` (the window shifts
+    the peer and we offered, -1 if none) and `established`. An IP or IP6 stream
+    adds `fragmented`, `frags_out`, `frags_in`, `reassembled` and
+    `reasm_timeouts` (incomplete after 30s, or 60s for IP6).
 -   `getenv(name, default=s)`
 -   `arg(n, default=s)`: the n-th argument after the program, from 0. `nargs()`:
     how many there are.

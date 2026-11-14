@@ -522,6 +522,13 @@ let stats n =
         | None -> List.assoc_opt name counts |? zero typ
     ) (L.stream_stats @ n.layer.stats)
 
+(** What the streams of the stack of [n] tell (see {!L.stack_stats}). *)
+let stack_stats n =
+    let rec down acc n =
+        let acc = stats n :: acc in
+        match n.parent with None -> acc | Some p -> down acc p in
+    L.stack_stats (down [] n)
+
 (** The stack of [n], from the root up, with the keys of its nodes, as
  * [/IP(src=..., dst=..., proto=6)/TCP(src=..., dst=...)]. *)
 let rec stream_name n =

@@ -1744,8 +1744,10 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         | Stats, [], _ ->
             (match env.stack with
             | [] -> error loc "stats() is only defined on a protocol stack"
-            | (l, _) :: _ ->
-                mk (record_type (L.stream_stats @ l.stats)) (Call (Stats, [])))
+            | stack ->
+                let per_stream =
+                    List.rev_map (fun ((l : L.layer), _) -> L.stream_stats @ l.stats) stack in
+                mk (record_type (L.stack_stats per_stream)) (Call (Stats, [])))
         | Histogram, [ a ; bucket ], _ ->
             let t =
                 if values_type a.typ = Some Type.Interval then Type.Interval
@@ -3922,12 +3924,12 @@ let check_patterns (ps : A.patterns) =
     (types "x = { p = /IP!(dst=1.2.3.4)/UDP(dst=53)/Raw(\"x\") ; 1 } + 1")
 *)
 
-(* The stats of the stream at the top of the stack: *)
+(* The stats of the streams of the stack: *)
 (*$= types & ~printer:identity
   "line 1, column 5: stats() is only defined on a protocol stack" (types "x = stats()")
-  "s: {bytes_in: int, bytes_out: int, packets_in: int, packets_out: int}" \
+  "s: {bytes_in: int, bytes_out: int, fragmented: int, frags_in: int, frags_out: int, packets_in: int, packets_out: int, reasm_timeouts: int, reassembled: int}" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=7) { s = stats() }")
-  "line 1, column 35: No field cwnd in {bytes_in: int, bytes_out: int, packets_in: int, packets_out: int}" \
+  "line 1, column 35: No field cwnd in {bytes_in: int, bytes_out: int, fragmented: int, frags_in: int, frags_out: int, packets_in: int, packets_out: int, reasm_timeouts: int, reassembled: int}" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=7) { x = stats().cwnd }")
   "x: int, y: interval" \
     (types "/IP(dst=1.2.3.4)/TCP!(dst=7) { x = stats().cwnd\ny = stats().srtt }")

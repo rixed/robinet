@@ -2001,6 +2001,16 @@ let stream_stats =
     [ "packets_out", Type.Int ; "bytes_out", Type.Int ;
       "packets_in", Type.Int ; "bytes_in", Type.Int ]
 
+(** What the streams of a stack tell, given what each tells from the bottom
+ * one up: all of it, an upper stream's replacing a lower one's of the same
+ * name. *)
+let stack_stats per_stream =
+    List.fold_left (fun acc own ->
+        List.fold_left (fun acc (name, x) ->
+            (name, x) :: List.remove_assoc name acc
+        ) acc own
+    ) [] per_stream
+
 let tcp =
     layer N.TCP ~above:[ ip ; ip6 ] ~driven:true ~node:tcp_node ~unpack:unpack_tcp
         ~stats:Type.[
