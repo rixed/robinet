@@ -460,6 +460,7 @@ what their engine computes (checksums).
   `spawn`.
 - `continue n`: likewise, but goes on with the next iteration of the `n`th
   (or, for an `on`, waits for its next match).
+- `exit`: ends the program successfully, from anywhere.
 - `wait d` (or `sleep d`): pauses.
 - `expect timeout=d PATTERN { ... } | PATTERN { ... } else { ... }`: waits for
   the first packet that matches any pattern, then runs its block; after the

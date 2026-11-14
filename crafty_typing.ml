@@ -31,7 +31,7 @@
    TimeExceeded, when there are several).
 
    A block, an [if] or a [case] has the value of the branch it runs, and can
-   wait (or send, receive, loop, break, continue) only as the value of a
+   wait (or send, receive, loop, break, continue, exit) only as the value of a
    declaration, an assignment or a statement, or as a branch of such a one:
    elsewhere in an expression, it is computed at once. *)
 open Batteries
@@ -165,6 +165,7 @@ and stmt_desc =
     (* How many enclosing [repeat], [on] and [spawn] to leave, going on
      * with the next iteration (or match) of the last with [continue]: *)
     | Break of { depth : int ; continue : bool }
+    | Exit
     | Wait of expr
     (* Without [for_], it ends [linger] after the statements of its block: *)
     | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
@@ -384,10 +385,10 @@ let rec join_types a b =
         Option.map (fun t -> Type.Map (k, t)) (join_types a b)
     | _ -> None
 
-(* Whether that block ends only with a break or a continue: *)
+(* Whether that block ends only with a break, a continue or an exit: *)
 let rec diverges (b : block) =
     match List.rev b with
-    | { stmt = Break _ ; _ } :: _ -> true
+    | { stmt = Break _ | Exit ; _ } :: _ -> true
     | { stmt = Expr e ; _ } :: _ ->
         (match e.desc with
         | Block b -> diverges b
@@ -545,7 +546,7 @@ type env =
       loops : string list ;
       layer_ctx : layer_ctx option ;
       (* Whether the statements of the block can wait (or send, receive,
-       * loop, break, continue), which they cannot in a block within an
+       * loop, break, continue, exit), which they cannot in a block within an
        * expression but for the value of a declaration, an assignment or a statement: *)
       may_wait : bool ;
       errors : errors ;
@@ -2570,6 +2571,7 @@ and stmt errors env (s : A.stmt) =
                 | A.Retry _ -> Some "retry"
                 | A.Break { continue = false ; _ } -> Some "break"
                 | A.Break { continue = true ; _ } -> Some "continue"
+                | A.Exit -> Some "exit"
                 | A.Wait _ -> Some "wait"
                 | A.On _ -> Some "on" | A.Spawn _ -> Some "spawn"
                 | A.Expr _ | A.Declare _ | A.Assign _ -> None in
@@ -2773,6 +2775,7 @@ and stmt errors env (s : A.stmt) =
             if continue && List.nth env.loops (depth - 1) = "spawn" then
                 error loc "A spawn has no next iteration to continue with" ;
             env, Some (mk (Break { depth ; continue }))
+        | A.Exit -> env, Some (mk Exit)
         | A.Wait dur ->
             env, Some (mk (Wait (expect "The duration of wait" (expr env dur) Type.Interval)))
         | A.On { for_ ; linger ; timeout ; max ; cases = cs } ->
@@ -2863,7 +2866,7 @@ let stmt_exprs s =
     | Retry { max ; _ } -> opts [ max ]
     | On { for_ ; linger ; timeout ; max ; _ } -> opts [ for_ ; linger ; timeout ; max ]
     | Spawn { for_ ; _ } -> opts [ for_ ]
-    | Break _ -> []
+    | Break _ | Exit -> []
 
 (* The expressions directly within [e], not within its blocks: *)
 let sub_exprs e =
@@ -2893,7 +2896,7 @@ let stmt_blocks s =
     | Spawn { body ; _ } ->
         [ body ]
     | On { cases ; _ } -> List.map (fun (c : case) -> c.body) cases
-    | Send _ | Expr _ | Declare _ | Wait _ | Assign _ | Break _ -> []
+    | Send _ | Expr _ | Declare _ | Wait _ | Assign _ | Break _ | Exit -> []
 
 let expr_blocks e =
     match e.desc with
@@ -3642,6 +3645,9 @@ let check_patterns (ps : A.patterns) =
     (types "catch {} Timeout {} | Closed|Timeout {}")
   "e: string" (types "catch {} else { e = ERROR }")
   "x: int" (types "x = catch { 1 } Unset { 2 }")
+  "x: int" (types "x = if true { exit } else { 1 }")
+  "line 1, column 11: exit cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \
+    (types "x = 1 + { exit\n 2 }")
   "line 1, column 9: catch cannot be within an expression, but be the value of a declaration, an assignment or a statement" \
     (types "x = 1 + catch { 1 } Unset { 2 }")
   "line 1, column 5: The branches of this catch are of different types: an int and a string" \

@@ -287,6 +287,8 @@ and stmt_desc =
     (* Leaving [depth] enclosing loops, or with [continue] going on with
      * the next iteration of the last: *)
     | Break of { depth : expr option ; continue : bool }
+    (* Ends the program successfully: *)
+    | Exit
     | Wait of expr
     (* The block of the patterns of each match, never empty: *)
     | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
@@ -386,7 +388,7 @@ let predefined = [ "MATCH" ; "LAST" ; "ERROR" ; "OWN_IP" ; "OWN_IPS" ] @ self_de
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
     [ "true" ; "false" ; "repeat" ; "for" ; "retry" ; "catch" ; "if" ;
-      "elsif" ; "else" ; "case" ; "break" ; "continue" ; "expect" ; "on" ; "wait" ;
+      "elsif" ; "else" ; "case" ; "break" ; "continue" ; "exit" ; "expect" ; "on" ; "wait" ;
       "sleep" ; "in" ; "spawn" ]
 
 (** {2 Printing}
@@ -634,6 +636,7 @@ and print_stmt ~all indent oc s =
     | Break { depth ; continue } ->
         String.print oc (if continue then "continue" else "break") ;
         param "depth" depth
+    | Exit -> String.print oc "exit"
     | Wait dur ->
         if all then (String.print oc "wait" ; param "dur" (Some dur))
         else Printf.fprintf oc "wait %a" expr dur

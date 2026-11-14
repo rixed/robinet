@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 67815e2366d92d983291278226f7de3a) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 e3e183819bf17719769f50e487c983c0) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -426,6 +426,7 @@ what their engine computes (checksums).
     `spawn`.
 -   `continue n`: likewise, but goes on with the next iteration of the `n`th
     (or, for an `on`, waits for its next match).
+-   `exit`: ends the program successfully, from anywhere.
 -   `wait d` (or `sleep d`): pauses.
 -   `expect timeout=d PATTERN { ... } | PATTERN { ... } else { ... }`: waits for
     the first packet that matches any pattern, then runs its block; after the

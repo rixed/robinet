@@ -1021,6 +1021,7 @@ let () = set_stmt (
             fun p -> Break { depth = p "depth" ; continue = false }) |||
         (keyword "continue" -+ params "continue" [ "depth" ] >>:
             fun p -> Break { depth = p "depth" ; continue = true }) |||
+        (keyword "exit" >>: fun _ -> Exit) |||
         (let wait k =
             keyword k -+ params k [ "dur" ] >>:
                 fun p ->

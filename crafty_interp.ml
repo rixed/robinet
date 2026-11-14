@@ -906,7 +906,9 @@ type t =
       awaited : (Crafty_tree.emitted * (Bitstring.bitstring -> unit)) list ref ;
       (* Run before each statement, which it may stop the program from running;
        * so must cost next to nothing: *)
-      checkpoint : unit -> unit }
+      checkpoint : unit -> unit ;
+      (* Ends the program successfully: *)
+      exit : unit -> unit }
 
 (* How long a packet sent may take to be seen leaving, once no node of its
  * stack holds it: *)
@@ -1131,6 +1133,7 @@ and exec t b env (s : T.stmt) k =
             (guard (fun () -> bind_path t.output env path))
     | T.Expr e -> exec_value t b env e (fun _ -> k env)
     | T.Break { depth ; continue } -> b.break_ ~continue depth
+    | T.Exit -> t.exit ()
     | T.Wait dur ->
         guard (fun () ->
             match eval dur with
@@ -1550,7 +1553,8 @@ let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
         incr statements ;
         if !statements land 0xffff = 0 && !status = Running && check_ram () then stop () in
     let t = { power ; output = output_of power ?format ?report ~check_words ~print ~print_err () ;
-              tree ; awaited = ref [] ; checkpoint } in
+              tree ; awaited = ref [] ; checkpoint ;
+              exit = (fun () -> cancel root ; exit Done) } in
     let own =
         List.map (fun (a : Eth.State.my_address) -> Ip.Addr.of_bitstring a.addr)
                  tree.Crafty_tree.eth.my_addresses |>
@@ -1583,7 +1587,7 @@ let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
                                       kind = None ; packet = None }) ;
     ignore (run_block t root vars program
                 ~fail:root.fail ~break_:root.break_
-                (fun _ -> cancel root ; exit Done)) ;
+                (fun _ -> t.exit ())) ;
     h
 
 (* With what it declares of itself: *)
@@ -1998,6 +2002,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "catch { print(\"ok\") } else {}\nx = 1 / 0")
   "0s: -1 2\n0s: No key 3 in this map\n0s: done" \
     (runs "x = catch { int(\"a\") } Invalid { -1 }\ny = catch { 2 } Invalid { -1 }\nprint(\"${x} ${y}\")\nm = [1: 2]\ncatch { z = m[3] } Unset { print(ERROR) }")
+  "0s: 1\n0s: done" (runs "print(1)\nexit\nprint(2)")
+  "0s: done" (runs "catch { exit } else { print(\"no\") }\nprint(\"no\")")
+  "1s: done" (runs "spawn { wait 1s\n  exit }\nrepeat every=100ms { wait 1ms }")
   "0s: ok\n0s: failed: line 2, column 5: Division by zero" \
     (runs "retry Assertion max=2 { print(\"ok\") }\nx = 1 / 0")
   "0s: 2 {a: 1, b: [1, 2]} #414243 1.2.3.4 AA:BB:CC:DD:EE:FF\n0s: done" \
