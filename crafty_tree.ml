@@ -99,6 +99,8 @@ type node =
       (* The kernel's routes, if they are to be followed: *)
       router : L.router option ;
       ops : L.ops ;
+      (* The packet that made it fail (see [L.ops.failure]), if one did: *)
+      mutable failed_by : packet option ;
       (* Registered on it, by order of registration: *)
       mutable patterns : pattern list }
 
@@ -174,7 +176,7 @@ let make_child parent (l : L.layer) key =
     let self = ref None in
     let current () = match !self with Some c -> c.key | None -> key in
     let c = { layer = l ; key ; parent = Some parent ;
-              children = Hashtbl.create 3 ; users = 0 ; received = 0 ;
+              children = Hashtbl.create 3 ; users = 0 ; received = 0 ; failed_by = None ;
               received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
               closing = false ; driven = false ; eth = parent.eth ; ports = parent.ports ;
               local_port = parent.local_port ; uses_port = parent.uses_port ;
@@ -486,11 +488,20 @@ let busy_for stack =
 let on_ready stack k =
     List.iter (fun e -> e.node.ops.on_ready k) (senders stack)
 
-(** Why a node of that stack will never send what it was sent, once one
- * knows: *)
+(** Why a self-driven node of that stack will never send what it was sent,
+ * once one knows, and the packet that told it so, if one did: *)
 let failure stack =
-    List.fold_left (fun f e -> if f <> None then f else e.node.ops.failure ())
+    List.fold_left (fun f e ->
+        if f <> None || e.mode <> L.Driven then f else
+        Option.map (fun why -> why, e.node.failed_by) (e.node.ops.failure ()))
         None (senders stack)
+
+(* [f ()], [packet] having made [n] fail if it did meanwhile: *)
+let failing_by n packet f =
+    let ok = n.ops.failure () = None in
+    let x = f () in
+    if ok && n.ops.failure () <> None then n.failed_by <- Some packet ;
+    x
 
 (** Whether a node of that stack still holds some of what it was sent, that
  * it may yet send: *)
@@ -619,12 +630,14 @@ let icmp_error_reason (icmp : L.layer) (err : L.layer) (u : L.unpacked) =
               | None -> Printf.sprintf "%s code %d" (L.N.to_string err.name) code)
     | _ -> None
 
-(* Of an ICMP error carried by [u], about the stream of [n], tells the node
- * on top of [n] that sent the segment it quotes. Only TCP acts on it; a UDP
- * stream the program opened, as a connected socket, could fail its next
- * write likewise. *)
-let tell_icmp_error n (u : L.unpacked) =
-    match layers_on_top 4 n.layer u with
+(* Of an ICMP error carried by [u], about the stream of [n], below which are
+ * the layers of [below] (the top first), tells the node on top of [n] that
+ * sent the segment it quotes. Only TCP acts on it; a UDP stream the program
+ * opened, as a connected socket, could fail its next write likewise. *)
+let tell_icmp_error n below (u : L.unpacked) =
+    let above = layers_on_top 4 n.layer u in
+    let packet = List.rev above @ ((n.layer, u) :: below) in
+    match above with
     | [ icmp, _ ; err, eu ; _ ; ql, qu ] when ql.L.quoted ->
         (match icmp_error_reason icmp err eu, L.find ~below:n.layer ql.name,
                Hashtbl.find_option n.children ql.name with
@@ -635,7 +648,9 @@ let tell_icmp_error n (u : L.unpacked) =
                         (List.assoc_opt l.fields.(i).name qu.values))
             ) (L.key_fields l) (Some []) |>
             Option.may (fun key ->
-                Option.may (fun c -> c.ops.icmp_error qu why) (Siblings.find_option s key))
+                Option.may (fun c ->
+                    failing_by c packet (fun () -> c.ops.icmp_error qu why))
+                    (Siblings.find_option s key))
         | _ -> ())
     | _ -> ()
 
@@ -727,7 +742,7 @@ and up_to w node seen packet pending (ul : L.layer) =
             let about = lazy (Option.bind (quoted_key ul uu) (Siblings.find_option s)) in
             (match uu.upper with
             | L.Only (L.N.ICMP | L.N.ICMP6) ->
-                Option.may (fun c -> tell_icmp_error c uu) (Lazy.force about)
+                Option.may (fun c -> tell_icmp_error c packet uu) (Lazy.force about)
             | _ -> ()) ;
             match Siblings.find_option s key with
             | None -> Lazy.force about
@@ -781,7 +796,7 @@ and enter w node seen packet u pending =
         let packet = (node.layer, u) :: packet in
         if not node.driven then note_missed w packet modes pending ;
         up w (Some node) (modes :: seen) packet (check w packet modes pending)
-    ) (node.ops.receive modes u) ;
+    ) (failing_by node ((node.layer, u) :: packet) (fun () -> node.ops.receive modes u)) ;
     w.round <- round
 
 (** Takes a frame from the interface, then tells the patterns it met. Its
@@ -906,7 +921,7 @@ let make_root ?(ports=[]) ?(on_removed=ignore) ?router
     let ports name = restricted name |? dynamic_ports in
     let root =
         { layer = L.root ; key = [] ; parent = None ;
-          children = Hashtbl.create 10 ; users = 0 ; received = 0 ;
+          children = Hashtbl.create 10 ; users = 0 ; received = 0 ; failed_by = None ;
           received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
           closing = false ; driven = false ; eth ; ports ; local_port ; uses_port ;
           removed = on_removed ; router ;

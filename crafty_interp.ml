@@ -45,8 +45,8 @@
    [catch] leaves its block on its first error, which goes to the first of
    its handlers that names it (or to its [else]), if any, and no further. [if]
    runs the block of the first condition that holds, if any, and [case] that
-   of its value's constructor. A block, an [if], a [case] or an [expect]
-   that is the value of a declaration, an assignment or a statement runs as
+   of its value's constructor. A block, an [if], a [case], an [expect] or a
+   [catch] that is the value of a declaration, an assignment or a statement runs as
    a block of its own, which ends with that value; within another
    expression, the typer lets it only compute, and it is evaluated at once. An error
    reaching the program's block ends the program.
@@ -126,7 +126,7 @@ let find loc typ m d k =
     | exception Not_found ->
         (match d with
         | Some v -> v
-        | None -> error loc "No key %s in this map" (to_string typ k))
+        | None -> error_as A.Error_name.Unset loc "No key %s in this map" (to_string typ k))
 
 (* A copy of [x] with [y] at that path of indices, each with its type: *)
 let rec set_item loc x path y =
@@ -694,7 +694,9 @@ let rec eval output (env : env) (e : T.expr) =
                 (* A layer of any kind is the variant itself: *)
                 if List.last path = None then a.(i)
                 else (match a.(i) with Variant (_, v) -> v | _ -> assert false)
-            | [] -> error e.loc "No %s in this packet" (T.string_of_path ~absolute path))
+            | [] ->
+                error_as A.Error_name.Unset e.loc "No %s in this packet"
+                    (T.string_of_path ~absolute path))
         | _ -> assert false)
     | T.Call (T.Stats, []) ->
         let stats = Crafty_tree.stats (List.hd env.stack).node in
@@ -801,7 +803,7 @@ let rec eval output (env : env) (e : T.expr) =
         eval_block output env b
     (* Which the typer lets be only the value of a declaration, an
      * assignment or a statement: *)
-    | T.Expect _ -> assert false
+    | T.Expect _ | T.Catch _ -> assert false
 
 (* The block of a [case] for that value, and the environment to run it in: *)
 and branch env v (arms : T.arm list) else_ =
@@ -892,7 +894,7 @@ let guard b f =
     match f () with
     | x -> Some x
     | exception Runtime_error (kind, where, message) ->
-        b.fail Crafty_parser.{ where ; message ; kind } ;
+        b.fail Crafty_parser.{ where ; message ; kind ; packet = None } ;
         None
 
 type t =
@@ -909,38 +911,6 @@ type t =
 (* How long a packet sent may take to be seen leaving, once no node of its
  * stack holds it: *)
 let capture_timeout = Interval.sec 1.
-
-(* Calls [k] with the packet that the interface emits as [e], once it is
- * captured on its way out, decoded along the layers of [stack] it was sent
- * through, or else fails [b] at [loc]: as soon as a node of [stack] tells it
- * will never send it, or once [capture_timeout] passed without one holding
- * it: *)
-let await t b loc e stack k =
-    let rec w = e, (fun frame ->
-        if b.live then (
-            disarm () ;
-            k (Crafty_tree.captured ~along:(Crafty_tree.along stack) t.tree frame)))
-    and disarm () =
-        t.awaited := List.filter ((!=) w) !(t.awaited) ;
-        Crafty_tree.forget e in
-    t.awaited := !(t.awaited) @ [ w ] ;
-    b.cleanups <- disarm :: b.cleanups ;
-    let rec timer () =
-        if List.memq w !(t.awaited) && b.live then (
-            match Crafty_tree.failure stack with
-            | Some msg ->
-                disarm () ;
-                ignore (guard b (fun () -> error_as A.Error_name.Cannot_connect loc "%s" msg))
-            | None when Crafty_tree.holding stack ->
-                Simulation.delay t.power capture_timeout timer ()
-            | None ->
-                disarm () ;
-                ignore (guard b (fun () ->
-                    error_as A.Error_name.Timeout loc "The packet sent was not seen leaving within %s"
-                        (Interval.to_short_string capture_timeout)))) in
-    Simulation.delay t.power capture_timeout timer () ;
-    Crafty_tree.on_ready stack (fun () ->
-        if Crafty_tree.failure stack <> None then timer ())
 
 (* Tells the first that waits for [frame], captured on its way out: *)
 let emitted t frame =
@@ -975,6 +945,43 @@ let packet_value packet =
 
 (* [MATCH], from the packet that matched, decoded to its top: *)
 let match_value packet = packet_value (Crafty_tree.complete packet)
+
+(* Fails [b] at [loc] as a stack does that will never send, for that reason
+ * and because of that packet, if one: *)
+let cannot_send b loc (message, packet) =
+    b.fail Crafty_parser.{ where = loc ; message ; kind = Some A.Error_name.Cannot_connect ;
+                           packet = Option.map match_value packet }
+
+(* Calls [k] with the packet that the interface emits as [e], once it is
+ * captured on its way out, decoded along the layers of [stack] it was sent
+ * through, or else fails [b] at [loc]: as soon as a node of [stack] tells it
+ * will never send it, or once [capture_timeout] passed without one holding
+ * it: *)
+let await t b loc e stack k =
+    let rec w = e, (fun frame ->
+        if b.live then (
+            disarm () ;
+            k (Crafty_tree.captured ~along:(Crafty_tree.along stack) t.tree frame)))
+    and disarm () =
+        t.awaited := List.filter ((!=) w) !(t.awaited) ;
+        Crafty_tree.forget e in
+    t.awaited := !(t.awaited) @ [ w ] ;
+    b.cleanups <- disarm :: b.cleanups ;
+    let rec timer () =
+        if List.memq w !(t.awaited) && b.live then (
+            match Crafty_tree.failure stack with
+            | Some f -> disarm () ; cannot_send b loc f
+            | None when Crafty_tree.holding stack ->
+                Simulation.delay t.power capture_timeout timer ()
+            | None ->
+                disarm () ;
+                ignore (guard b (fun () ->
+                    error_as A.Error_name.Timeout loc "The packet sent was not seen leaving within %s"
+                        (Interval.to_short_string capture_timeout)))) in
+    Simulation.delay t.power capture_timeout timer () ;
+    Crafty_tree.on_ready stack (fun () ->
+        if Crafty_tree.failure stack <> None then timer ())
+
 
 (* Registers alternative [patterns] for block [b], their conditions
  * evaluated in [env] at match time; a relative pattern on the node of the
@@ -1059,7 +1066,7 @@ let rec run_block ?(enter=fun _ env -> Some env) t parent env (stmts : T.block)
     b
 
 (* Computes [e] in block [b], then [k] with its value; a block, an [if], a
- * [case] or an [expect] runs as a block within [b]: *)
+ * [case], an [expect] or a [catch] runs as a block within [b]: *)
 and exec_value t b env (e : T.expr) k =
     let run env body =
         ignore (run_block t b env body ~fail:b.fail ~break_:b.break_ k) in
@@ -1085,7 +1092,7 @@ and exec_value t b env (e : T.expr) k =
                             run (bind_lazy env c.match_ (fun () -> match_value packet))
                                 c.body)) cases)
                     ~failed:(fun kind where message -> fire (fun () ->
-                        b.fail Crafty_parser.{ where ; message ; kind }))
+                        b.fail Crafty_parser.{ where ; message ; kind ; packet = None }))
                     ~missed:(fun l -> missed := Some l) ;
             b.cleanups <- disarm :: b.cleanups ;
             Option.may (fun timeout ->
@@ -1096,6 +1103,15 @@ and exec_value t b env (e : T.expr) k =
                         ignore (guard b (fun () ->
                             nothing_matched e.loc timeout missed)))) ()) timeout)
             (guard b (fun () -> timeout_of value "expect" timeout))
+    | T.Catch { body ; handlers } ->
+        ignore (run_block t b env body ~fail:(fun err ->
+            match List.find_opt (fun (h : T.handler) -> caught h.errors err) handlers with
+            | None -> b.fail err
+            | Some h ->
+                if b.live then
+                    let env = bind env h.error_ (String err.message) in
+                    run (bind env h.match_ (err.packet |? Array [||])) h.handler)
+            ~break_:b.break_ k)
     | _ -> Option.may k (eval e)
 
 (* Runs that statement in block [b], then [k] with the environment for the
@@ -1138,25 +1154,15 @@ and exec t b env (s : T.stmt) k =
                             attempt (retries + 1)
                         else b.fail e)) in
             attempt 0)
-    | T.Catch { body ; handlers } ->
-        ignore (run_block t b env body ~break_:b.break_ (fun _ -> k env)
-            ~fail:(fun e ->
-                match List.find_opt (fun (h : T.handler) -> caught h.errors e) handlers with
-                | None -> b.fail e
-                | Some h ->
-                    if b.live then
-                        let env = bind env h.error_ (String e.message) in
-                        ignore (run_block t b env h.handler ~fail:b.fail
-                                    ~break_:b.break_ (fun _ -> k env))))
     | T.Stack { depth ; overlay ; layers ; body } ->
         (* The block holds the nodes of its stack: *)
         let enter b env =
             match push t b env depth overlay layers with
             | stack -> Some { env with stack }
             | exception Failed (kind, message) ->
-                b.fail Crafty_parser.{ where = s.stmt_loc ; message ; kind } ; None
+                b.fail Crafty_parser.{ where = s.stmt_loc ; message ; kind ; packet = None } ; None
             | exception Runtime_error (kind, where, message) ->
-                b.fail Crafty_parser.{ where ; message ; kind } ; None in
+                b.fail Crafty_parser.{ where ; message ; kind ; packet = None } ; None in
         ignore (run_block ~enter t b env body ~fail:b.fail ~break_:b.break_
                     (fun _ -> k env))
     | T.Send { depth ; overlay ; layers ; capture } ->
@@ -1166,12 +1172,16 @@ and exec t b env (s : T.stmt) k =
          * asked a picosecond later, once they all ran; and again once it
          * said it would be ready, or a node of it says it is, whichever
          * comes first: *)
-        guard (fun () ->
-            try
-                let stack = push t b env depth overlay layers in
-                stack, Crafty_tree.send ~mark:(capture <> None) stack
-            with Failed (kind, msg) -> raise (Runtime_error (kind, s.stmt_loc, msg))) |>
-        Option.may (fun (stack, (packet, emitted)) ->
+        let guard f =
+            guard (fun () ->
+                try f () with Failed (kind, msg) -> raise (Runtime_error (kind, s.stmt_loc, msg))) in
+        guard (fun () -> push t b env depth overlay layers) |>
+        Option.may (fun stack ->
+        match Crafty_tree.failure stack with
+        | Some f -> cannot_send b s.stmt_loc f
+        | None ->
+        guard (fun () -> Crafty_tree.send ~mark:(capture <> None) stack) |>
+        Option.may (fun (packet, emitted) ->
             env.last := lazy (packet_value (Lazy.force packet)) ;
             (* The first capture makes its variable, which the next ones
              * update: *)
@@ -1193,13 +1203,11 @@ and exec t b env (s : T.stmt) k =
                 Crafty_tree.on_ready stack ask
             and check () =
                 match Crafty_tree.failure stack with
-                | Some msg ->
-                    ignore (guard (fun () ->
-                        error_as A.Error_name.Cannot_connect s.stmt_loc "%s" msg))
+                | Some f -> cannot_send b s.stmt_loc f
                 | None ->
                     let d = Crafty_tree.busy_for stack in
                     if Interval.compare d Interval.zero <= 0 then k env else wait d in
-            wait (Interval.psec 1))
+            wait (Interval.psec 1)))
     | T.On { for_ ; linger ; timeout ; max ; cases } ->
         let duration what = Option.map (fun (e : T.expr) ->
             match eval e with
@@ -1322,7 +1330,7 @@ and on t b env loc cases ~for_ ~linger ~timeout max =
             ~failed:(fun kind where message ->
                 if !armed && b.live then (
                     disarm () ;
-                    b.fail Crafty_parser.{ where ; message ; kind }))
+                    b.fail Crafty_parser.{ where ; message ; kind ; packet = None }))
             ~missed:(fun l -> missed := Some l) ;
     b.cleanups <- disarm :: b.cleanups ;
     let end_ () = disarm () ; check_over () in
@@ -1572,7 +1580,7 @@ let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
         others exn ;
         if on_exception exn then
             root.fail Crafty_parser.{ where = A.nowhere ; message = Printexc.to_string exn ;
-                                      kind = None }) ;
+                                      kind = None ; packet = None }) ;
     ignore (run_block t root vars program
                 ~fail:root.fail ~break_:root.break_
                 (fun _ -> cancel root ; exit Done)) ;
@@ -1654,7 +1662,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         let name = Crafty_layers.N.to_string l.name in
         if not (Hashtbl.mem told (name, p)) then (
             Hashtbl.add told (name, p) () ;
-            on_warning { Crafty_parser.where ; kind = None ; message =
+            on_warning { Crafty_parser.where ; kind = None ; packet = None ; message =
                 Printf.sprintf "%s source port %d is outside the ports allowed (%s): \
                                 replies to it are not captured" name p
                     (String.concat ", " (List.map (fun (lo, hi) ->
@@ -1988,6 +1996,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "catch { assert(false) } else { assert(false, msg=\"again\") }")
   "0s: ok\n0s: failed: line 2, column 5: Division by zero" \
     (runs "catch { print(\"ok\") } else {}\nx = 1 / 0")
+  "0s: -1 2\n0s: No key 3 in this map\n0s: done" \
+    (runs "x = catch { int(\"a\") } Invalid { -1 }\ny = catch { 2 } Invalid { -1 }\nprint(\"${x} ${y}\")\nm = [1: 2]\ncatch { z = m[3] } Unset { print(ERROR) }")
   "0s: ok\n0s: failed: line 2, column 5: Division by zero" \
     (runs "retry Assertion max=2 { print(\"ok\") }\nx = 1 / 0")
   "0s: 2 {a: 1, b: [1, 2]} #414243 1.2.3.4 AA:BB:CC:DD:EE:FF\n0s: done" \
@@ -2907,9 +2917,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1460] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hi\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hi\"\na 0.000s: -1 -1 65535\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Raw#1}}}\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckFin \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckFin \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7, wscale=-1) {\n  Raw(\"hi\")\n  expect timeout=1s Raw {\n    s = stats()\n    print(\"${s.rcv_wscale} ${s.snd_wscale} ${s.rcv_wnd}\") } }")
-  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4001>22 Syn opts=[mss 1460,nop,wscale 7] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 22>4001 AckRst \"\"\na 0.000s: reset\na 0.000s: Cannot connect to 10.0.0.2 port 22: connection refused\na 0.000s: done Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4001, dst=22)#1{Raw}}}" \
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4001>22 Syn opts=[mss 1460,nop,wscale 7] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 22>4001 AckRst \"\"\na 0.000s: reset\na 0.000s: Cannot connect to 10.0.0.2 port 22: connection refused\na 0.000s: again 20\na 0.000s: done Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4001, dst=22)#1{Raw}}}" \
     (with_host ~frames:true \
-        "/IP(dst=10.0.0.2)/TCP(src=4001, dst=22) {\n  on max=1 ../TCP!(flags & RST) { print(\"reset\") }\n  catch { Raw(#1ee7) } CannotConnect { print(ERROR) } }")
+        "/IP(dst=10.0.0.2)/TCP(src=4001, dst=22) {\n  on max=1 ../TCP!(flags & RST) { print(\"reset\") }\n  catch { Raw(#1ee7) } CannotConnect { print(ERROR) }\n  catch { Raw(#1ee7) } CannotConnect { print(\"again ${MATCH[TCP].flags}\") } }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na 0.000s: connected!\na 0.000s: done Eth#2" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  ../TCP!(flags=SYN, seq_num=123)/Raw()\n  expect timeout=1s ../TCP!(flags == SYN | ACK) {\n    ../TCP!(flags=ACK, seq_num=124, ack_num=MATCH[TCP].seq_num + 1)/Raw()\n    print(\"connected!\") } }")
@@ -2923,14 +2933,14 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (* An ICMP error about the SYN refuses the connection, but not one quoting
  * another sequence number, nor one once the connection is established: *)
 (*$= & ~printer:identity
-  "a 0.000s: Cannot connect to 10.0.0.2 port 80: host unreachable\na 0.000s: done Eth#1{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4000, dst=80){Raw}}}\nb 0.000s: done Eth#1" \
-    (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  catch { Raw(\"hi\") } CannotConnect { print(ERROR) } }" \
+  "a 0.000s: Cannot connect to 10.0.0.2 port 80: host unreachable: code 1, from 4000, -1\na 0.000s: done Eth#1{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4000, dst=80){Raw}}}\nb 0.000s: done Eth#1" \
+    (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  catch { Raw(\"hi\") } CannotConnect {\n    sport = catch { MATCH[UDP].src } Unset { -1 }\n    print(\"${ERROR}: code ${MATCH[DestUnreachable].code}, from ${MATCH[TCP].src}, ${sport}\") } }" \
          "expect timeout=1s /IP/TCP!(dst == 80, flags & SYN) {\n  /IP(dst=MATCH[IP].src)/ICMP/DestUnreachable(code=HOST_UNREACHABLE)/IP(src=MATCH[IP].src, dst=MATCH[IP].dst)/TCP(src=MATCH[TCP].src, dst=MATCH[TCP].dst, seq_num=MATCH[TCP].seq_num, flags=SYN)/Raw() }")
   "a 0.000s: Cannot connect to 2001:db8::2 port 80: port unreachable\na 0.000s: done Eth#2{IP6(src=2001:db8::1, dst=2001:db8::2)#1{TCP(src=4000, dst=80){Raw}}}\nb 0.000s: done Eth#2" \
     (two ~arp:true ~v6:true "/IP6(dst=2001:db8::2)/TCP(src=4000, dst=80) {\n  catch { Raw(\"hi\") } CannotConnect { print(ERROR) } }" \
          "expect timeout=1s /IP6/TCP!(dst == 80, flags & SYN) {\n  /IP6(dst=MATCH[IP6].src)/ICMP6/DestUnreachable(code=PORT_UNREACHABLE6)/IP6(src=MATCH[IP6].src, dst=MATCH[IP6].dst)/TCP(src=MATCH[TCP].src, dst=MATCH[TCP].dst, seq_num=MATCH[TCP].seq_num, flags=SYN)/Raw() }")
-  "b 0.000s: done Eth#1\na 15.000s: Cannot connect to 10.0.0.2 port 80: connection timed out\na 15.000s: done Eth#1{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4000, dst=80){Raw}}}" \
-    (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  catch { Raw(\"hi\") } CannotConnect { print(ERROR) } }" \
+  "b 0.000s: done Eth#1\na 15.000s: Cannot connect to 10.0.0.2 port 80: connection timed out 0\na 15.000s: done Eth#1{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4000, dst=80){Raw}}}" \
+    (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  catch { Raw(\"hi\") } CannotConnect { print(\"${ERROR} ${length(MATCH)}\") } }" \
          "expect timeout=1s /IP/TCP!(dst == 80, flags & SYN) {\n  /IP(dst=MATCH[IP].src)/ICMP/DestUnreachable(code=HOST_UNREACHABLE)/IP(src=MATCH[IP].src, dst=MATCH[IP].dst)/TCP(src=MATCH[TCP].src, dst=MATCH[TCP].dst, seq_num=MATCH[TCP].seq_num + 1, flags=SYN)/Raw() }")
   "b 0.000s: hi\na 0.500s: established true\na 0.500s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=4000, dst=80)#2{Raw}}}\nb 0.500s: again\nb 1.000s: done Eth#6{IP(src=10.0.0.2, dst=10.0.0.1)#6{TCP(src=80, dst=4000)#6}}" \
     (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  Raw(\"hi\")\n  wait 500ms\n  Raw(\"again\")\n  print(\"established ${stats().established}\") }" \

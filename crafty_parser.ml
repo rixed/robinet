@@ -113,8 +113,10 @@ let condition_hint e =
 module P = Parsers.Make (ParsersPositions.LineCol (Parsers.SimpleConfig (Char)))
 open P
 
-(* [kind] names the errors a program may catch: *)
-type error = { where : location ; message : string ; kind : Error_name.t option }
+(* [kind] names the errors a program may catch, and [packet] is the packet
+ * that caused a runtime error, if one did: *)
+type error = { where : location ; message : string ; kind : Error_name.t option ;
+               packet : Crafty_value.value option }
 
 let print_error oc e =
     if e.where = nowhere then String.print oc e.message
@@ -616,6 +618,16 @@ let make_layer expr =
     fun (((layer_loc, layer_name), manual), options) ->
         { layer_loc ; layer_name ; manual ; options }
 
+(* Alternative errors ([Timeout|Closed]), the first of which is no
+ * parameter's name: *)
+let error_names =
+    let name =
+        identifier >>= fun s ->
+            if is_keyword s || Layer_name.of_string s <> None then fail
+            else return s in
+    nay (identifier -- sp -- item '=') -+
+    repeat ~min:1 ~sep:(sp -- item '|' -- sp) name
+
 (* [self] is the grammar being built: that of normal expressions, or that of
  * conditions, where [=] compares. [expr] is that of normal expressions, used
  * within brackets. *)
@@ -677,6 +689,20 @@ let make_expr ~cond ~self ~expr ~pattern ~patterns ~block ~stmt =
                 reject "The else of expect runs once its timeout passed: \
                         expect needs one" ;
             Expect { timeout ; cases ; else_ } in
+    (* Then errors and their block, which no statement but a stack starts
+     * with, separated as the cases of an [expect]: *)
+    let catch =
+        let sep = nl_sp -- item '|' -- nl_sp in
+        let else_ = (sep ||| nl_sp) -+ keyword "else" -+ body in
+        let handler =
+            here ++ (error_names +- sp +- check (item '{')) ++ body >>:
+            fun ((handler_loc, errors), handler) -> { handler_loc ; errors ; handler } in
+        body ++ optional_greedy ~def:([], None) (
+            (nl_sp -+ repeat ~min:1 ~sep handler ++
+             optional_greedy ~def:None (else_ >>: Option.some)) |||
+            (else_ >>: fun b -> [], Some b)) +-
+        quiet (nay (sp -- item '|')) >>:
+        fun (body, (handlers, else_)) -> Catch { body ; handlers ; else_ } in
     let field = identifier +- sp +- item ':' +- nl_sp ++ expr in
     let atom =
         (here ++ literal >>: fun (loc, l) -> { loc ; desc = Lit l }) |||
@@ -714,6 +740,7 @@ let make_expr ~cond ~self ~expr ~pattern ~patterns ~block ~stmt =
         (here ++ (keyword "if" -+ if_) >>: fun (loc, desc) -> { loc ; desc }) |||
         (here ++ (keyword "case" -+ case) >>: fun (loc, desc) -> { loc ; desc }) |||
         (here ++ (keyword "expect" -+ expect) >>: fun (loc, desc) -> { loc ; desc }) |||
+        (here ++ (keyword "catch" -+ catch) >>: fun (loc, desc) -> { loc ; desc }) |||
         (* A stack rather than arguments: *)
         (here +- quiet (identifier >>= fun s ->
             if String.lowercase_ascii s = "encode" then return () else fail) ++
@@ -855,16 +882,6 @@ let () =
 
 let params ?unnamed ?pattern form names = params_of expr ?unnamed ?pattern form names
 
-(* Alternative errors ([Timeout|Closed]), the first of which is no
- * parameter's name: *)
-let error_names =
-    let name =
-        identifier >>= fun s ->
-            if is_keyword s || Layer_name.of_string s <> None then fail
-            else return s in
-    nay (identifier -- sp -- item '=') -+
-    repeat ~min:1 ~sep:(sp -- item '|' -- sp) name
-
 let end_of_stmt = "end of statement (';' or new line)"
 let stmt_sep = sp -- (item '\n' ||| item ';') -- nl_sp |? end_of_stmt
 
@@ -884,20 +901,9 @@ let assign_op =
 
 let () = set_stmt (
     let body = sp -+ block in
-    (* Of expect, on and catch, separated by bars that may start or end
-     * lines, then maybe an [else], with or without a bar before it: *)
+    (* Of on, separated by bars that may start or end lines: *)
     let sep = nl_sp -- item '|' -- nl_sp in
     let cases = repeat ~min:1 ~sep (patterns ++ body) in
-    let else_ = (sep ||| nl_sp) -+ keyword "else" -+ body in
-    (* Errors then their block, which no statement but a stack starts with: *)
-    let handler =
-        here ++ (error_names +- sp +- check (item '{')) ++ body >>:
-        fun ((handler_loc, errors), handler) -> { handler_loc ; errors ; handler } in
-    let handlers =
-        optional_greedy ~def:([], None) (
-            (nl_sp -+ repeat ~min:1 ~sep handler ++
-             optional_greedy ~def:None (else_ >>: Option.some)) |||
-            (else_ >>: fun b -> [], Some b)) in
     let with_loc p = here ++ p >>: fun (stmt_loc, stmt) -> { stmt_loc ; stmt } in
     (* Any name, that is then refused if reserved, for a better message: *)
     let variable =
@@ -1011,8 +1017,6 @@ let () = set_stmt (
         (keyword "retry" -+ optional ~def:[] (sp -+ error_names) ++
          params ~unnamed:false "retry" [ "max" ] ++ body >>:
             fun ((on, p), body) -> Retry { max = p "max" ; on ; body }) |||
-        (keyword "catch" -+ body ++ handlers >>:
-            fun (body, (handlers, else_)) -> Catch { body ; handlers ; else_ }) |||
         (keyword "break" -+ params "break" [ "depth" ] >>:
             fun p -> Break { depth = p "depth" ; continue = false }) |||
         (keyword "continue" -+ params "continue" [ "depth" ] >>:
@@ -1089,12 +1093,12 @@ let ambiguity readings =
                     Printf.sprintf "This statement can be read in %d ways, \
                                     such as:\n  %s\nand:\n  %s"
                         (List.length readings) (String.strip a) (String.strip b) ;
-                  kind = None })
+                  kind = None ; packet = None })
         | _ ->
             { where = { line = 1 ; column = 1 } ;
               message = Printf.sprintf "The program can be read in %d ways"
                                        (List.length readings) ;
-              kind = None } in
+              kind = None ; packet = None } in
     match readings with
     | p1 :: p2 :: _ -> diff (p1, p2)
     | _ -> diff ([], [])
@@ -1102,7 +1106,7 @@ let ambiguity readings =
 (*$= ambiguity & ~printer:(IO.to_string print_error)
   { where = { line = 2 ; column = 1 } ; \
     message = "This statement can be read in 2 ways, such as:\n  y = [a, b]\nand:\n  y = [a: b]" ; \
-    kind = None } \
+    kind = None ; packet = None } \
     (let open Crafty_ast in \
      let reading m = \
          let p = Result.get_ok (parse ("x = 1\ny = [a, b]")) in \
@@ -1120,14 +1124,14 @@ let parse_with ?ambiguous p text =
                        (stream_of_string text)) with
     | Ok (p, _) -> Ok p
     | Error (NoSolution None) ->
-        Error { where = { line = 1 ; column = 1 } ; message = "Syntax error" ; kind = None }
+        Error { where = { line = 1 ; column = 1 } ; message = "Syntax error" ; kind = None ; packet = None }
     | Error (NoSolution (Some e)) ->
         let where, message =
             match String.split_on_char rejection_mark.[0] (message_of e.what) with
             | [ at ; message ] ->
                 Scanf.sscanf at "%d:%d" (fun line column -> { line ; column }), message
             | _ -> loc_of e.where, message_of e.what in
-        Error { where ; message ; kind = None }
+        Error { where ; message ; kind = None ; packet = None }
     | Error (Ambiguous rs) ->
         Error (match ambiguous with
               | Some f -> f (List.map (fun (r, _, _) -> r) rs)
@@ -1135,7 +1139,7 @@ let parse_with ?ambiguous p text =
                   { where = { line = 1 ; column = 1 } ;
                     message = Printf.sprintf "The text can be read in %d ways"
                                              (List.length rs) ;
-                    kind = None })
+                    kind = None ; packet = None })
     | Error (Approximation _) ->
         (* Only with error correction, which is not asked for *)
         assert false

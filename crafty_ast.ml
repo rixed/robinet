@@ -218,6 +218,9 @@ and expr_desc =
      * [else_] once [timeout] passed: *)
     | Expect of { timeout : expr option ; cases : (patterns * block) list ;
                   else_ : block option }
+    (* The value of [body], left on its first error, or else that of the
+     * first handler that names it, else of [else_]: *)
+    | Catch of { body : block ; handlers : handler list ; else_ : block option }
 
 and arm = { arm_loc : location ; ctor : string ; body : block }
 
@@ -281,9 +284,6 @@ and stmt_desc =
     (* Run [body], and again up to [max] times while it fails with one of
      * the errors [on], named as written: *)
     | Retry of { max : expr option ; on : string list ; body : block }
-    (* Run [body], leaving it on its first error, which goes to the first
-     * handler that names it, else to [else_]: *)
-    | Catch of { body : block ; handlers : handler list ; else_ : block option }
     (* Leaving [depth] enclosing loops, or with [continue] going on with
      * the next iteration of the last: *)
     | Break of { depth : expr option ; continue : bool }
@@ -560,6 +560,13 @@ let rec print_expr_at ?(bare=false) ~all ~indent p oc e =
                 (print_patterns ~all ~indent) p ;
             block oc body) cases ;
         Option.may (fun b -> String.print oc " else " ; block oc b) else_
+    | Catch { body ; handlers ; else_ } ->
+        String.print oc "catch " ; block oc body ;
+        List.iteri (fun i h ->
+            Printf.fprintf oc "%s%a " (if i = 0 then " " else " | ")
+                (List.print ~first:"" ~last:"" ~sep:"|" String.print) h.errors ;
+            block oc h.handler) handlers ;
+        Option.may (fun b -> String.print oc " else " ; block oc b) else_
 
 and print_args ~all ~indent oc args =
     print_list (fun oc a ->
@@ -592,8 +599,6 @@ and print_stmt ~all indent oc s =
         List.iteri (fun i (p, body) ->
             Printf.fprintf oc "%s%a " (if i = 0 then " " else " | ") pattern p ;
             print_block ~all indent oc body) in
-    let print_else =
-        Option.may (fun b -> String.print oc " else " ; print_block ~all indent oc b) in
     let print_errors = List.print ~first:"" ~last:"" ~sep:"|" String.print in
     String.print oc (String.make indent ' ') ;
     match s.stmt with
@@ -626,13 +631,6 @@ and print_stmt ~all indent oc s =
     | Retry { max ; on ; body } ->
         Printf.fprintf oc "retry %a" print_errors on ; param "max" max ;
         Char.print oc ' ' ; print_block ~all indent oc body
-    | Catch { body ; handlers ; else_ } ->
-        String.print oc "catch " ; print_block ~all indent oc body ;
-        List.iteri (fun i h ->
-            Printf.fprintf oc "%s%a " (if i = 0 then " " else " | ")
-                print_errors h.errors ;
-            print_block ~all indent oc h.handler) handlers ;
-        print_else else_
     | Break { depth ; continue } ->
         String.print oc (if continue then "continue" else "break") ;
         param "depth" depth
