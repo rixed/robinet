@@ -633,22 +633,27 @@ let error_names =
  * within brackets. *)
 let make_expr ~cond ~self ~expr ~pattern ~patterns ~block ~stmt =
     let layer = make_layer expr in
-    let body = sp -+ block in
-    (* A branch of an [if]: a statement on the same line, a block being the
-     * branch itself: *)
+    (* After a pattern or a constructor, on the same line; after a keyword
+     * that needs one, on that line or the next ones: *)
+    let body = sp -+ block and kw_body = nl_sp -+ block in
+    (* A branch of an [if]: a block on the next lines, or a statement on the
+     * same line, a block being the branch itself: *)
     let branch =
-        sp -+ (stmt |? "a branch of if, which starts on the same line") >>:
-        fun (s : stmt) ->
+        (sp -- item '\n' -- nl_sp --
+         (check (item '{') |? "'{', as a branch of if on the next lines is a block,") -+
+         block) |||
+        (sp -+ (stmt |? "a branch of if, which starts on the same line") >>:
+         fun (s : stmt) ->
             match s.stmt with
             | Expr { desc = Block b ; _ } -> b
             | Declare (v, _) | Capture { var = v ; declare = true ; _ } ->
                 reject "%s would only be declared in this branch" v
-            | _ -> [ s ] in
+            | _ -> [ s ]) in
     (* What follows [if] or [elsif], the else on the same line as the branch
-     * before it or on the next ones, and to the innermost [if]: *)
+     * before it, after a [;] or on the next lines, and to the innermost [if]: *)
     let if_ = fix (fun if_ ->
         sp -+ expr ++ branch ++
-        optional_greedy ~def:None (nl_sp -+ (
+        optional_greedy ~def:None (optional ~def:() (sp -- item ';') -- nl_sp -+ (
             (keyword "else" -+ branch) |||
             (keyword "elsif" -+ here ++ if_ >>:
                 fun (loc, desc) -> [ { stmt_loc = loc ; stmt = Expr { loc ; desc } } ]) |||
@@ -665,7 +670,7 @@ let make_expr ~cond ~self ~expr ~pattern ~patterns ~block ~stmt =
         let arm =
             here ++ (identifier >>= fun s -> if is_keyword s then fail else return s) ++
             body >>: fun ((arm_loc, ctor), body) -> { arm_loc ; ctor ; body } in
-        let else_ = keyword "else" -+ body in
+        let else_ = keyword "else" -+ kw_body in
         let arms =
             (repeat ~min:1 ~sep arm ++
              optional ~def:None ((sep ||| nl_sp) -+ else_ >>: Option.some)) |||
@@ -678,7 +683,7 @@ let make_expr ~cond ~self ~expr ~pattern ~patterns ~block ~stmt =
      * them, where a case is missing: *)
     let expect =
         let sep = nl_sp -- item '|' -- nl_sp in
-        let else_ = (sep ||| nl_sp) -+ keyword "else" -+ body in
+        let else_ = (sep ||| nl_sp) -+ keyword "else" -+ kw_body in
         params_of expr ~pattern:true "expect" [ "timeout" ] +- sp ++
         repeat ~min:1 ~sep (patterns ++ body) ++
         optional_greedy ~def:None (else_ >>: Option.some) +-
@@ -693,11 +698,11 @@ let make_expr ~cond ~self ~expr ~pattern ~patterns ~block ~stmt =
      * with, separated as the cases of an [expect]: *)
     let catch =
         let sep = nl_sp -- item '|' -- nl_sp in
-        let else_ = (sep ||| nl_sp) -+ keyword "else" -+ body in
+        let else_ = (sep ||| nl_sp) -+ keyword "else" -+ kw_body in
         let handler =
             here ++ (error_names +- sp +- check (item '{')) ++ body >>:
             fun ((handler_loc, errors), handler) -> { handler_loc ; errors ; handler } in
-        body ++ optional_greedy ~def:([], None) (
+        kw_body ++ optional_greedy ~def:([], None) (
             (nl_sp -+ repeat ~min:1 ~sep handler ++
              optional_greedy ~def:None (else_ >>: Option.some)) |||
             (else_ >>: fun b -> [], Some b)) +-
@@ -900,7 +905,8 @@ let assign_op =
     op "<<=" (Some Shl) ||| op ">>=" (Some Shr)
 
 let () = set_stmt (
-    let body = sp -+ block in
+    (* As in [make_expr]: *)
+    let body = sp -+ block and kw_body = nl_sp -+ block in
     (* Of on, separated by bars that may start or end lines: *)
     let sep = nl_sp -- item '|' -- nl_sp in
     let cases = repeat ~min:1 ~sep (patterns ++ body) in
@@ -1007,15 +1013,15 @@ let () = set_stmt (
                  item '=' -- nay (item '=' ||| item '~') >>:
                     fun _ -> reject "An item is not declared (:= changes it)"))) |||
         (keyword "repeat" -+ params "repeat" [ "var" ; "count" ; "every" ; "for" ] ++
-         body >>: fun (p, body) ->
+         kw_body >>: fun (p, body) ->
             Repeat { var = Option.map (var_name "variable name") (p "var") ;
                      count = p "count" ; every = p "every" ; for_ = p "for" ;
                      body }) |||
-        (for_head expr ++ params ~unnamed:false "for" [ "every" ; "for" ] ++ body >>:
+        (for_head expr ++ params ~unnamed:false "for" [ "every" ; "for" ] ++ kw_body >>:
             fun (((var, items), p), body) ->
                 For { var ; items ; every = p "every" ; for_ = p "for" ; body }) |||
         (keyword "retry" -+ optional ~def:[] (sp -+ error_names) ++
-         params ~unnamed:false "retry" [ "max" ] ++ body >>:
+         params ~unnamed:false "retry" [ "max" ] ++ kw_body >>:
             fun ((on, p), body) -> Retry { max = p "max" ; on ; body }) |||
         (keyword "break" -+ params "break" [ "depth" ] >>:
             fun p -> Break { depth = p "depth" ; continue = false }) |||
@@ -1034,7 +1040,7 @@ let () = set_stmt (
          cases >>: fun (p, cases) ->
             On { for_ = p "for" ; linger = p "linger" ; timeout = p "timeout" ;
                  max = p "max" ; cases }) |||
-        (keyword "spawn" -+ params "spawn" [ "for" ] ++ body >>:
+        (keyword "spawn" -+ params "spawn" [ "for" ] ++ kw_body >>:
             fun (p, body) -> Spawn { for_ = p "for" ; body })) in
     (* Read as nothing else, so that this rejection is the furthest error: *)
     ((foreign_start >>: fun (s, hint) -> reject "%s is no keyword: %s" s hint) |||
@@ -1203,6 +1209,7 @@ let parse_patterns text =
   "catch {\n  x = 1\n} else {\n}\n" (reads "catch { x = 1 } else {}")
   "retry Timeout|Closed max=2 {\n}\n" (reads "retry Timeout | Closed max=2 {}")
   "retry Unset {\n}\n" (reads "retry Unset {}")
+  "retry {\n}\nretry max=2 {\n}\n" (reads "retry {}\nretry max=2 {}")
   "catch {\n} Timeout|NoRoute {\n  x = 1\n} | Unset {\n} else {\n}\nx = 2\n" \
     (reads "catch {}\nTimeout | NoRoute { x = 1 }\n| Unset {} else {}\nx = 2")
   "catch {\n} else {\n}\nUDP {\n}\n" (reads "catch {}\nelse {}\nUDP {}")
@@ -1220,6 +1227,14 @@ let parse_patterns text =
   "if a {\n  x += 1\n} else {\n  y += 1\n}\n" (reads "if a x += 1 else y += 1;")
   "if a {\n  x += 1\n} elsif b {\n  print(1)\n} else {\n  y += 1\n}\n" \
     (reads "if a x += 1\nelsif b { print(1) }\nelse y += 1")
+  "if a {\n  x += 1\n} elsif b {\n  print(1)\n} else {\n  y += 1\n}\n" \
+    (reads "if a x += 1; elsif b { print(1) } ; else y += 1")
+  "if a {\n  x += 1\n}\ny += 1\n" (reads "if a x += 1; y += 1")
+  "if a {\n  x += 1\n} else {\n  y += 1\n}\n" \
+    (reads "if a # c\n\n{ x += 1 }\nelse\n{ y += 1 }")
+  "repeat count=2 {\n}\nfor x in l {\n}\nspawn {\n}\n" \
+    (reads "repeat count=2\n{}\nfor x in l\n{}\nspawn\n{}")
+  "/IP/UDP/Raw(\"x\")\n{\n}\n" (reads "/IP/UDP/Raw(\"x\")\n{}")
   "if a {\n  if b {\n    x += 1\n  } else {\n    y += 1\n  }\n}\n" \
     (reads "if a if b x += 1 else y += 1")
   "y = if a {\n  1\n} else {\n  2 + 3\n}\n" (reads "y = if a 1 else 2 + 3")
@@ -1479,8 +1494,8 @@ let parse_patterns text =
   "line 1, column 13: Expected ')' in pattern" (reads "expect (Raw {}")
   "line 1, column 5: wait needs a duration" (reads "wait")
   "line 1, column 6: sleep needs a duration" (reads "sleep")
-  "line 1, column 5: Expected statement in a branch of if, which starts on the same line" \
-    (reads "if x\n{}")
+  "line 2, column 1: Expected '{', as a branch of if on the next lines is a block, in expression" \
+    (reads "if x\ny := 1")
   "line 1, column 11: x would only be declared in this branch" (reads "if a x = 1")
   "line 1, column 1: Expected end of statement (';' or new line)" (reads "else {}")
   "line 1, column 9: Expected '\\\"' in string" (reads "x = \"abc")

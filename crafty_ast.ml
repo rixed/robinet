@@ -631,7 +631,9 @@ and print_stmt ~all indent oc s =
         param "every" every ; param "for" for_ ;
         Char.print oc ' ' ; print_block ~all indent oc body
     | Retry { max ; on ; body } ->
-        Printf.fprintf oc "retry %a" print_errors on ; param "max" max ;
+        String.print oc "retry" ;
+        if on <> [] then Printf.fprintf oc " %a" print_errors on ;
+        param "max" max ;
         Char.print oc ' ' ; print_block ~all indent oc body
     | Break { depth ; continue } ->
         String.print oc (if continue then "continue" else "break") ;

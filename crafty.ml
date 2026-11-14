@@ -35,7 +35,7 @@
 open Batteries
 module EthSpeed = SimTypes.EthSpeed
 
-let synopsis = "crafty [options] (PROG.cfty | -e PROG) [ARG...]"
+let synopsis = "crafty [options] (PROG.cfty | - | -e PROG) [ARG...]"
 let usage = synopsis ^"\n\nOptions:"
 
 let die fmt =
@@ -162,11 +162,12 @@ let () =
     let set_prog name text =
         if !prog <> None then die "Only one program, please" ;
         prog := Some (name, text) in
-    (* The first file is the program, and options stop there; with -e, all
-     * are arguments: *)
+    (* The first file ([-] for stdin) is the program, and options stop there;
+     * with -e, all are arguments: *)
     let program_or_arg ~stop s =
         if !prog <> None then prog_args := !prog_args @ [ s ] else (
-            set_prog s (lazy (File.with_file_in s IO.read_all)) ;
+            if s = "-" then set_prog "stdin" (lazy (IO.read_all IO.stdin))
+            else set_prog s (lazy (File.with_file_in s IO.read_all)) ;
             if stop then (
                 prog_args := Array.(to_list (sub Sys.argv (!Arg.current + 1)
                                        (length Sys.argv - !Arg.current - 1))) ;
@@ -180,6 +181,8 @@ let () =
               interface's subnets and default gateways as they are at start" ;
         "-e", Arg.String (fun s -> set_prog "-e" (lazy s)),
             "PROG the program, rather than from a file" ;
+        "-", Arg.Unit (fun () -> program_or_arg ~stop:true "-"),
+            " read the program from stdin" ;
         "--ip", Arg.String (fun s -> own_ip := Some (Ip.Addr.of_dotted_string s)),
             "ADDR use this address, rather than the interface's" ;
         "--tcp", port_range Host_config.Tcp,

@@ -50,9 +50,11 @@ absolute stack starts with `/IP` (with an `Eth` layer implied).  A relative
 stack goes on top of the current one.
 
 Some layers are terminal (`Raw`, `Request`, `Reply`, `Query`, `Answer`): they
-end the stack and send the message. An incomplete stack is followed instead by
-a block of further instructions. A few layers can be both, and are terminal
-unless followed by a block or a layer.
+end the stack and send the message. An incomplete stack is followed instead, on
+the same line, by a block of further instructions. A few layers can be both
+(`HttpRequest`, `HttpAnswer`, `WebSocket`), and are terminal unless followed by
+a block or a layer. So `X/Y { Z }` is not `X/Y` then `{ Z }` on the next line:
+that sends `X/Y` (or fails, if `Y` cannot end a message), then runs `Z` apart.
 
 The layers of a stack are streams: `UDP` picks its source port once (from
 `--udp`), and every message sent and every pattern on top of it belong to that
@@ -195,7 +197,8 @@ This is how to fragment by hand, since no fragment has what the checksum covers:
 
 ### Running crafty
 
-`crafty [options] file [arg...]` or `crafty [options] -e program [arg...]`.
+`crafty [options] file [arg...]` or `crafty [options] -e program [arg...]`,
+where file `-` is stdin.
 
 What follow the file are the program's own arguments (that are returned by
 `arg(n)`.  With `-e`, every argument that's not an option is a program's
@@ -239,6 +242,7 @@ permissions deny, 130 when interrupted.
 - Use `resolve("hostname")` to resolve a hostname
 - Errors and warnings go to stderr, all else to stdout: filter stdout as
   you like, but not stderr (`crafty x.cfty | grep ...`, not `2>&1 | grep`)
+- Quote programs as `-e '...'` or `- <<'EOF'`, lest the shell expand `${}`
 - Parameterize your programs with arguments (`crafty x.cfty 10.0.0.1 5`,
   read with `arg(0)`, `arg(1)`) or environment variables (`TARGET=10.0.0.1
   crafty x.cfty`, read with `getenv("TARGET")`) then cast.
@@ -252,8 +256,7 @@ permissions deny, 130 when interrupted.
 
 - A statement ends at the end of its line or at a `;`.  Within parentheses,
   brackets and braces, after a binary operator, or before an `else`, `elsif` or
-  `|`, a new line is plain white space. A block opens on the line of the
-  statement it belongs to.
+  `|`, a new line is plain white space.
 - Comments run from a `#` to the end of the line. A `#` followed by a
   hexadecimal digit is a byte literal instead.
 - Names of layers, fields, functions and keywords are case insensitive.
