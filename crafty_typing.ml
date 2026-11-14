@@ -573,6 +573,9 @@ type env =
       widened : (A.location, Type.t) Hashtbl.t ;
       (* Whether a variable was widened while typing: *)
       widening : bool ref ;
+      (* The declarations whose unknown items this pass has filled, the
+       * first assignment that fills them telling their type: *)
+      filled : (A.location, unit) Hashtbl.t ;
       (* The constructor of what the variables of a case hold, by id: *)
       held_by : (int, string) Hashtbl.t ;
       (* The layers, from the bottom, that each pattern of a [MATCH] fixed,
@@ -616,6 +619,14 @@ let widens env at a b =
 (* The type of an empty array literal of a declaration, until what is added
  * to it tells the type of its items: *)
 let unknown_items = Type.Array Type.Void
+
+(* The variable declared [at] is of type [t] from the next pass on, unless
+ * an earlier assignment of this pass already filled it: *)
+let fill env at t =
+    if not (Hashtbl.mem env.filled at) then (
+        Hashtbl.add env.filled at () ;
+        Hashtbl.replace env.widened at t ;
+        env.widening := true)
 
 let rec has_unknown (typ : Type.t) =
     match typ with
@@ -2784,8 +2795,7 @@ and stmt errors env (s : A.stmt) =
             | Some value, _ -> env, Some (mk (Assign { var = v ; path = List.rev path ; value }))
             | None, Some at when fills typ e.typ ->
                 (* Typed again, with the items of the type assigned: *)
-                Hashtbl.replace env.widened at (set_at v.typ (List.length is) e.typ) ;
-                env.widening := true ;
+                fill env at (set_at v.typ (List.length is) e.typ) ;
                 env, None
             | None, _ ->
                 error loc "Cannot assign %s to an item of %s, which is %s"
@@ -2803,8 +2813,7 @@ and stmt errors env (s : A.stmt) =
             | Some e, _ -> env, Some (mk (Assign { var = v ; path = [] ; value = e }))
             | None, Some at when fills v.typ e.typ ->
                 (* Typed again, with the items of the type assigned: *)
-                Hashtbl.replace env.widened at e.typ ;
-                env.widening := true ;
+                fill env at e.typ ;
                 env, None
             | None, Some at when widens env at v.typ e.typ ->
                 (* The program is typed again, with that variable of a
@@ -3363,7 +3372,8 @@ let check ?(warnings=ref []) (program : A.program) =
                     may_wait = true ; errors = ref [] ; warnings = ref [] ;
                     declared_at = Hashtbl.create 7 ; declared_as = Hashtbl.create 7 ;
                     reads = Hashtbl.create 7 ; declared = ref [] ;
-                    widened ; widening = ref false ; held_by = Hashtbl.create 7 ;
+                    widened ; widening = ref false ; filled = Hashtbl.create 7 ;
+                    held_by = Hashtbl.create 7 ;
                     matched = Hashtbl.create 7 ;
                     reports = Hashtbl.create 3 ; provisional = false ;
                     unknown = Hashtbl.create 3 } in
@@ -3414,7 +3424,8 @@ let check_patterns (ps : A.patterns) =
                 declared_as = Hashtbl.create 1 ;
                 reads = Hashtbl.create 1 ; declared = ref [] ;
                 widened = Hashtbl.create 1 ;
-                widening = ref false ; held_by = Hashtbl.create 1 ;
+                widening = ref false ; filled = Hashtbl.create 1 ;
+                held_by = Hashtbl.create 1 ;
                 matched = Hashtbl.create 1 ;
                 reports = Hashtbl.create 1 ; provisional = false ;
                 unknown = Hashtbl.create 1 } in
@@ -3694,6 +3705,10 @@ let check_patterns (ps : A.patterns) =
     (types "a = []\nprint(min(a))")
   "a: interval[], b: float[], c: int[]" \
     (types "a = []\na += 1ms\nb = []\nb := append(b, 1.5)\nc = []\nc += [1]\nc := []")
+  "line 3, column 1: Cannot apply + to x (an ip[], declared at line 1 as []) and an int" \
+    (types "x = []\nx += 1.2.3.4\nx += 1")
+  "line 3, column 1: Cannot assign an int[] to an item of m, which is an ip[]" \
+    (types "m = [[]]\nm[0] := [1.2.3.4]\nm[0] := [1]")
   "a: int[], w: int[], x: int[], y: int[], z: bool" \
     (types "a = [1]\nw = [] + 1\nx = concat([], a)\ny = append([], 1)\nz = [] == a")
   "m: int[][int], r: int[][]" \
