@@ -558,6 +558,8 @@ type env =
        * loop, break, continue, exit), which they cannot in a block within an
        * expression but for the value of a declaration, an assignment or a statement: *)
       may_wait : bool ;
+      (* Whether in the else of an expect, run on timeout, so with no MATCH: *)
+      in_expect_else : bool ;
       errors : errors ;
       warnings : errors ;
       (* Where the variables of the declarations are declared, by id: *)
@@ -977,9 +979,12 @@ let lookup_var env loc name =
     | Some v -> v
     | None ->
         if List.mem name env.poisoned then raise Already_told ;
+        if name = "MATCH" && env.in_expect_else then
+            error loc "MATCH is not defined in the else of expect, which runs \
+                       on timeout, when no packet matched" ;
         if name = "MATCH" then
-            error loc "MATCH is only defined in the blocks of expect and on, \
-                       and the handlers of catch" ;
+            error loc "MATCH is only defined in the pattern blocks of expect \
+                       and on, and the handlers of catch" ;
         if name = "ERROR" then
             error loc "ERROR is only defined in the handlers of catch" ;
         (* In a condition, a name can also be a field of the layer, and
@@ -2066,7 +2071,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 let match_ = match_var env patterns in
                 patterns, match_, branch ~env:{ env with vars = match_ :: env.vars } body)
                 cases in
-        let else_ = Option.map branch else_ in
+        let else_ = Option.map (branch ~env:{ inner with in_expect_else = true }) else_ in
         let typ, bs =
             join loc "expect" (List.map (fun (_, _, b) -> b) cases @ Option.map_default (fun b -> [ b ]) [] else_) in
         let case_bs, else_bs = List.split_at (List.length cases) bs in
@@ -3369,7 +3374,7 @@ let check ?(warnings=ref []) (program : A.program) =
                     declared_here = [] ;
                     poisoned = [] ; stack = [] ;
                     stack_text = [] ; loops = [] ; layer_ctx = None ;
-                    may_wait = true ; errors = ref [] ; warnings = ref [] ;
+                    may_wait = true ; in_expect_else = false ; errors = ref [] ; warnings = ref [] ;
                     declared_at = Hashtbl.create 7 ; declared_as = Hashtbl.create 7 ;
                     reads = Hashtbl.create 7 ; declared = ref [] ;
                     widened ; widening = ref false ; filled = Hashtbl.create 7 ;
@@ -3420,7 +3425,7 @@ let limits (program : A.program) =
 let check_patterns (ps : A.patterns) =
     let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
                 stack_text = [] ; loops = [] ; layer_ctx = None ; may_wait = false ;
-                errors = ref [] ; warnings = ref [] ; declared_at = Hashtbl.create 1 ;
+                in_expect_else = false ; errors = ref [] ; warnings = ref [] ; declared_at = Hashtbl.create 1 ;
                 declared_as = Hashtbl.create 1 ;
                 reads = Hashtbl.create 1 ; declared = ref [] ;
                 widened = Hashtbl.create 1 ;
@@ -3751,8 +3756,10 @@ let check_patterns (ps : A.patterns) =
     (types "if \"x\" {}")
   "line 1, column 16: The timeout of expect must be an interval, not an int" \
     (types "expect timeout=1 Raw {}")
-  "line 2, column 5: MATCH is only defined in the blocks of expect and on, and the handlers of catch" \
+  "line 2, column 5: MATCH is only defined in the pattern blocks of expect and on, and the handlers of catch" \
     (types "expect Raw {} | Raw { x = MATCH }\ny = MATCH")
+  "line 1, column 47: MATCH is not defined in the else of expect, which runs on timeout, when no packet matched" \
+    (types "expect timeout=1s Raw {} else { if true { x = MATCH } }")
   "line 1, column 5: ERROR is only defined in the handlers of catch" (types "x = ERROR")
   "line 1, column 23: Timeout is caught twice" \
     (types "catch {} Timeout {} | Closed|Timeout {}")
@@ -3912,7 +3919,7 @@ let check_patterns (ps : A.patterns) =
     (types "/UDP {}")
   "line 1, column 18: IP cannot be on top of IP\n  On top of IP can be: TCP, UDP, ICMP, Raw." \
     (types "/IP(dst=1.2.3.4)/IP {}")
-  "line 1, column 5: MATCH is only defined in the blocks of expect and on, and the handlers of catch" \
+  "line 1, column 5: MATCH is only defined in the pattern blocks of expect and on, and the handlers of catch" \
     (types "x = MATCH")
   "line 1, column 5: IP.src is a field of a packet being matched, which only the condition of a pattern can read (as in \"expect Raw(IP.src == x)\").\n  Of a packet in a variable, it is \"p[IP].src\": \"LAST[IP].src\" for the last one sent, \"MATCH[IP].src\" for the one that matched." \
     (types "x = IP.src")
