@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 d88b5d895d0c3ddb0b58ba3d1f409613) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 eeae9db0fe911b42238c69ffe00985c9) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -51,8 +51,10 @@ stream.
 
 ### Errors
 
-An error leaves the enclosing blocks one after the other, until a `catch`
-handles it or a `retry` runs its block again; uncaught errors end the program.
+An error leaves the enclosing blocks one after the other until an enclosing
+`try` handles it or a `retry` runs its block again; uncaught errors end the
+program.
+
 Only these errors can be caught: `Timeout` (of `expect` or `on`), `Closed` (a
 TCP connection), `CannotConnect` (writing to a TCP connection refused or timed
 out), `NoRoute`, `Unset` (`getenv`, `arg`, a missing map key or packet layer),
@@ -62,7 +64,7 @@ packet that caused the error (the RST or ICMP error refusing a connection), else
 empty.
 
     n = 1
-    catch {
+    try {
       n := int(arg(0))
     } Unset {}                         # no argument: keep 1
       | Invalid { print_err(ERROR) }   # ERROR is the message
@@ -297,10 +299,10 @@ with the constructors of all, which `case` tells apart:
     inner block may shadow it.
 -   `x := expr` assigns it, and `x += expr` (also `-=`, `*=`, etc.) updates it.
 -   Predefined: `MATCH` (in the block of an `expect` or `on`, or a handler of
-    `catch`), `ERROR` (in a handler of `catch`), `LAST` (the last packet sent,
-    once a block has sent one), `I`, the counter of a `repeat`, `BUDGET`,
-    `PORTS`, `PERMISSIONS`, `OWN_IPS`, the addresses of the interface (or
-    `--ip`'s), IPv4 ones first, and `OWN_IP`, the first of them.
+    `try`), `ERROR` (in a handler of `try`), `LAST` (the last packet sent, once
+    a block has sent one), `I`, the counter of a `repeat`, `BUDGET`, `PORTS`,
+    `PERMISSIONS`, `OWN_IPS`, the addresses of the interface (or `--ip`'s), IPv4
+    ones first, and `OWN_IP`, the first of them.
 -   `LAST` is the packet as given, not as it left: reading a field that only the
     wire knows (`LAST[Eth].ts`, or `IP.id`, `UDP.checksum`... under a
     self-driven `IP`) is an error. In contrast, `p = MESSAGE` captures the
@@ -360,13 +362,13 @@ and the layer selectors of [Patterns](#patterns). Arrays, bytes and strings
 slice as in Python. `a[i] := v` and `m[k] += 1` change an item, adding the key
 to a map if need be.
 
-**Blocks, `if`, `case`, `expect` and `catch` are expressions**:
+**Blocks, `if`, `case`, `expect` and `try` are expressions**:
 
     y = if cond 1 else 2
     ttl = case var=h MATCH[1] IP { h.ttl } else { 0 }
     resp = expect timeout=1s Raw { Got(MATCH[Raw].data) } else { Lost }
     rtt = { t0 = now() ; Request("ping") ; expect Reply {} ; now() - t0 }
-    code = catch { MATCH[DestUnreachable].code } Unset { -1 }
+    code = try { MATCH[DestUnreachable].code } Unset { -1 }
 
 ### Self-driven vs manual stacks
 
@@ -419,7 +421,7 @@ what their engine computes (checksums).
     array or map `a` (as `{key: k, value: v}`).
 -   `retry E|E max=n { ... }`: runs the block again, up to `n` times (default
     3), while it fails with one of these errors. The last error escapes.
--   `catch { ... } E|E { ... } | E { ... } else { ... }`: runs the block of the
+-   `try { ... } E|E { ... } | E { ... } else { ... }`: runs the block of the
     first handler naming the error, or else that of `else` (any error that can
     be caught). Other errors escape.
 -   `if COND STMT [elsif COND STMT] else STMT`: conditionals.

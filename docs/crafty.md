@@ -62,8 +62,10 @@ stream.
 
 ### Errors
 
-An error leaves the enclosing blocks one after the other, until a `catch`
-handles it or a `retry` runs its block again; uncaught errors end the program.
+An error leaves the enclosing blocks one after the other until an enclosing
+`try` handles it or a `retry` runs its block again; uncaught errors end the
+program.
+
 Only these errors can be caught: `Timeout` (of `expect` or `on`), `Closed` (a
 TCP connection), `CannotConnect` (writing to a TCP connection refused or timed
 out), `NoRoute`, `Unset` (`getenv`, `arg`, a missing map key or packet
@@ -74,7 +76,7 @@ connection), else empty.
 
 ```
 n = 1
-catch {
+try {
   n := int(arg(0))
 } Unset {}                         # no argument: keep 1
   | Invalid { print_err(ERROR) }   # ERROR is the message
@@ -326,7 +328,7 @@ print(case result Got { "${I} layers" } else { "${result}" })
   An inner block may shadow it.
 - `x := expr` assigns it, and `x += expr` (also `-=`, `*=`, etc.) updates it.
 - Predefined: `MATCH` (in the block of an `expect` or `on`, or a handler of
-  `catch`), `ERROR` (in a handler of `catch`), `LAST`
+  `try`), `ERROR` (in a handler of `try`), `LAST`
   (the last packet sent, once a block has sent one), `I`, the counter of
   a `repeat`, `BUDGET`, `PORTS`, `PERMISSIONS`,
   `OWN_IPS`, the addresses of the interface (or `--ip`'s), IPv4 ones first, and
@@ -390,14 +392,14 @@ and the layer selectors of [Patterns](#patterns). Arrays, bytes and strings
 slice as in Python.  `a[i] := v` and `m[k] += 1` change an item, adding the key
 to a map if need be.
 
-**Blocks, `if`, `case`, `expect` and `catch` are expressions**:
+**Blocks, `if`, `case`, `expect` and `try` are expressions**:
 
 ```
 y = if cond 1 else 2
 ttl = case var=h MATCH[1] IP { h.ttl } else { 0 }
 resp = expect timeout=1s Raw { Got(MATCH[Raw].data) } else { Lost }
 rtt = { t0 = now() ; Request("ping") ; expect Reply {} ; now() - t0 }
-code = catch { MATCH[DestUnreachable].code } Unset { -1 }
+code = try { MATCH[DestUnreachable].code } Unset { -1 }
 ```
 
 ### Self-driven vs manual stacks
@@ -453,7 +455,7 @@ what their engine computes (checksums).
   array or map `a` (as `{key: k, value: v}`).
 - `retry E|E max=n { ... }`: runs the block again, up to `n` times
   (default 3), while it fails with one of these errors. The last error escapes.
-- `catch { ... } E|E { ... } | E { ... } else { ... }`: runs the block of the
+- `try { ... } E|E { ... } | E { ... } else { ... }`: runs the block of the
   first handler naming the error, or else that of `else` (any error that can
   be caught). Other errors escape.
 - `if COND STMT [elsif COND STMT] else STMT`: conditionals.

@@ -696,7 +696,7 @@ let make_expr ~cond ~self ~expr ~pattern ~patterns ~block ~stmt =
             Expect { timeout ; cases ; else_ } in
     (* Then errors and their block, which no statement but a stack starts
      * with, separated as the cases of an [expect]: *)
-    let catch =
+    let try_ =
         let sep = nl_sp -- item '|' -- nl_sp in
         let else_ = (sep ||| nl_sp) -+ keyword "else" -+ kw_body in
         let handler =
@@ -707,7 +707,7 @@ let make_expr ~cond ~self ~expr ~pattern ~patterns ~block ~stmt =
              optional_greedy ~def:None (else_ >>: Option.some)) |||
             (else_ >>: fun b -> [], Some b)) +-
         quiet (nay (sp -- item '|')) >>:
-        fun (body, (handlers, else_)) -> Catch { body ; handlers ; else_ } in
+        fun (body, (handlers, else_)) -> Try { body ; handlers ; else_ } in
     let field = identifier +- sp +- item ':' +- nl_sp ++ expr in
     let atom =
         (here ++ literal >>: fun (loc, l) -> { loc ; desc = Lit l }) |||
@@ -745,7 +745,7 @@ let make_expr ~cond ~self ~expr ~pattern ~patterns ~block ~stmt =
         (here ++ (keyword "if" -+ if_) >>: fun (loc, desc) -> { loc ; desc }) |||
         (here ++ (keyword "case" -+ case) >>: fun (loc, desc) -> { loc ; desc }) |||
         (here ++ (keyword "expect" -+ expect) >>: fun (loc, desc) -> { loc ; desc }) |||
-        (here ++ (keyword "catch" -+ catch) >>: fun (loc, desc) -> { loc ; desc }) |||
+        (here ++ (keyword "try" -+ try_) >>: fun (loc, desc) -> { loc ; desc }) |||
         (* A stack rather than arguments: *)
         (here +- quiet (identifier >>= fun s ->
             if String.lowercase_ascii s = "encode" then return () else fail) ++
@@ -1206,13 +1206,13 @@ let parse_patterns text =
   "../../IP!/TCP!(flags=4)/Raw\n" (reads "../../IP!/TCP!(flags=4)/Raw()")
   "x = (y =~ /IP/UDP(dport == 53))\n" (reads "x = y =~ /IP/UDP(dport = 53)")
   "retry Timeout max=3 {\n  break\n}\n" (reads "retry Timeout max=3 {\n  break\n}")
-  "catch {\n  x = 1\n} else {\n}\n" (reads "catch { x = 1 } else {}")
+  "try {\n  x = 1\n} else {\n}\n" (reads "try { x = 1 } else {}")
   "retry Timeout|Closed max=2 {\n}\n" (reads "retry Timeout | Closed max=2 {}")
   "retry Unset {\n}\n" (reads "retry Unset {}")
   "retry {\n}\nretry max=2 {\n}\n" (reads "retry {}\nretry max=2 {}")
-  "catch {\n} Timeout|NoRoute {\n  x = 1\n} | Unset {\n} else {\n}\nx = 2\n" \
-    (reads "catch {}\nTimeout | NoRoute { x = 1 }\n| Unset {} else {}\nx = 2")
-  "catch {\n} else {\n}\nUDP {\n}\n" (reads "catch {}\nelse {}\nUDP {}")
+  "try {\n} Timeout|NoRoute {\n  x = 1\n} | Unset {\n} else {\n}\nx = 2\n" \
+    (reads "try {}\nTimeout | NoRoute { x = 1 }\n| Unset {} else {}\nx = 2")
+  "try {\n} else {\n}\nUDP {\n}\n" (reads "try {}\nelse {}\nUDP {}")
   "expect timeout=1s Raw {\n} | ICMP {\n} else {\n}\n" \
     (reads "expect timeout=1s Raw {}\n  | ICMP {}\n  else {}")
   "line 1, column 22: The else of expect runs once its timeout passed: expect needs one" \
@@ -1476,7 +1476,7 @@ let parse_patterns text =
   "line 1, column 16: Unknown function foo" (reads "print(\"${foo(2)}\")")
   "line 1, column 10: Unknown function foo" (reads "if foo(1) { x := 1 }")
   "line 2, column 12: Unknown function foo" \
-    (reads "catch {\n  if foo(1) { x := 1 } else { x := 2 }\n} else {}")
+    (reads "try {\n  if foo(1) { x := 1 } else { x := 2 }\n} else {}")
   "line 1, column 10: A layer is selected by the layers below it, not by carets: /IP is the first IP, TimeExceeded/IP the one on top of TimeExceeded" (reads "x = a[^IP]")
   "line 1, column 1: _ is a reserved name" (reads "_ = 1")
   "line 1, column 5: _ is a reserved name" (reads "for _ in [1] {}")

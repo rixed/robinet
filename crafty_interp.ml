@@ -42,11 +42,11 @@
    it fails with one of the errors E, the error of the last attempt going to
    the enclosing block.
    [wait] goes on with the next statement after that duration.
-   [catch] leaves its block on its first error, which goes to the first of
+   [try] leaves its block on its first error, which goes to the first of
    its handlers that names it (or to its [else]), if any, and no further. [if]
    runs the block of the first condition that holds, if any, and [case] that
    of its value's constructor. A block, an [if], a [case], an [expect] or a
-   [catch] that is the value of a declaration, an assignment or a statement runs as
+   [try] that is the value of a declaration, an assignment or a statement runs as
    a block of its own, which ends with that value; within another
    expression, the typer lets it only compute, and it is evaluated at once. An error
    reaching the program's block ends the program.
@@ -805,7 +805,7 @@ let rec eval output (env : env) (e : T.expr) =
         eval_block output env b
     (* Which the typer lets be only the value of a declaration, an
      * assignment or a statement: *)
-    | T.Expect _ | T.Catch _ -> assert false
+    | T.Expect _ | T.Try _ -> assert false
 
 (* The block of a [case] for that value, and the environment to run it in: *)
 and branch env v (arms : T.arm list) else_ =
@@ -1070,7 +1070,7 @@ let rec run_block ?(enter=fun _ env -> Some env) t parent env (stmts : T.block)
     b
 
 (* Computes [e] in block [b], then [k] with its value; a block, an [if], a
- * [case], an [expect] or a [catch] runs as a block within [b]: *)
+ * [case], an [expect] or a [try] runs as a block within [b]: *)
 and exec_value t b env (e : T.expr) k =
     let run env body =
         ignore (run_block t b env body ~fail:b.fail ~break_:b.break_ k) in
@@ -1107,7 +1107,7 @@ and exec_value t b env (e : T.expr) k =
                         ignore (guard b (fun () ->
                             nothing_matched e.loc timeout missed)))) ()) timeout)
             (guard b (fun () -> timeout_of value "expect" timeout))
-    | T.Catch { body ; handlers } ->
+    | T.Try { body ; handlers } ->
         ignore (run_block t b env body ~fail:(fun err ->
             match List.find_opt (fun (h : T.handler) -> caught h.errors err) handlers with
             | None -> b.fail err
@@ -1816,8 +1816,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (*$= runs & ~printer:identity
   "0s: #0101\n0s: #0101\n0s: done" \
     (runs "repeat count=2 { print(\"${#01 * 2}\") }")
-  "0s: failed: line 1, column 30: Cannot repeat -1 times" \
-    (runs "repeat count=2 { catch { x = #01 * -1\n  print(\"no\") } else {}\n  print(I) }")
+  "0s: failed: line 1, column 28: Cannot repeat -1 times" \
+    (runs "repeat count=2 { try { x = #01 * -1\n  print(\"no\") } else {}\n  print(I) }")
   "0s: 0\n0s: 1\n0s: done" \
     (runs "repeat count=2 { if I > 5 { print(\"${#01 * -1}\") }\n  print(I) }")
   "0s: [2, 2]\n0s: [3, 2]\n0s: done" \
@@ -1989,23 +1989,23 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "0s: try\n0s: failed: line 2, column 3: Assertion failed: false" \
     (runs "retry Assertion max=0 { print(\"try\")\n  assert(false) }")
   "0s: 0\n0s: 1\n0s: 2\n0s: after\n0s: done" \
-    (runs "repeat count=3 { catch { print(I)\n    assert(false)\n    print(\"not reached\") } else {} }\nprint(\"after\")")
+    (runs "repeat count=3 { try { print(I)\n    assert(false)\n    print(\"not reached\") } else {} }\nprint(\"after\")")
   "0s: caught boom\n0s: after\n0s: done" \
-    (runs "catch { assert(false, msg=\"boom\") } Timeout { print(\"t\") }\n  | Unset|Assertion { print(\"caught ${ERROR}\") }\nprint(\"after\")")
-  "0s: failed: line 1, column 9: boom" \
-    (runs "catch { assert(false, msg=\"boom\") } Timeout { print(\"t\") }\nprint(\"not reached\")")
+    (runs "try { assert(false, msg=\"boom\") } Timeout { print(\"t\") }\n  | Unset|Assertion { print(\"caught ${ERROR}\") }\nprint(\"after\")")
+  "0s: failed: line 1, column 7: boom" \
+    (runs "try { assert(false, msg=\"boom\") } Timeout { print(\"t\") }\nprint(\"not reached\")")
   "0s: No argument 5: 0 given\n0s: done" \
-    (runs "catch { x = arg(5) }\nelse { print(ERROR) }")
-  "0s: failed: line 1, column 13: Division by zero" \
-    (runs "catch { x = 1 / 0 } else { print(\"not reached\") }")
-  "0s: failed: line 1, column 32: again" \
-    (runs "catch { assert(false) } else { assert(false, msg=\"again\") }")
+    (runs "try { x = arg(5) }\nelse { print(ERROR) }")
+  "0s: failed: line 1, column 11: Division by zero" \
+    (runs "try { x = 1 / 0 } else { print(\"not reached\") }")
+  "0s: failed: line 1, column 30: again" \
+    (runs "try { assert(false) } else { assert(false, msg=\"again\") }")
   "0s: ok\n0s: failed: line 2, column 5: Division by zero" \
-    (runs "catch { print(\"ok\") } else {}\nx = 1 / 0")
+    (runs "try { print(\"ok\") } else {}\nx = 1 / 0")
   "0s: -1 2\n0s: No key 3 in this map\n0s: done" \
-    (runs "x = catch { int(\"a\") } Invalid { -1 }\ny = catch { 2 } Invalid { -1 }\nprint(\"${x} ${y}\")\nm = [1: 2]\ncatch { z = m[3] } Unset { print(ERROR) }")
+    (runs "x = try { int(\"a\") } Invalid { -1 }\ny = try { 2 } Invalid { -1 }\nprint(\"${x} ${y}\")\nm = [1: 2]\ntry { z = m[3] } Unset { print(ERROR) }")
   "0s: 1\n0s: done" (runs "print(1)\nexit\nprint(2)")
-  "0s: done" (runs "catch { exit } else { print(\"no\") }\nprint(\"no\")")
+  "0s: done" (runs "try { exit } else { print(\"no\") }\nprint(\"no\")")
   "1s: done" (runs "spawn { wait 1s\n  exit }\nrepeat every=100ms { wait 1ms }")
   "0s: ok\n0s: failed: line 2, column 5: Division by zero" \
     (runs "retry Assertion max=2 { print(\"ok\") }\nx = 1 / 0")
@@ -2088,7 +2088,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "0s: failed: line 2, column 1: x is 3" \
     (runs "x = 3\nassert(x == 4, msg=\"x is ${x}\")")
   "0s: caught\n0s: done" \
-    (runs "catch { assert(0) } else {}\nprint(\"caught\")")
+    (runs "try { assert(0) } else {}\nprint(\"caught\")")
   "0s: small 0\n0s: odd 1\n0s: big 2\n0s: odd 3\n0s: big 4\n0s: done" \
     (runs "repeat count=5 { if I & 1 print(\"odd ${I}\") elsif I > 1 print(\"big ${I}\")\n  else print(\"small ${I}\") }")
   "0s: 1 0 4\n0s: done" \
@@ -2312,12 +2312,12 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect timeout=1s Raw(\"pong\") { print(\"no\") } }")
   "2s400ms3ps: 2\n2s400ms3ps: done" \
     (runs ~inject:[ 0.5, reply "pong" ; 1.4, reply "pong" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  catch { repeat count=3 { Raw(\"ping\")\n      expect timeout=1s Raw(\"pong\") { n += 1 } } } else {}\n  print(n) }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  try { repeat count=3 { Raw(\"ping\")\n      expect timeout=1s Raw(\"pong\") { n += 1 } } } else {}\n  print(n) }")
   "500ms: pong\n1s500ms3ps: lost\n1s500ms3ps: after\n1s500ms3ps: done" \
     (runs ~inject:[ 0.5, reply "pong" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  repeat count=2 { Raw(\"ping\")\n    expect timeout=1s Raw(\"pong\") { print(\"pong\") }\n    else { print(\"lost\") } }\n  print(\"after\") }")
   "1s: Nothing matched within 1s\n1s: done" \
-    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  catch { expect timeout=1s Raw(\"pong\") {} } Closed {} | Timeout { print(ERROR) } }")
+    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  try { expect timeout=1s Raw(\"pong\") {} } Closed {} | Timeout { print(ERROR) } }")
   "500ms: pong\n1s500ms3ps: lost\n1s500ms3ps: done" \
     (runs ~inject:[ 0.5, reply "pong" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  repeat count=2 { Raw(\"ping\")\n    r = expect timeout=1s Raw { MATCH[Raw].data } else { \"lost\" }\n    print(r) } }")
@@ -2480,7 +2480,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "0s: 0\n0s: 1\n0s: 2\n0s: done" \
     (runs "repeat count=5 { spawn { if I == 3 { break 2 } } ; print(I) }")
   "100ms: b\n100ms: done" \
-    (runs "catch { spawn for=1s { wait 100ms ; assert(false) }\n  wait 500ms ; print(\"a\") } else {}\nprint(\"b\")")
+    (runs "try { spawn for=1s { wait 100ms ; assert(false) }\n  wait 500ms ; print(\"a\") } else {}\nprint(\"b\")")
   "100ms: failed: line 1, column 33: Division by zero" \
     (runs "spawn for=1s { wait 100ms ; x = 1 / 0 }")
   "0s: failed: line 1, column 11: The duration of spawn cannot be negative" \
@@ -2932,7 +2932,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7, wscale=-1) {\n  Raw(\"hi\")\n  expect timeout=1s Raw {\n    s = stats()\n    print(\"${s.rcv_wscale} ${s.snd_wscale} ${s.rcv_wnd}\") } }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4001>22 Syn opts=[mss 1460,nop,wscale 7] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 22>4001 AckRst \"\"\na 0.000s: reset\na 0.000s: Cannot connect to 10.0.0.2 port 22: connection refused\na 0.000s: again 20\na 0.000s: done Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4001, dst=22)#1{Raw}}}" \
     (with_host ~frames:true \
-        "/IP(dst=10.0.0.2)/TCP(src=4001, dst=22) {\n  on max=1 ../TCP!(flags & RST) { print(\"reset\") }\n  catch { Raw(#1ee7) } CannotConnect { print(ERROR) }\n  catch { Raw(#1ee7) } CannotConnect { print(\"again ${MATCH[TCP].flags}\") } }")
+        "/IP(dst=10.0.0.2)/TCP(src=4001, dst=22) {\n  on max=1 ../TCP!(flags & RST) { print(\"reset\") }\n  try { Raw(#1ee7) } CannotConnect { print(ERROR) }\n  try { Raw(#1ee7) } CannotConnect { print(\"again ${MATCH[TCP].flags}\") } }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na 0.000s: connected!\na 0.000s: done Eth#2" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  ../TCP!(flags=SYN, seq_num=123)/Raw()\n  expect timeout=1s ../TCP!(flags == SYN | ACK) {\n    ../TCP!(flags=ACK, seq_num=124, ack_num=MATCH[TCP].seq_num + 1)/Raw()\n    print(\"connected!\") } }")
@@ -2947,13 +2947,13 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
  * another sequence number, nor one once the connection is established: *)
 (*$= & ~printer:identity
   "a 0.000s: Cannot connect to 10.0.0.2 port 80: host unreachable: code 1, from 4000, -1\na 0.000s: done Eth#1{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4000, dst=80){Raw}}}\nb 0.000s: done Eth#1" \
-    (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  catch { Raw(\"hi\") } CannotConnect {\n    sport = catch { MATCH[UDP].src } Unset { -1 }\n    print(\"${ERROR}: code ${MATCH[DestUnreachable].code}, from ${MATCH[TCP].src}, ${sport}\") } }" \
+    (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  try { Raw(\"hi\") } CannotConnect {\n    sport = try { MATCH[UDP].src } Unset { -1 }\n    print(\"${ERROR}: code ${MATCH[DestUnreachable].code}, from ${MATCH[TCP].src}, ${sport}\") } }" \
          "expect timeout=1s /IP/TCP!(dst == 80, flags & SYN) {\n  /IP(dst=MATCH[IP].src)/ICMP/DestUnreachable(code=HOST_UNREACHABLE)/IP(src=MATCH[IP].src, dst=MATCH[IP].dst)/TCP(src=MATCH[TCP].src, dst=MATCH[TCP].dst, seq_num=MATCH[TCP].seq_num, flags=SYN)/Raw() }")
   "a 0.000s: Cannot connect to 2001:db8::2 port 80: port unreachable\na 0.000s: done Eth#2{IP6(src=2001:db8::1, dst=2001:db8::2)#1{TCP(src=4000, dst=80){Raw}}}\nb 0.000s: done Eth#2" \
-    (two ~arp:true ~v6:true "/IP6(dst=2001:db8::2)/TCP(src=4000, dst=80) {\n  catch { Raw(\"hi\") } CannotConnect { print(ERROR) } }" \
+    (two ~arp:true ~v6:true "/IP6(dst=2001:db8::2)/TCP(src=4000, dst=80) {\n  try { Raw(\"hi\") } CannotConnect { print(ERROR) } }" \
          "expect timeout=1s /IP6/TCP!(dst == 80, flags & SYN) {\n  /IP6(dst=MATCH[IP6].src)/ICMP6/DestUnreachable(code=PORT_UNREACHABLE6)/IP6(src=MATCH[IP6].src, dst=MATCH[IP6].dst)/TCP(src=MATCH[TCP].src, dst=MATCH[TCP].dst, seq_num=MATCH[TCP].seq_num, flags=SYN)/Raw() }")
   "b 0.000s: done Eth#1\na 15.000s: Cannot connect to 10.0.0.2 port 80: connection timed out 0\na 15.000s: done Eth#1{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4000, dst=80){Raw}}}" \
-    (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  catch { Raw(\"hi\") } CannotConnect { print(\"${ERROR} ${length(MATCH)}\") } }" \
+    (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  try { Raw(\"hi\") } CannotConnect { print(\"${ERROR} ${length(MATCH)}\") } }" \
          "expect timeout=1s /IP/TCP!(dst == 80, flags & SYN) {\n  /IP(dst=MATCH[IP].src)/ICMP/DestUnreachable(code=HOST_UNREACHABLE)/IP(src=MATCH[IP].src, dst=MATCH[IP].dst)/TCP(src=MATCH[TCP].src, dst=MATCH[TCP].dst, seq_num=MATCH[TCP].seq_num + 1, flags=SYN)/Raw() }")
   "b 0.000s: hi\na 0.500s: established true\na 0.500s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=4000, dst=80)#2{Raw}}}\nb 0.500s: again\nb 1.000s: done Eth#6{IP(src=10.0.0.2, dst=10.0.0.1)#6{TCP(src=80, dst=4000)#6}}" \
     (two ~arp:true "/IP(dst=10.0.0.2)/TCP(src=4000, dst=80) {\n  Raw(\"hi\")\n  wait 500ms\n  Raw(\"again\")\n  print(\"established ${stats().established}\") }" \
@@ -3148,7 +3148,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (policed "print(\"hello\")\n/IP(dst=1.2.3.4)/UDP(src=1000, dst=7)/Raw(\"x\")")
   "0.003s: hit max-packets\n0.003s: stopped\n3 frames" (policed ~max_packets:3 pings)
   "0.003s: hit max-packets\n0.003s: stopped\n3 frames" \
-    (policed ~max_packets:3 ("catch { "^ pings ^" } else {}\nprint(\"not caught\")"))
+    (policed ~max_packets:3 ("try { "^ pings ^" } else {}\nprint(\"not caught\")"))
   "0.110s: hit max-packet-rate\n0.110s: stopped\n110 frames" (policed ~max_packet_rate:100. pings)
   "0.100s: stopped\n100 frames" (policed ~stop_at:0.1 pings)
   "0.000s: stopped\n0 frames" (policed ~stop:true pings)
@@ -3220,11 +3220,11 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "0.000s: stopped\n0 frames" \
     (policed ("BUDGET = {max_ram: 8000}\nx = bytes(\""^ String.make 1001 'x' ^"\")\nprint(\"b\")"))
   "0.000s: stopped\n0 frames" \
-    (policed "BUDGET = {max_ram: 8000}\ncatch { x = [0] * 1001 } else {}\nprint(\"not caught\")")
+    (policed "BUDGET = {max_ram: 8000}\ntry { x = [0] * 1001 } else {}\nprint(\"not caught\")")
   "0.000s: failed: Out of memory\n0 frames" \
     (policed "x = [0] * 1000000000000000\nprint(\"not reached\")")
   "0.000s: failed: Out of memory\n0 frames" \
-    (policed "catch { x = array(init=0, len=1000000000000000) } else {}\nprint(\"not caught\")")
+    (policed "try { x = array(init=0, len=1000000000000000) } else {}\nprint(\"not caught\")")
   "0.000s: a\n1.000s: failed: Out of memory\n0 frames" \
     (policed "print(\"a\")\nwait 1s\nx = [0] * 1000000000000000\nprint(\"not reached\")")
   "0.000s: failed: Invalid_argument(\"Array.make\")\n0 frames" \
@@ -3341,9 +3341,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
        /IP(dst=10.0.0.2)/UDP(dst=7)/Raw(\"on-subnet\")\n\
        /IP(dst=10.1.0.1)/UDP(dst=7)/Raw(\"specific\")\n\
        /IP(dst=10.2.0.1)/UDP(dst=7)/Raw(\"on-link\")\n\
-       catch { /IP(dst=10.9.9.9)/UDP(dst=7)/Raw(\"unrouted\") } else {}\n\
-       catch { /IP(dst=10.0.0.1)/UDP(dst=7)/Raw(\"local\") } else {}\n\
-       catch { /IP(dst=172.16.0.9)/UDP(dst=7)/Raw(\"elsewhere\") } else {}\n\
+       try { /IP(dst=10.9.9.9)/UDP(dst=7)/Raw(\"unrouted\") } else {}\n\
+       try { /IP(dst=10.0.0.1)/UDP(dst=7)/Raw(\"local\") } else {}\n\
+       try { /IP(dst=172.16.0.9)/UDP(dst=7)/Raw(\"elsewhere\") } else {}\n\
        wait dur=1s\n\
        /IP(dst=10.0.0.255)/UDP(dst=7)/Raw(\"broadcast\")\n\
        /Eth!/IP!(src=10.0.0.1, dst=10.1.0.1)/UDP!(src=5000, dst=7)/Raw(\"manual\")") in

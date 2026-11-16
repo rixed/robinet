@@ -100,7 +100,7 @@ and desc =
                   else_ : block option }
     (* The value of [body], or else that of the first handler that names its
      * error, if any: *)
-    | Catch of { body : block ; handlers : handler list }
+    | Try of { body : block ; handlers : handler list }
     (* A constant within a loop (see [cache_constants]), and its value once
      * it was computed: *)
     | Memo of { value : expr ; mutable cached : Crafty_value.value option }
@@ -409,7 +409,7 @@ let rec diverges (b : block) =
         | Expect { cases ; else_ ; _ } ->
             List.for_all (fun (c : case) -> diverges c.body) cases &&
             Option.map_default diverges true else_
-        | Catch { body ; handlers } ->
+        | Try { body ; handlers } ->
             diverges body && List.for_all (fun h -> diverges h.handler) handlers
         | _ -> false)
     | _ -> false
@@ -457,14 +457,14 @@ let rec coerce e typ =
             match cases, else_ with
             | Some cases, Some else_ -> Some (Expect { timeout ; cases ; else_ })
             | _ -> None)
-    | Catch { body ; handlers } ->
+    | Try { body ; handlers } ->
         let handlers =
             all_some (List.map (fun h ->
                 Option.map (fun handler -> { h with handler }) (coerce_tail h.handler typ))
                 handlers) in
         with_desc (
             match coerce_tail body typ, handlers with
-            | Some body, Some handlers -> Some (Catch { body ; handlers })
+            | Some body, Some handlers -> Some (Try { body ; handlers })
             | _ -> None)
     | _ -> if converts e.typ typ then Some (convert e typ) else None
 
@@ -984,9 +984,9 @@ let lookup_var env loc name =
                        on timeout, when no packet matched" ;
         if name = "MATCH" then
             error loc "MATCH is only defined in the pattern blocks of expect \
-                       and on, and the handlers of catch" ;
+                       and on, and the handlers of try" ;
         if name = "ERROR" then
-            error loc "ERROR is only defined in the handlers of catch" ;
+            error loc "ERROR is only defined in the handlers of try" ;
         (* In a condition, a name can also be a field of the layer, and
          * those of the layers around it read otherwise: *)
         let fields, elsewhere =
@@ -2079,23 +2079,23 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             List.map2 (fun (patterns, match_, _) body -> { patterns ; match_ ; body })
                 cases case_bs in
         mk typ (Expect { timeout ; cases ; else_ = List.Exceptionless.hd else_bs })
-    | A.Catch { body ; handlers ; else_ } ->
+    | A.Try { body ; handlers ; else_ } ->
         if not env.may_wait then
-            error loc "catch cannot be in a block within an expression, but for \
+            error loc "try cannot be in a block within an expression, but for \
                        the value of a declaration, an assignment or a statement" ;
         if not tail then
-            error loc "catch cannot be within an expression, but be the value \
+            error loc "try cannot be within an expression, but be the value \
                        of a declaration, an assignment or a statement" ;
         if handlers = [] && else_ = None then
-            error loc "catch needs handlers of the errors it catches, as in \
-                       catch { ... } Timeout|Closed { ... }, or else { ... } \
+            error loc "try needs handlers of the errors it catches, as in \
+                       try { ... } Timeout|Closed { ... }, or else { ... } \
                        for any error that can be caught" ;
         let handlers =
             List.map (fun (h : A.handler) ->
                 h, List.map (error_name h.handler_loc) h.errors) handlers in
         if body = [] then
             env.warnings :=
-                (loc, "This catch has an empty block: it catches nothing") ::
+                (loc, "This try has an empty block: it catches nothing") ::
                 !(env.warnings) ;
         ignore (List.fold_left (fun seen ((h : A.handler), names) ->
             List.fold_left (fun seen n ->
@@ -2111,11 +2111,11 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         let hs =
             List.map (fun ((h : A.handler), names) -> handler names h.handler) handlers @
             Option.map_default (fun b -> [ handler [] b ]) [] else_ in
-        let typ, bs = join loc "catch" (branch body :: List.map snd hs) in
+        let typ, bs = join loc "try" (branch body :: List.map snd hs) in
         let handlers =
             List.map2 (fun ((errors, error_, match_), _) handler ->
                 { errors ; error_ ; match_ ; handler }) hs (List.tl bs) in
-        mk typ (Catch { body = List.hd bs ; handlers })
+        mk typ (Try { body = List.hd bs ; handlers })
 
 (* An operand, named if a variable, with where its type comes from: *)
 and describe env e =
@@ -2935,7 +2935,7 @@ and expr_declarations e =
         Option.map_default expr_declarations [] timeout @
         List.concat_map (fun (c : case) -> declarations c.body) cases @
         Option.map_default declarations [] else_
-    | Catch { body ; handlers } ->
+    | Try { body ; handlers } ->
         declarations body @ List.concat_map (fun h -> declarations h.handler) handlers
     | Field (e, _) | Unop (_, e) | Convert e | Select { packet = e ; _ }
     | Memo { value = e ; _ } ->
@@ -2997,7 +2997,7 @@ let sub_exprs e =
     | If { cond ; _ } -> [ cond ]
     | Case { subject ; _ } -> [ subject ]
     | Expect { timeout ; _ } -> Option.map_default (fun e -> [ e ]) [] timeout
-    | Block _ | Catch _ | Lit _ | Var _ | Packet_field _ -> []
+    | Block _ | Try _ | Lit _ | Var _ | Packet_field _ -> []
 
 (* The blocks directly within [s] and [e]: *)
 let stmt_blocks s =
@@ -3016,7 +3016,7 @@ let expr_blocks e =
         List.map (fun a -> a.branch) arms @ Option.map_default (fun b -> [ b ]) [] else_
     | Expect { cases ; else_ ; _ } ->
         List.map (fun (c : case) -> c.body) cases @ Option.map_default (fun b -> [ b ]) [] else_
-    | Catch { body ; handlers } -> body :: List.map (fun h -> h.handler) handlers
+    | Try { body ; handlers } -> body :: List.map (fun h -> h.handler) handlers
     | _ -> []
 
 (* The conditions of the patterns of [s] and [e]: *)
@@ -3138,7 +3138,7 @@ let exfiltrations (b : block) =
         | Expect { cases ; else_ ; _ } ->
             List.exists (fun (c : case) -> block_taints c.body) cases ||
             Option.map_default block_taints false else_
-        | Catch { body ; handlers } ->
+        | Try { body ; handlers } ->
             block_taints body || List.exists (fun h -> block_taints h.handler) handlers
         | _ -> List.exists (fun e -> is_packet e || taints e) (sub_exprs e)
     and block_taints b =
@@ -3157,7 +3157,7 @@ let exfiltrations (b : block) =
             List.iter (function Bind (v, items) -> flows v items | Filter _ -> ()) clauses
         | Expect { cases ; _ } ->
             List.iter (fun (c : case) -> mark packets c.match_) cases
-        | Catch { handlers ; _ } ->
+        | Try { handlers ; _ } ->
             List.iter (fun (h : handler) -> mark packets h.match_) handlers
         | _ -> ()) ;
         List.iter bind_cases (sub_exprs e) in
@@ -3288,7 +3288,7 @@ let rec is_constant e =
     | Record _ | Array _ | Map _ | Comprehension _ | Convert _ | Construct _ | Memo _ ->
         List.for_all is_constant (sub_exprs e)
     | Var _ | Packet_field _ | Select _ | Encode _ | Block _ | If _ | Case _
-    | Expect _ | Catch _ ->
+    | Expect _ | Try _ ->
         false
 
 (* Has each constant that is not a scalar, within a loop, computed the first
@@ -3489,8 +3489,8 @@ let check_patterns (ps : A.patterns) =
     (warns "on for=1s /IP/UDP {}\non /IP/UDP {}\non max=2 /IP/TCP {}")
   "" (warns "on /IP/UDP {}\non linger=1s /IP/TCP {}")
   "" (warns "on /IP/UDP {}\nwait 1s")
-  "line 2, column 1: This catch has an empty block: it catches nothing" \
-    (warns "wait 1s\ncatch { } else {}")
+  "line 2, column 1: This try has an empty block: it catches nothing" \
+    (warns "wait 1s\ntry { } else {}")
   "line 1, column 1: This retry has an empty block: it has nothing to retry" \
     (warns "retry Timeout max=2 { }")
   "line 2, column 12: This id is the variable id, not the field of IP: write IP.id for the field\nline 2, column 18: This id is the variable id, not the field of IP: write IP.id for the field" \
@@ -3758,32 +3758,32 @@ let check_patterns (ps : A.patterns) =
     (types "if \"x\" {}")
   "line 1, column 16: The timeout of expect must be an interval, not an int" \
     (types "expect timeout=1 Raw {}")
-  "line 2, column 5: MATCH is only defined in the pattern blocks of expect and on, and the handlers of catch" \
+  "line 2, column 5: MATCH is only defined in the pattern blocks of expect and on, and the handlers of try" \
     (types "expect Raw {} | Raw { x = MATCH }\ny = MATCH")
   "line 1, column 47: MATCH is not defined in the else of expect, which runs on timeout, when no packet matched" \
     (types "expect timeout=1s Raw {} else { if true { x = MATCH } }")
-  "line 1, column 5: ERROR is only defined in the handlers of catch" (types "x = ERROR")
-  "line 1, column 23: Timeout is caught twice" \
-    (types "catch {} Timeout {} | Closed|Timeout {}")
-  "e: string" (types "catch {} else { e = ERROR }")
-  "x: int" (types "x = catch { 1 } Unset { 2 }")
+  "line 1, column 5: ERROR is only defined in the handlers of try" (types "x = ERROR")
+  "line 1, column 21: Timeout is caught twice" \
+    (types "try {} Timeout {} | Closed|Timeout {}")
+  "e: string" (types "try {} else { e = ERROR }")
+  "x: int" (types "x = try { 1 } Unset { 2 }")
   "x: int" (types "x = if true { exit } else { 1 }")
   "line 1, column 11: exit cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \
     (types "x = 1 + { exit\n 2 }")
-  "line 1, column 9: catch cannot be within an expression, but be the value of a declaration, an assignment or a statement" \
-    (types "x = 1 + catch { 1 } Unset { 2 }")
-  "line 1, column 5: The branches of this catch are of different types: an int and a string" \
-    (types "x = catch { 1 } Unset { \"a\" }")
+  "line 1, column 9: try cannot be within an expression, but be the value of a declaration, an assignment or a statement" \
+    (types "x = 1 + try { 1 } Unset { 2 }")
+  "line 1, column 5: The branches of this try are of different types: an int and a string" \
+    (types "x = try { 1 } Unset { \"a\" }")
   "line 1, column 1: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, CannotConnect, NoRoute, Unset, Invalid, Unresolved, Assertion)" \
     (types "retry Timout {}")
-  "line 1, column 10: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, CannotConnect, NoRoute, Unset, Invalid, Unresolved, Assertion)" \
-    (types "catch {} Closed | Timout {}")
+  "line 1, column 8: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, CannotConnect, NoRoute, Unset, Invalid, Unresolved, Assertion)" \
+    (types "try {} Closed | Timout {}")
   "line 1, column 1: retry needs the errors it retries on, as in retry Timeout|Closed max=3 { ... }" \
     (types "retry {}")
   "line 1, column 1: retry needs the errors it retries on, as in retry Timeout|Closed max=3 { ... }" \
     (types "retry max=2 {}")
-  "line 2, column 1: catch needs handlers of the errors it catches, as in catch { ... } Timeout|Closed { ... }, or else { ... } for any error that can be caught" \
-    (types "x = 1\ncatch { x := 2 }\nx := 3")
+  "line 2, column 1: try needs handlers of the errors it catches, as in try { ... } Timeout|Closed { ... }, or else { ... } for any error that can be caught" \
+    (types "x = 1\ntry { x := 2 }\nx := 3")
   "x: int" (types "expect timeout=1s Raw {} else { x = 1 }")
   "line 1, column 19: The maximum of retry must be an int, not an interval" \
     (types "retry Timeout max=1s {}")
@@ -3921,7 +3921,7 @@ let check_patterns (ps : A.patterns) =
     (types "/UDP {}")
   "line 1, column 18: IP cannot be on top of IP\n  On top of IP can be: TCP, UDP, ICMP, Raw." \
     (types "/IP(dst=1.2.3.4)/IP {}")
-  "line 1, column 5: MATCH is only defined in the pattern blocks of expect and on, and the handlers of catch" \
+  "line 1, column 5: MATCH is only defined in the pattern blocks of expect and on, and the handlers of try" \
     (types "x = MATCH")
   "line 1, column 5: IP.src is a field of a packet being matched, which only the condition of a pattern can read (as in \"expect Raw(IP.src == x)\").\n  Of a packet in a variable, it is \"p[IP].src\": \"LAST[IP].src\" for the last one sent, \"MATCH[IP].src\" for the one that matched." \
     (types "x = IP.src")

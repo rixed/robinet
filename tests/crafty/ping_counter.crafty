@@ -1,7 +1,7 @@
 # From the spec's "Declarations and assignment".
 /IP(dst=1.2.3.4)/UDP(src=1,dst=2) {
   num_resp = 0
-  catch { # quit this block on the first timeout
+  try { # quit this block on the first timeout
     repeat count=10 {
       Raw("Ping\n")
       expect timeout=1s Raw("Pong\n") {

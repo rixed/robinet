@@ -220,7 +220,7 @@ and expr_desc =
                   else_ : block option }
     (* The value of [body], left on its first error, or else that of the
      * first handler that names it, else of [else_]: *)
-    | Catch of { body : block ; handlers : handler list ; else_ : block option }
+    | Try of { body : block ; handlers : handler list ; else_ : block option }
 
 and arm = { arm_loc : location ; ctor : string ; body : block }
 
@@ -387,7 +387,7 @@ let predefined = [ "MATCH" ; "LAST" ; "ERROR" ; "OWN_IP" ; "OWN_IPS" ] @ self_de
 
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
-    [ "true" ; "false" ; "repeat" ; "for" ; "retry" ; "catch" ; "if" ;
+    [ "true" ; "false" ; "repeat" ; "for" ; "retry" ; "try" ; "if" ;
       "elsif" ; "else" ; "case" ; "break" ; "continue" ; "exit" ; "expect" ; "on" ; "wait" ;
       "sleep" ; "in" ; "spawn" ]
 
@@ -562,8 +562,8 @@ let rec print_expr_at ?(bare=false) ~all ~indent p oc e =
                 (print_patterns ~all ~indent) p ;
             block oc body) cases ;
         Option.may (fun b -> String.print oc " else " ; block oc b) else_
-    | Catch { body ; handlers ; else_ } ->
-        String.print oc "catch " ; block oc body ;
+    | Try { body ; handlers ; else_ } ->
+        String.print oc "try " ; block oc body ;
         List.iteri (fun i h ->
             Printf.fprintf oc "%s%a " (if i = 0 then " " else " | ")
                 (List.print ~first:"" ~last:"" ~sep:"|" String.print) h.errors ;

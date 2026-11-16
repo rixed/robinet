@@ -331,7 +331,7 @@ ip route add 10.79.0.0/24 via 10.77.0.2
 ip route add unreachable 10.80.0.0/24
 
 ping_prog() {
-    echo "catch { /IP(dst=$1)/ICMP/Echo { Request(\"x\")
+    echo "try { /IP(dst=$1)/ICMP/Echo { Request(\"x\")
       expect timeout=500ms Reply { print(\"reply from \${MATCH[IP].src}\") } } }"
 }
 
@@ -360,7 +360,7 @@ ip route del 10.79.0.0/24
   Request("x")
   wait dur=1s
   Request("y")
-  catch { expect timeout=500ms Reply { print("reply from ${MATCH[IP].src}") } }
+  try { expect timeout=500ms Reply { print("reply from ${MATCH[IP].src}") } }
 }' > "$DIR/out" 2>&1
 code=$?
 wait $!
