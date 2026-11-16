@@ -259,8 +259,10 @@ let known_layer =
     identifier >>= fun s ->
         match Layer_name.of_string s with Some n -> return n | None -> fail
 
-(* Where only a layer can be: *)
+(* Where only a layer can be, so a [../] there is misplaced: *)
 let layer_name =
+    (here +- word ".." +- slash >>: fun loc ->
+        reject_at loc "../ can only start a stack") |||
     (identifier >>= fun s ->
         if is_keyword s || is_in functions s then fail else return s) >>:
     fun s ->
@@ -1448,6 +1450,8 @@ let parse_patterns text =
   "line 1, column 12: LAST is a reserved name" (reads "repeat var=LAST {}")
   "line 1, column 12: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
   "line 1, column 10: Unknown layer HTTPS, do you mean HTTP?" (reads "/IP/HTTPS {}")
+  "line 1, column 7: ../ can only start a stack" (reads "../IP/../TCP {}")
+  "line 1, column 12: ../ can only start a stack" (reads "expect /IP/../TCP {}")
   "line 1, column 8: Unknown layer UPD, do you mean UDP?" (reads "/IP/UPD {}")
   "line 1, column 11: Unknown layer Rae, do you mean Raw?" (reads "expect Rae {}")
   "line 1, column 11: Unknown layer Rae, do you mean Raw?" (reads "expect Rae(\"x\") {}")
