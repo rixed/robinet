@@ -542,8 +542,8 @@ type layer_ctx =
 type env =
     { (* Innermost first: *)
       vars : var list ;
-      (* Declared in the current block: *)
-      declared_here : string list ;
+      (* Declared in the current block, and where: *)
+      declared_here : (string * A.location) list ;
       (* Whose declaration was in error: *)
       poisoned : string list ;
       (* The current protocol stack, top first: *)
@@ -2664,12 +2664,14 @@ and stmt errors env (s : A.stmt) =
                                         loops = loops @ env.loops } body in
             { patterns ; match_ ; body }) cs in
     let declare_typ env name typ =
-        if List.mem name env.declared_here then
-            error loc "%s is already declared in this block (:= changes it)" name ;
+        Option.may (fun (at : A.location) ->
+            error loc "%s is already declared in this block, at line %d: \
+                       use := instead of = to update it" name at.line
+        ) (List.assoc_opt name env.declared_here) ;
         let v = new_var name typ in
         env.declared := (v, loc, bound env name) :: !(env.declared) ;
         { env with vars = v :: env.vars ;
-                   declared_here = name :: env.declared_here }, v in
+                   declared_here = (name, loc) :: env.declared_here }, v in
     let declare env name e = declare_typ env name e.typ in
     try
         if not env.may_wait then (
@@ -2752,7 +2754,7 @@ and stmt errors env (s : A.stmt) =
              * its uses are not reported as well: *)
             let poisoned () =
                 { env with poisoned = name :: env.poisoned ;
-                           declared_here = name :: env.declared_here }, None in
+                           declared_here = (name, loc) :: env.declared_here }, None in
             (* Of the type that its assignments widened it to: *)
             let widened = Hashtbl.find_opt env.widened loc in
             let widen e =
@@ -3406,7 +3408,7 @@ let check ?(warnings=ref []) (program : A.program) =
             env.warnings :=
                 (loc, Printf.sprintf "%s is never read%s" v.name
                           (if hides then
-                              ", and hides another "^ v.name ^" (:= changes it)"
+                              ", and hides another "^ v.name ^": use := instead of = to update it"
                           else " (name it _"^ v.name ^" if that is meant)")) ::
                 !(env.warnings)
     ) !(env.declared) ;
@@ -3465,7 +3467,7 @@ let check_patterns (ps : A.patterns) =
 *)
 
 (*$= warns & ~printer:identity
-  "line 2, column 18: x is never read, and hides another x (:= changes it)" \
+  "line 2, column 18: x is never read, and hides another x: use := instead of = to update it" \
     (warns "x = 0\nrepeat count=2 { x = x + 1 }\nprint(x)")
   "line 1, column 1: p is never read (name it _p if that is meant)" \
     (warns "p = /IP(dst=1.2.3.4)/UDP(dst=1)/Raw(\"a\")")
@@ -3664,7 +3666,7 @@ let check_patterns (ps : A.patterns) =
     (types "x = \"a\" + 1.2.3.4")
   "line 1, column 1: ACK is a reserved name" \
     (types "ACK = 1")
-  "line 2, column 1: x is already declared in this block (:= changes it)" \
+  "line 2, column 1: x is already declared in this block, at line 1: use := instead of = to update it" \
     (types "x = 1\nx = 2")
   "line 2, column 1: Cannot assign a string to x, which is an int (declared at line 1 as 1)" \
     (types "x = 1\nx := \"s\"")

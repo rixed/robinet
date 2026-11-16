@@ -1011,7 +1011,7 @@ let () = set_stmt (
                     fun ((v, op), e) -> Assign (v, is, op, e)) |||
                 (if is = [] then fail else
                  item '=' -- nay (item '=' ||| item '~') >>:
-                    fun _ -> reject "An item is not declared (:= changes it)"))) |||
+                    fun _ -> reject "An item is not declared: use := instead of = to update it"))) |||
         (keyword "repeat" -+ params "repeat" [ "var" ; "count" ; "every" ; "for" ] ++
          kw_body >>: fun (p, body) ->
             Repeat { var = Option.map (var_name "variable name") (p "var") ;
@@ -1439,7 +1439,7 @@ let parse_patterns text =
   "line 1, column 8: return is no keyword: a block is worth its last expression" (reads "return 1")
   "line 2, column 17: elif is no keyword: use elsif" (reads "x = 1\nif x { 1 } elif x { 2 }")
   "line 1, column 1: print is a reserved name" (reads "print += 3")
-  "line 1, column 7: An item is not declared (:= changes it)" (reads "x[0] = 1")
+  "line 1, column 7: An item is not declared: use := instead of = to update it" (reads "x[0] = 1")
   "line 1, column 14: Items without keys in a map" (reads "x = [1: 2, 3]")
   "line 1, column 1: MATCH is a reserved name" (reads "MATCH = 1")
   "line 2, column 3: answer is a reserved name" \
