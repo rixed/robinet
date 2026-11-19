@@ -110,6 +110,7 @@ C_SOURCES = \
 	sockopt_wrap.c \
 	route_wrap.c \
 	condvar_wrap.c \
+	clock_wrap.c \
 	privileges_wrap.c
 
 SOURCES = $(LIB_SOURCES) $(EXAMPLE_SOURCES) $(TEST_SOURCES) robinet.ml \

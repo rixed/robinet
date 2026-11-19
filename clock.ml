@@ -23,7 +23,7 @@
    [Time.t] is an instant and [Interval.t] a length of time, both counted in
    whole picoseconds from the beginning of the simulation.
    A picosecond is a tenth of a bit at 100Gbps, and 62 bits of them are 53 days.
-   The instants of the world outside (what [Unix.gettimeofday] reads, what
+   The instants of the world outside (what the system clock reads, what
    libpcap writes beside a captured packet) are [Wall.t], in nanoseconds since
    1970, and those two meet only where a simulation says they do.
 *)
@@ -403,7 +403,7 @@ end = struct
 end
 
 (** An instant of the world outside, in nanoseconds since 1970-01-01 00:00:00
- * UTC, from 1824 to 2116: what [Unix.gettimeofday] reads and what libpcap
+ * UTC, from 1824 to 2116: what [clock_gettime] reads and what libpcap
  * writes beside a captured packet, to the nanosecond when it can.
  *
  * Not a [Time.t], and deliberately not made of the same stuff: those two
@@ -481,8 +481,15 @@ end = struct
         let sec, ns = split (t :> int) in
         float_of_int sec +. float_of_int ns /. 1e9
 
-    (** Get the current wall clock (through {Unix.gettimeofday}). *)
-    let now () = of_secs (Unix.gettimeofday ())
+    external realtime_ns : unit -> int = "wrap_clock_realtime_ns" [@@noalloc]
+
+    (** The wall clock, to the nanosecond (through [clock_gettime]). *)
+    let now () = o (realtime_ns ())
+
+    (*$T
+      let a = Clock.Wall.now () in \
+      Float.abs (Clock.Wall.to_secs a -. Unix.gettimeofday ()) < 0.1
+    *)
 
     (* Picoseconds to the nearest nanosecond: *)
     let ns_of_interval (i : Interval.t) =
