@@ -61,36 +61,10 @@ let record format ?(json=[]) kind fields =
     | Json ->
         Crafty_value.json_to_string (`Assoc (("type", `String kind) :: fields @ json))
 
-(* The stats of streams that tell what -p and the streams may hide, summed
- * over all streams for a warning at exit, by what they tell: *)
-let suspicious_stats =
-    [ "IP fragmentation", [ "fragmented" ; "frags_in" ] ;
-      "incomplete IP packets", [ "reasm_timeouts" ] ;
-      "TCP retransmissions", [ "retrans" ; "timeouts" ] ;
-      "TCP duplicate acks", [ "dupacks" ] ;
-      "gaps in received TCP data", [ "holes_in" ] ;
-      "TCP segments out of order", [ "ooo_in" ] ;
-      "duplicate TCP segments", [ "dup_in" ] ]
-
-(* Privileged (setuid root, or given capabilities with setcap), crafty runs
- * the commands that configure the host with an environment of its own, since
- * the user's (LD_PRELOAD...) would decide what they do. The user's variables
- * stay, renamed, for the program's [getenv] only. Setuid root, crafty becomes
- * root entirely, for these commands to be root as well (busybox's sh drops an
- * effective uid that is not the real one). *)
 let () =
-    if Privileges.is_secure () then (
-        if Unix.geteuid () = 0 && Unix.getuid () <> 0 then (
-            (* Without CAP_SETUID, only the effective uid would change: *)
-            Unix.setuid 0 ;
-            if Unix.getuid () <> 0 then die "Setuid root, but without CAP_SETUID.") ;
-        let user_env = Unix.unsafe_environment () in
-        Privileges.clearenv () ;
-        Unix.putenv "PATH" "/usr/sbin:/usr/bin:/sbin:/bin" ;
-        Array.iter (fun var ->
-            match String.split var ~by:"=" with
-            | name, v -> Unix.putenv (Crafty_interp.user_env_prefix ^ name) v
-            | exception Not_found -> ()) user_env)
+    match Crafty_run.secure_env () with
+    | Ok () -> ()
+    | Error e -> die "%s" e
 
 (* Ids, ISNs and ports differ from one run to the next, lest a peer take a
  * packet of this run for one of a previous run's: *)
@@ -257,7 +231,7 @@ let () =
     (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
     Arg.parse !specs (program_or_arg ~stop:true) usage ;
     if !cleanup then (
-        (match Host_config.cleanup_stale () with
+        (match Crafty_run.cleanup () with
         | [] -> print_endline "Nothing to clean up."
         | names -> List.iter (Printf.printf "Cleaned up after %s.\n") names) ;
         exit 0) ;
@@ -293,11 +267,6 @@ let () =
         Crafty_typing.{ local_ips = rules !local_ips ; remote_ips = rules !remote_ips ;
                         mac_spoofing = !mac_spoofing ; exfiltration = !exfiltration ;
                         promiscuous = !promiscuous } in
-    (* Unless allowed, nothing received is sent: *)
-    if not (!exfiltration |? (program.limits.permissions.exfiltration |? false)) then (
-        match Crafty_typing.exfiltrations program.body with
-        | [] -> ()
-        | es -> fail es) ;
     (* What both the command line and the program allow: *)
     let limits =
         let budget =
@@ -327,14 +296,10 @@ let () =
             { l with budget = ("max_duration", Crafty_ast.Interval default_max_duration)
                               :: l.budget }
         | Error e -> die "%s: %s its PORTS and --tcp/--udp." prog_name e in
-    let ports =
-        Option.map_default (fun (p : Crafty_typing.ports) ->
-            let ranges proto = List.map (fun (lo, hi) -> Host_config.{ proto ; lo ; hi }) in
-            ranges Host_config.Tcp p.tcp @ ranges Host_config.Udp p.udp) [] limits.ports in
-    let budget_int n =
-        match List.assoc_opt n limits.budget with Some (Crafty_ast.Int i) -> Some i | _ -> None
-    and budget_float n =
-        match List.assoc_opt n limits.budget with Some (Crafty_ast.Float x) -> Some x | _ -> None in
+    let limits =
+        { limits with permissions =
+            Crafty_typing.resolve_permissions ~program:program.limits.permissions
+                                              ~cli:cli_permissions } in
     let format = !format in
     (* What crafty tells of how it goes, on stderr unless as text, out of the
      * way of the records: *)
@@ -350,19 +315,21 @@ let () =
             | Error e ->
                 Printf.eprintf "-p: %s\n" (IO.to_string Crafty_interp.print_error e) ;
                 exit 2) !print_only in
-    let denied_literals ~local ~remote ~mac =
-        match Crafty_typing.denied_literals ~local ~remote ~mac program.body with
-        | [] -> ()
-        | es -> fail es in
     if !check then (
+        (* Unless allowed, nothing received is sent: *)
+        if not (limits.permissions.exfiltration |? false) then (
+            match Crafty_typing.exfiltrations program.body with
+            | [] -> ()
+            | es -> fail es) ;
         (* Without the interface, rules about its addresses are not checked: *)
-        let r = Crafty_typing.resolve_permissions ~program:program.limits.permissions
-                                                  ~cli:cli_permissions in
         let known rs =
             let rs = Option.default [] rs in
             if List.exists (fun (_, a) -> a = Crafty_typing.Own_ip || a = Own_ips) rs then None
             else Some (Crafty_typing.address_rules ~own:[] rs) in
-        denied_literals ~local:(known r.local_ips) ~remote:(known r.remote_ips) ~mac:None ;
+        (match Crafty_typing.denied_literals ~local:(known limits.permissions.local_ips)
+                   ~remote:(known limits.permissions.remote_ips) ~mac:None program.body with
+        | [] -> ()
+        | es -> fail es) ;
         Printf.printf "%s: OK\n" prog_name ;
         exit 0) ;
     let kernel_routing =
@@ -371,154 +338,32 @@ let () =
             die "--routing kernel works only on Linux."
         | Some r -> r
         | None -> Kernel_route.available () in
-    (* The interface chosen goes first: the kernel takes for on-link what has
-     * no route through it. Otherwise it is free to tell of no route, or of
-     * another interface. Link-local addresses mean nothing without one: *)
-    let oif_of =
-        let chosen = !ifname <> "" in
-        fun dst ->
-            if chosen || (Ip.Addr.is_v6 dst && Ip.Addr.is_link_local dst)
-            then !ifname else "" in
-    if !ifname = "" then (
+    (* Without -i, the kernel may route through another interface: *)
+    let any_iface = !ifname = "" in
+    if any_iface then (
         match Host_config.default_ifname () with
         | Some i -> ifname := i
         | None -> die "No default route: give the interface (-i).") ;
-    if !fw && ports = [] then die "--fw needs ports (--tcp, --udp, or PORTS)." ;
+    if !fw && limits.ports = None then die "--fw needs ports (--tcp, --udp, or PORTS)." ;
     if !fw && !own_ip <> None then
         die "--fw and --ip do not go together: an address of the program's \
              own shares no port with the kernel." ;
-    let iface = Host_config.iface !ifname in
-    if !fw then (
-        let addresses =
-            List.map (fun c -> (fst (c : Ip.Cidr.t :> Ip.Addr.t * int) :> Unix.inet_addr))
-                     iface.addresses in
-        match Host_config.fenced ~addresses ports
-                                 (Host_config.listening ()) with
-        | [] -> ()
-        | sockets ->
-            (* By port, with the addresses listened on: *)
-            let ports =
-                List.map (fun (proto, _, p) -> proto, p) sockets |> List.unique |>
-                List.sort (fun (a, p) (b, q) -> compare (p, a) (q, b)) in
-            die "--fw would keep the host off ports it listens on: %s. \
-                 Narrow --tcp, --udp or PORTS."
-                (String.concat ", " (List.map (fun (proto, p) ->
-                    Printf.sprintf "%s %d (%s)"
-                        (String.uppercase_ascii (Host_config.string_of_proto proto)) p
-                        (String.concat ", " (List.filter_map (fun (proto', a, p') ->
-                            if proto' = proto && p' = p then
-                                Some (Unix.string_of_inet_addr a)
-                            else None) sockets))) ports))) ;
-    (* The program's own address, on the network of the interface's first one
-     * of its family (else on no network), or else all of the interface's: *)
-    let addresses =
-        match !own_ip with
-        | Some ip ->
-            let width =
-                List.find_map_opt (fun c ->
-                    let a, w = (c : Ip.Cidr.t :> Ip.Addr.t * int) in
-                    if Ip.Addr.is_v6 a = Ip.Addr.is_v6 ip then Some w else None)
-                    iface.addresses |? Ip.Addr.length ip in
-            [ Ip.Cidr.o (ip, width) ]
-        | None ->
-            if iface.addresses = [] then
-                die "Interface %s has no IP address." !ifname ;
-            iface.addresses in
-    let limits =
-        { limits with permissions =
-            Crafty_typing.resolve_permissions ~program:program.limits.permissions
-                                              ~cli:cli_permissions } in
-    let permissions = limits.permissions in
-    let rules =
-        let own = List.map (fun c -> fst (c : Ip.Cidr.t :> Ip.Addr.t * int)) addresses in
-        Crafty_typing.address_rules ~own % Option.default []
-    and flag = Option.default false in
-    let promisc = flag permissions.promiscuous in
-    denied_literals ~local:(Some (rules permissions.local_ips))
-        ~remote:(Some (rules permissions.remote_ips))
-        ~mac:(if flag permissions.mac_spoofing then None else Some iface.mac) ;
-    let speed, full_duplex =
-        let speed', full_duplex' = Host_config.link !ifname in
-        (match !speed, speed' with Some s, _ | None, Some s -> s | None, None -> EthSpeed.Eth1Gbps),
-        (match !full_duplex, full_duplex' with Some d, _ | None, Some d -> d | None, None -> true)
-    and mtu = !mtu |? iface.mtu in
-    if !Host_config.verbose then (
-        info "Interface %s: %s %s-duplex, MTU %d." !ifname
-            (EthSpeed.to_string speed) (if full_duplex then "full" else "half") mtu ;
-        info "Routing: %s." (if kernel_routing then "the kernel's" else "manual") ;
-        info "Budget: %s." (if limits.budget = [] then "none" else
-            String.concat ", " (List.map (fun (n, l) ->
-                n ^" "^ Crafty_value.(to_string (Crafty_typing.type_of_literal l) (of_literal l)))
-                limits.budget)) ;
-        info "Ports: %s." (if ports = [] then "any" else
-            String.concat ", " (List.map (fun (r : Host_config.port_range) ->
-                String.uppercase_ascii (Host_config.string_of_proto r.proto) ^" "^
-                Host_config.string_of_range r) ports)) ;
-        let rules rs =
-            String.concat ", " (List.map Firewall.string_of_rule
-                                    (Firewall.of_address_rules (rules rs))) in
-        info "Permissions: local IPs %s; remote IPs %s; MAC spoofing %b; \
-              exfiltration %b; promiscuous %b."
-            (rules permissions.local_ips) (rules permissions.remote_ips)
-            (flag permissions.mac_spoofing) (flag permissions.exfiltration) promisc) ;
-    let configure = !fw || !own_ip <> None in
-    if configure && not (Privileges.has_net_admin ()) then
-        die "Configuring interface %s takes root or cap_net_admin; Have you \
-             tried under sudo?" !ifname ;
-    let forward_drop =
-        Option.map_default (fun ip -> Host_config.ip_forward ~v6:(Ip.Addr.is_v6 ip) ())
-                           false !own_ip in
-    if configure then (
-        try
-            Host_config.require (
-                "ethtool" ::
-                (if !fw then [ "nft" ; "sysctl" ]
-                 else if forward_drop then [ "nft" ] else []))
-        with e -> die "%s" (Printexc.to_string e)) ;
-    (* Configuring the host: *)
-    let changes =
-        if not configure then None else (
-            if !Host_config.verbose then
-                info "Configuring interface %s..." !ifname ;
-            let t = Host_config.changes "crafty" in
-            at_exit (fun () -> Host_config.undo t) ;
-            (try
-                Host_config.disable_rx_offloads t !ifname ;
-                if !fw then (
-                    Host_config.firewall t ~ifname:!ifname ~ports () ;
-                    Host_config.reserve_ports t ports) ;
-                if forward_drop then
-                    Option.may (fun ip ->
-                        Host_config.firewall t ~ifname:!ifname ~forward_drop:ip ()
-                    ) !own_ip
-            with e ->
-                Printf.eprintf "Cannot configure %s: %s\n" !ifname
-                    (Printexc.to_string e) ;
-                exit 1) ;
-            Some t) in
-    (* The simulation: crafty, a policer and the interface. What is sent is
-     * injected through a handle that captures nothing, so that the other
-     * one, capturing either way, sees it leave, before whatever it causes
-     * comes back: *)
-    let sim = Simulation.make "crafty" in
-    let open_iface ?blocking ~direction ~filter () =
-        Pcap.open_iface ~widget:(Widget.make ~parent:sim.root !ifname)
-            ~promisc ~direction ~caplen:(Pcap.caplen_of_mtu mtu)
-            ?blocking ~filter !ifname in
-    (* Blocking, so that crafty sends no faster than the kernel takes: *)
-    let injector =
-        open_iface ~blocking:true ~direction:Pcap.Out ~filter:"less 0" ()
-    and pcap =
-        open_iface ~direction:Pcap.InOut
-            ~filter:(Host_config.pcap_filter ?ip:(if promisc then None else !own_ip) ports) () in
-    let secs () = Clock.Time.to_secs (Simulation.now sim) in
+    let failed = function
+        | Crafty_run.Setup e -> die "%s" e
+        | Denied es -> fail es
+        | Configure e -> prerr_endline e ; exit 1 in
+    let iface =
+        match Crafty_run.Iface.setup ~rx_offloads_off:(!fw || !own_ip <> None)
+                                     ~ifname:!ifname () with
+        | Ok i -> i
+        | Error e -> failed e in
     (* Dated to the microsecond, as the text and captures are: *)
-    let emit ?json kind fields =
-        let ts = Float.round (secs () *. 1e6) /. 1e6 in
+    let emit ?json t kind fields =
+        let ts = Float.round (Clock.Time.to_secs t *. 1e6) /. 1e6 in
         print_endline (record format ?json kind (("ts", `Float ts) :: fields)) in
     (* A report as the summary of its value, in CSV as a line per key of a
      * map, with the fields of a record of scalars after the key: *)
-    let report name typ v _ =
+    let report name typ v t =
         let typ, v = Crafty_interp.summarize typ v in
         let json = Crafty_value.to_json in
         let scalar = function
@@ -535,256 +380,97 @@ let () =
         match format, typ, v with
         | Human, _, _ ->
             print_endline (name ^": "^ Crafty_value.to_string typ v)
-        | Json, _, _ -> emit "report" [ "name", `String name ; "value", json typ v ]
-        | Csv, Map (k, t), Map (m, _) when scalar k ->
+        | Json, _, _ -> emit t "report" [ "name", `String name ; "value", json typ v ]
+        | Csv, Map (k, ty), Map (m, _) when scalar k ->
             Map.PMap.iter (fun key v ->
-                emit "report" (("name", `String name) :: ("key", json k key) :: fields t v)) m
-        | Csv, _, _ -> emit "report" (("name", `String name) :: fields typ v) in
-    let print_stats what n =
+                emit t "report" (("name", `String name) :: ("key", json k key) :: fields ty v)) m
+        | Csv, _, _ -> emit t "report" (("name", `String name) :: fields typ v) in
+    let print_stats t what n =
         if !stats then
             if format = Human then
                 Printf.printf "%s %s\n" (String.capitalize_ascii what)
                     (Crafty_tree.stats_line n)
             else
-                emit what (
+                emit t what (
                     ("stream", `String (Crafty_tree.stream_name n)) ::
                     List.map (fun (name, typ, v) -> name, Crafty_value.to_json typ v)
                         (Crafty_tree.typed_stats n)) in
+    (* The suspicious stats of all streams, summed, for a warning at exit: *)
     let suspicious = Hashtbl.create 8 in
-    let tally n =
-        List.iter (fun (name, v) ->
-            match v with
-            | Crafty_value.Int c
-              when List.exists (List.mem name % snd) suspicious_stats ->
-                Hashtbl.modify_def 0 name ((+) c) suspicious
-            | _ -> ()
-        ) (Crafty_tree.stats n) in
-    (* What the program sends, what goes out and comes in, and what is
-     * captured going out, the host's included: *)
-    let sent = ref 0 and pkts_out = ref 0 and pkts_in = ref 0
-    and bytes_out = ref 0 and bytes_in = ref 0
-    and wire_pkts = ref 0 and wire_bytes = ref 0 in
-    let status = ref Crafty_interp.Running and limit = ref None in
-    (* The handle, which the program is given no event before [run]
-     * returns: *)
-    let handle = ref None in
-    let idle () = Option.map_default (fun h -> h.Crafty_interp.idle ()) true !handle in
-    (* Whether to be done with lingering, and whether the streams still open
-     * were reset, which lifts the limits of the policer for the RSTs to go
-     * out: *)
-    let hurry = ref false and reset = ref false and lift_limits = ref ignore in
-    let reset_streams () =
-        reset := true ;
-        !lift_limits () ;
-        Option.may (fun h -> h.Crafty_interp.reset_streams ()) !handle in
-    let on_unrouted dst reason =
-        if not !no_warning then
-            let text =
-                Printf.sprintf "Cannot send to %s: %s"
-                    (Ip.Addr.to_dotted_string dst) reason in
+    let warning t ?(json=[]) text =
+        if format = Human then Printf.eprintf "%s: Warning: %s\n%!" prog_name text
+        else emit t "warning" (("text", `String text) :: json) in
+    let on_warning t = function
+        | Crafty_run.Not_injected msg -> info "Cannot inject: %s." msg
+        | _ when !no_warning -> ()
+        | Program e ->
             if format = Human then
-                Printf.eprintf "%s: Warning: %s\n%!" prog_name text
-            else emit "warning" [ "text", `String text ] in
-    let router =
-        if not kernel_routing then None else
-        Some (Crafty_layers.make_router ~ifname:!ifname ~on_unrouted
-                  ~lookup:(fun dst -> Kernel_route.lookup ~oif:(oif_of dst) dst)) in
-    let dev, h =
-        Crafty_interp.run ~parent:sim.root ~mac:iface.mac ~addresses
-            ~speed ~full_duplex ~mtu ?router
-            ~gateways:(List.map (fun gw -> Eth.Gateway.Ip gw) iface.gateways)
-            (* The kernel answers for its own address: *)
-            ~answer_requests:(!own_ip <> None) ~promisc
-            ~limits
-            ~format ~report ~args:(Array.of_list !prog_args)
-            ~resolver:Crafty_interp.(cached system_resolver)
-            ~print:(fun s ->
-                if format = Human then print_endline s
-                else emit "print" [ "text", `String s ])
-            ~print_err:prerr_endline
-            ~on_warning:(fun e ->
-                if not !no_warning then
-                    if format = Human then
-                        Printf.eprintf "%s: %a: Warning: %s\n%!" prog_name
-                            Crafty_ast.print_location e.where e.message
-                    else
-                        emit "warning" [ "text", `String e.message ;
-                                         "line", `Int e.where.line ;
-                                         "column", `Int e.where.column ])
-            ~on_closed:(fun n -> tally n ; print_stats "closed" n)
-            (* What comes in was received by the real interface already: *)
-            ~rx_wire:false
-            ~on_exit:(fun s ->
-                status := s ;
-                (* Streams that are closing, and frames on their way, go on
-                 * for as long as packets keep going out or coming in, until
-                 * none did for [linger] (or none at all once stopped). Then
-                 * the streams still open are reset, for their peers not to
-                 * keep sending, and crafty stops; checked from the next
-                 * tick, once the kernel has sent all that was injected, and
-                 * once the clock has caught up with the wall clock, which
-                 * dates what is captured, and which blocking injections
-                 * leave it behind: *)
-                let linger = Clock.Interval.to_secs !linger
-                and tick = Clock.Interval.msec 100. in
-                (* From a thread of its own, as stopping takes the lock this
-                 * event runs under: *)
-                let stop () = ignore (Thread.create (Simulation.stop sim) ()) in
-                let rec check pkts deadline =
-                    Simulation.delay sim.root.power tick (fun () ->
-                        let pkts' = !pkts_out + !pkts_in in
-                        let deadline =
-                            if pkts' <> pkts then secs () +. linger else deadline in
-                        if Pcap.unsent injector.handler = 0 &&
-                           Clock.Interval.compare sim.late tick < 0 &&
-                           (idle () || !reset || !hurry || secs () >= deadline) then (
-                            if idle () || !reset then stop ()
-                            else (reset_streams () ; check pkts' deadline))
-                        else check pkts' deadline) () in
-                if s = Crafty_interp.Stopped then reset_streams () ;
-                check (!pkts_out + !pkts_in) (secs () +. linger))
-            program in
-    handle := Some h ;
-    (* For a program that waits, which the interpreter does not look at. From a
-     * thread rather than a recurring event, as an event pending slows down
-     * every statement: *)
-    if List.mem_assoc "max_ram" limits.budget then
-        ignore (Thread.create (fun () ->
-            while not (h.over_ram ()) do Thread.delay 1. done ;
-            Simulation.asap sim.root.power h.stop ()) ()) ;
-    let policer =
-        Policer.make ~parent:sim.root
-            ?max_duration:(match List.assoc_opt "max_duration" limits.budget with
-                           | Some (Crafty_ast.Interval d) -> Some d | _ -> None)
-            ?max_packets:(budget_int "max_packets")
-            ?max_volume:(budget_int "max_bytes")
-            ?max_packet_rate:(budget_float "max_packets_per_secs")
-            ?max_throughput:(budget_float "max_bytes_per_secs")
-            ?max_syns:(budget_int "max_syns")
-            ?max_syn_rate:(budget_float "max_syns_per_secs")
-            ~on_limit:(fun l ->
-                if !limit = None then (
-                    limit := Some l ;
-                    info "Limit reached: %s." (Policer.string_of_limit l) ;
-                    h.stop ()))
-            "policer" in
-    lift_limits := (fun () -> Policer.lift_limits policer) ;
-    (* The first packet sent that the permissions deny, which stops the
-     * program, and how many of those were sent and received: *)
-    let denied = ref None and denied_out = ref 0 and denied_in = ref 0 in
-    let firewall =
-        Firewall.make ~parent:sim.root
-            ~inside:(Firewall.of_address_rules (rules permissions.local_ips))
-            ~outside:(Firewall.of_address_rules (rules permissions.remote_ips))
-            ?mac:(if flag permissions.mac_spoofing then None else Some iface.mac)
-            ~promiscuous:promisc
-            ~on_drop:(fun dir cause bits ->
-                match dir with
-                | Firewall.In -> incr denied_in
-                | Firewall.Out ->
-                    incr denied_out ;
-                    if !denied = None then (
-                        denied := Some (cause, bits) ;
-                        h.stop ()))
-            "firewall" in
-    let print dir bits =
-        if !print_packets &&
-           Option.map_default (fun f -> h.matches f bits) true print_only then
-            let packet = Packet.of_frame bits in
-            let summary = Packet.Pdu.Printer.oneline packet in
-            if format = Human then
-                Printf.printf "%s %.6f %s\n" dir (secs ()) summary
+                Printf.eprintf "%s: %a: Warning: %s\n%!" prog_name
+                    Crafty_ast.print_location e.where e.message
             else
-                emit "packet" ~json:[ "layers", Packet.Pdu.to_json packet ]
-                    [ "dir", `String (if dir = ">" then "out" else "in") ;
-                      "bytes", `Int (Tools.bytelength bits) ;
-                      "summary", `String summary ] in
-    let before = Hub.VirtTap.make ~rev_mirror:ignore (fun _ -> incr sent)
-    and after =
-        Hub.VirtTap.make
-            ~rev_mirror:(fun bits ->
-                incr pkts_in ; bytes_in := !bytes_in + Tools.bytelength bits ; print "<" bits)
-            (fun bits ->
-                incr pkts_out ; bytes_out := !bytes_out + Tools.bytelength bits ; print ">" bits) in
-    Tools.(dev <--> before.ins) ;
-    Tools.(before.out <--> firewall.widget.ports.dev 0) ;
-    Tools.(firewall.widget.ports.dev 1 <--> policer.widget.ports.dev 0) ;
-    Tools.(policer.widget.ports.dev 1 <--> after.ins) ;
-    (* What was injected and not seen leaving yet, oldest first, of which
-     * those that are never seen are passed by the next that is. A frame seen
-     * leaving takes the marks of the one injected: *)
-    let injected = Queue.create () in
-    let was_injected frame =
-        let is_it bits = Crafty_tree.(is_emitted (Frame bits) frame) in
-        if Queue.fold (fun found bits -> found || is_it bits) false injected then (
-            let rec pop () =
-                let bits = Queue.pop injected in
-                if is_it bits then bits else pop () in
-            Mark.carry ~src:(pop ()) ~dst:frame ~at:0 ;
-            true
-        ) else false in
-    let not_injected = ref 0 in
-    Tools.(after.out --> sink (fun bits ->
-        Queue.push bits injected ;
-        try Pcap.inject injector.handler bits
-        with Failure msg ->
-            if !not_injected = 0 then info "Cannot inject: %s." msg ;
-            incr not_injected)) ;
-    Simulation.run_startup sim ;
-    Simulation.power_up firewall.widget.power ;
-    Simulation.power_up policer.widget.power ;
-    (* The host refusing what is for a port crafty uses, once per port: *)
-    let refused = Hashtbl.create 3 in
-    let warn_refused bits =
-        match Host_config.refused_port bits with
-        | Some (proto, p)
-          when not !no_warning && not (Hashtbl.mem refused (proto, p)) &&
-               h.uses_port (Host_config.string_of_proto proto) p ->
-            Hashtbl.add refused (proto, p) () ;
-            let text =
-                Printf.sprintf "The host %s %d, which crafty uses: %s"
-                    (if proto = Host_config.Tcp then "reset TCP port"
-                     else "refused UDP port")
-                    p
-                    (if !fw then
-                        "it is outside the ports that --fw keeps the host off"
-                     else "keep the host off it with --fw, or give crafty \
-                           an address of its own with --ip") in
-            if format = Human then
-                Printf.eprintf "%s: Warning: %s\n%!" prog_name text
-            else emit "warning" [ "text", `String text ]
-        | _ -> () in
-    (* What leaves is what crafty injected, or else what the host sends,
-     * which has the interface's address: *)
-    ignore (Pcap.sniffer pcap (fun bits ->
-        let injected = was_injected bits in
-        if injected ||
-           (match Eth.Pdu.unpack bits with
-           | Ok f -> Eth.Addr.eq f.src iface.mac
-           | Error _ -> false)
-        then (
-            if not injected then warn_refused bits ;
-            incr wire_pkts ; wire_bytes := !wire_bytes + Tools.bytelength bits ;
-            h.emitted bits
-        ) else after.out.write bits)) ;
+                warning t e.message ~json:[ "line", `Int e.where.line ;
+                                            "column", `Int e.where.column ]
+        | Unrouted (dst, reason) ->
+            warning t (Printf.sprintf "Cannot send to %s: %s"
+                           (Ip.Addr.to_dotted_string dst) reason)
+        | Host_refused (proto, p) ->
+            warning t (Printf.sprintf "The host %s %d, which crafty uses: %s"
+                (if proto = Host_config.Tcp then "reset TCP port"
+                 else "refused UDP port")
+                p
+                (if !fw then
+                    "it is outside the ports that --fw keeps the host off"
+                 else "keep the host off it with --fw, or give crafty \
+                       an address of its own with --ip")) in
+    let on_packet dir t bits =
+        let packet = Packet.of_frame bits in
+        let summary = Packet.Pdu.Printer.oneline packet in
+        if format = Human then
+            Printf.printf "%s %.6f %s\n" (if dir = Crafty_run.Out then ">" else "<")
+                (Clock.Time.to_secs t) summary
+        else
+            emit t "packet" ~json:[ "layers", Packet.Pdu.to_json packet ]
+                [ "dir", `String (if dir = Crafty_run.Out then "out" else "in") ;
+                  "bytes", `Int (Tools.bytelength bits) ;
+                  "summary", `String summary ] in
     (* A first signal stops the program, or its lingering, and a second one
      * crafty: *)
-    let interrupted = ref false in
-    Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ]
-        ~on_signal:(fun () ->
-            if !interrupted then Simulation.stop sim ()
-            else (
-                interrupted := true ;
-                Simulation.asap sim.root.power (fun () -> hurry := true ; h.stop ()) ()))
-        (fun () -> Simulation.run sim true) ;
-    let not_captured = Pcap.dropped pcap.handler in
-    Option.may Host_config.undo changes ;
-    List.iter (fun n -> tally n ; print_stats "open" n) (h.open_streams ()) ;
+    let control = ref None and signalled = ref false in
+    let on_start c =
+        control := Some c ;
+        if !signalled then c.Crafty_run.stop () in
+    let res =
+        Fun.protect ~finally:(fun () -> Crafty_run.Iface.release iface) (fun () ->
+            Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ]
+                ~on_signal:(fun () ->
+                    signalled := true ;
+                    Option.may (fun c -> c.Crafty_run.stop ()) !control)
+                (fun () ->
+                    Crafty_run.run iface ?own_ip:!own_ip ~fw:!fw ~kernel_routing ~any_iface
+                        ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger
+                        ~format ~args:(Array.of_list !prog_args)
+                        ~resolver:Crafty_interp.(cached system_resolver)
+                        ~limits ?packet_filter:print_only
+                        ~on_start ~info:(info "%s") ~on_report:report
+                        ~on_print:(fun t s ->
+                            if format = Human then print_endline s
+                            else emit t "print" [ "text", `String s ])
+                        ~on_print_err:(fun _ s -> prerr_endline s)
+                        ~on_warning
+                        ?on_packet:(if !print_packets then Some on_packet else None)
+                        ~on_stream:(fun t what n ->
+                            print_stats t (if what = `Closed then "closed" else "open") n)
+                        ~on_suspicious:(fun _ _ name c ->
+                            Hashtbl.modify_def 0 name ((+) c) suspicious)
+                        program)) in
+    let o = match res with Ok o -> o | Error e -> failed e in
+    let c = o.counters in
+    let end_ = Clock.Time.of_interval o.duration in
     let status_str, code =
-        match !status, !limit with
+        match o.status, o.limit with
         (* Whether or not the program was over by the time it was denied: *)
-        | _ when !denied <> None ->
-            let cause, bits = Option.get !denied in
+        | _ when o.denied <> None ->
+            let cause, bits = Option.get o.denied in
             let what, hint =
                 match cause with
                 | Firewall.Inside ip ->
@@ -800,8 +486,8 @@ let () =
         | Crafty_interp.Done, _ -> "OK", 0
         | Failed e, _ -> "failed: "^ IO.to_string Crafty_interp.print_error e, 1
         | Stopped, Some l -> "stopped: "^ Policer.string_of_limit l, 3
-        | Stopped, None when !interrupted -> "interrupted", 130
-        | Stopped, None when h.over_ram () -> "stopped: max-ram", 3
+        | Stopped, None when o.stopped -> "interrupted", 130
+        | Stopped, None when o.over_ram -> "stopped: max-ram", 3
         | Stopped, None -> "stopped", 3
         | Running, _ -> "interrupted", 130 in
     (* What was seen, with the counters that are not 0: *)
@@ -812,12 +498,12 @@ let () =
                     | 0 -> None
                     | c -> Some (name, c)) names with
             | [] -> None
-            | counts -> Some (what, counts)) suspicious_stats in
-    if not !no_warning && !denied_in > 0 then (
+            | counts -> Some (what, counts)) Crafty_run.suspicious_stats in
+    if not !no_warning && c.denied_in > 0 then (
         let text =
-            Printf.sprintf "Received %d packets the permissions deny, dropped" !denied_in in
+            Printf.sprintf "Received %d packets the permissions deny, dropped" c.denied_in in
         if format = Human then Printf.eprintf "Warning: %s\n%!" text
-        else emit "warning" [ "text", `String text ] ~json:[ "denied_in", `Int !denied_in ]) ;
+        else emit end_ "warning" [ "text", `String text ] ~json:[ "denied_in", `Int c.denied_in ]) ;
     if not !no_warning && suspicious <> [] then (
         let text =
             "Detected "^ String.concat ", " (List.map (fun (what, counts) ->
@@ -825,37 +511,38 @@ let () =
                     Printf.sprintf "%s=%d" name c) counts) ^")") suspicious) in
         if format = Human then Printf.eprintf "Warning: %s\n%!" text
         else
-            emit "warning" [ "text", `String text ]
+            emit end_ "warning" [ "text", `String text ]
                  ~json:(List.concat_map (fun (_, counts) ->
                      List.map (fun (name, c) -> name, `Int c) counts) suspicious)) ;
     if format = Human then (
-        (* Display verose details regarding captured traffic if we had an error: *)
+        (* Details of the traffic captured, also after an error: *)
         let verbose = !Host_config.verbose || code <> 0 in
         if verbose then
-            Printf.printf "Done after %.1fs, status: %s.\n" (secs ()) status_str ;
+            Printf.printf "Done after %.1fs, status: %s.\n"
+                (Clock.Interval.to_secs o.duration) status_str ;
         if verbose then
             Printf.printf "Packets: %d out, %d in. Bytes: %d out, %d in.\n"
-                !pkts_out !pkts_in !bytes_out !bytes_in ;
-        if !sent - !denied_out > !pkts_out then
+                c.pkts_out c.pkts_in c.bytes_out c.bytes_in ;
+        if c.sent - c.denied_out > c.pkts_out then
             Printf.printf "Dropped by the policer: %d packets.\n"
-                (!sent - !denied_out - !pkts_out) ;
-        if !denied_out > 0 then
-            Printf.printf "Not permitted: %d packets.\n" !denied_out ;
-        if !not_injected > 0 then
-            Printf.printf "Not injected: %d packets.\n" !not_injected ;
-        if not_captured > 0 then
-            Printf.printf "Not captured: %d packets.\n" not_captured ;
+                (c.sent - c.denied_out - c.pkts_out) ;
+        if c.denied_out > 0 then
+            Printf.printf "Not permitted: %d packets.\n" c.denied_out ;
+        if c.not_injected > 0 then
+            Printf.printf "Not injected: %d packets.\n" c.not_injected ;
+        if c.not_captured > 0 then
+            Printf.printf "Not captured: %d packets.\n" c.not_captured ;
         if verbose then
-            Printf.printf "Captured going out: %d packets, %d bytes.\n" !wire_pkts !wire_bytes
+            Printf.printf "Captured going out: %d packets, %d bytes.\n" c.wire_pkts c.wire_bytes
     ) else
-        emit "done"
+        emit end_ "done"
             [ "status", `String status_str ;
-              "packets_out", `Int !pkts_out ; "packets_in", `Int !pkts_in ;
-              "bytes_out", `Int !bytes_out ; "bytes_in", `Int !bytes_in ;
-              "dropped", `Int (!sent - !denied_out - !pkts_out) ;
-              "not_permitted", `Int !denied_out ;
-              "not_injected", `Int !not_injected ;
-              "not_captured", `Int not_captured ;
-              "captured_packets", `Int !wire_pkts ;
-              "captured_bytes", `Int !wire_bytes ] ;
+              "packets_out", `Int c.pkts_out ; "packets_in", `Int c.pkts_in ;
+              "bytes_out", `Int c.bytes_out ; "bytes_in", `Int c.bytes_in ;
+              "dropped", `Int (c.sent - c.denied_out - c.pkts_out) ;
+              "not_permitted", `Int c.denied_out ;
+              "not_injected", `Int c.not_injected ;
+              "not_captured", `Int c.not_captured ;
+              "captured_packets", `Int c.wire_pkts ;
+              "captured_bytes", `Int c.wire_bytes ] ;
     exit code
