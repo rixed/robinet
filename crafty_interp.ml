@@ -280,42 +280,73 @@ let getenv name =
     | None -> Tools.unsafe_getenv_opt name
     | v -> v
 
-(* The arguments that follow the program on the command line: *)
-let prog_args = ref [||]
+(** How [resolve()] and [hostname()] find what they return: the addresses of
+ * a name, IPv4 first, and the name of an address. Asked from the thread of
+ * the simulation, which waits for the answer. *)
+type resolver =
+    { resolve : string -> Ip.Addr.t list ;
+      hostname : Ip.Addr.t -> string option }
 
-(* The system resolver's answers, asked once per name or address for the
- * whole run; [resolve] has the IPv4 addresses first: *)
-let resolved = Hashtbl.create 10
-let resolve name =
-    match Hashtbl.find_option resolved name with
-    | Some addrs -> addrs
-    | None ->
-        let addrs =
-            Unix.getaddrinfo name "" [] |>
-            List.filter_map (function
-                | Unix.{ ai_addr = ADDR_INET (a, _) ; _ } -> Some (Ip.Addr.o a)
-                | _ -> None) |>
-            List.unique ~eq:(fun a b -> Ip.Addr.compare a b = 0) |>
-            List.stable_sort (fun a b -> Bool.compare (Ip.Addr.is_v6 a) (Ip.Addr.is_v6 b)) in
-        Hashtbl.add resolved name addrs ;
-        addrs
+(** The system's, asked every time: *)
+let system_resolver =
+    { resolve = (fun name ->
+        Unix.getaddrinfo name "" [] |>
+        List.filter_map (function
+            | Unix.{ ai_addr = ADDR_INET (a, _) ; _ } -> Some (Ip.Addr.o a)
+            | _ -> None) |>
+        List.unique ~eq:(fun a b -> Ip.Addr.compare a b = 0) |>
+        List.stable_sort (fun a b -> Bool.compare (Ip.Addr.is_v6 a) (Ip.Addr.is_v6 b))) ;
+      hostname = (fun ip ->
+        try Some (Unix.getnameinfo (Unix.ADDR_INET ((ip :> Unix.inet_addr), 0))
+                                   Unix.[ NI_NAMEREQD ]).ni_hostname
+        with Not_found -> None) }
 
-let hostnames = Hashtbl.create 10
-let hostname (ip : Ip.Addr.t) =
-    match Hashtbl.find_option hostnames ip with
-    | Some name -> name
-    | None ->
-        let name =
-            try Some (Unix.getnameinfo (Unix.ADDR_INET ((ip :> Unix.inet_addr), 0))
-                                       Unix.[ NI_NAMEREQD ]).ni_hostname
-            with Not_found -> None in
-        Hashtbl.add hostnames ip name ;
-        name
+(** [r], each answer of which is given again for [ttl] (default: forever), to
+ * all the programs, from any thread, that are given the result. *)
+let cached ?ttl r =
+    let lock = Mutex.create () in
+    let locked f =
+        Mutex.lock lock ;
+        Fun.protect ~finally:(fun () -> Mutex.unlock lock) f in
+    let fresh at =
+        match ttl with
+        | None -> true
+        | Some ttl -> Unix.gettimeofday () -. at < Clock.Interval.to_secs ttl in
+    let memo f =
+        let answers = Hashtbl.create 10 in
+        fun k ->
+            match locked (fun () -> Hashtbl.find_option answers k) with
+            | Some (v, at) when fresh at -> v
+            | _ ->
+                (* Not locked while asking, which may take long: *)
+                let v = f k in
+                locked (fun () -> Hashtbl.replace answers k (v, Unix.gettimeofday ())) ;
+                v in
+    { resolve = memo r.resolve ; hostname = memo r.hostname }
 
-let rec call loc (b : T.builtin) args ~print ~print_err ~now ~check_words =
+(* Where a program writes, the date it reads, and what else it is given: *)
+type output =
+    { print : string -> unit ; print_err : string -> unit ;
+      now : unit -> Clock.Wall.t ;
+      (* The instant of the simulation: *)
+      instant : unit -> Clock.Time.t ;
+      (* What [format()] writes: *)
+      format : format ;
+      (* Given what [report] reports: its name, the type and value, and the
+       * instant: *)
+      report : string -> A.Type.t -> value -> Clock.Time.t -> unit ;
+      (* Told how many words an array, bytes or string about to be made takes,
+       * which is one per item but for a string, it may stop the program and
+       * raise: *)
+      check_words : A.location -> int -> unit ;
+      (* The arguments that follow the program on the command line: *)
+      prog_args : string array ;
+      resolver : resolver }
+
+let rec call loc (b : T.builtin) args (output : output) =
+    let { print ; print_err ; now ; check_words ; prog_args ; resolver ; _ } = output in
     let number = function Bool _ | Int _ | Float _ -> true | _ -> false in
-    let reparse what ok s =
-        call loc b [ parsed loc what ok s ] ~print ~print_err ~now ~check_words in
+    let reparse what ok s = call loc b [ parsed loc what ok s ] output in
     match b, args with
     | T.To_int, [ String s ] -> reparse "an int" number s
     | T.To_float, [ String s ] -> reparse "a float" number s
@@ -383,16 +414,16 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now ~check_words =
         | None, _ -> error_as A.Error_name.Unset loc "Environment variable %s is not set" name)
     | T.Arg, Int n :: default ->
         (match default with
-        | _ when n >= 0 && n < Array.length !prog_args -> String !prog_args.(n)
+        | _ when n >= 0 && n < Array.length prog_args -> String prog_args.(n)
         | [ d ] -> d
-        | _ -> error_as A.Error_name.Unset loc "No argument %d: %d given" n (Array.length !prog_args))
-    | T.Nargs, [] -> Int (Array.length !prog_args)
+        | _ -> error_as A.Error_name.Unset loc "No argument %d: %d given" n (Array.length prog_args))
+    | T.Nargs, [] -> Int (Array.length prog_args)
     | T.Resolve, [ String name ] ->
-        (match resolve name with
+        (match resolver.resolve name with
         | [] -> error_as A.Error_name.Unresolved loc "%s has no IP address" name
         | addrs -> Array (Array.of_list (List.map (fun a -> Ip a) addrs)))
     | T.Hostname, Ip ip :: default ->
-        (match hostname ip, default with
+        (match resolver.hostname ip, default with
         | Some n, _ -> String n
         | None, [ d ] -> d
         | None, _ -> error_as A.Error_name.Unresolved loc "%s has no name" (Ip.Addr.to_dotted_string ip))
@@ -552,19 +583,6 @@ let arith ~check_words loc op a b =
     | A.Shr, Byte a, Int n -> Byte (if n >= 8 then 0 else a lsr n)
     | _ -> invalid_arg "Crafty_interp.arith"
 
-(* Where a program writes, and the date it reads: *)
-type output =
-    { print : string -> unit ; print_err : string -> unit ;
-      now : unit -> Clock.Wall.t ;
-      (* What [format()] writes: *)
-      format : format ;
-      (* Given what [report] reports: its name, the type and value, and when: *)
-      report : string -> A.Type.t -> value -> Clock.Wall.t -> unit ;
-      (* Told how many words an array, bytes or string about to be made takes,
-       * which is one per item but for a string, it may stop the program and
-       * raise: *)
-      check_words : A.location -> int -> unit }
-
 (* The stack of [env] with these layers on top of its [depth] first ones,
  * given to [hold] (but for the root, which stays, and for a terminal layer's,
  * which goes with its parent) once acquired. The options, valued by [eval],
@@ -715,17 +733,13 @@ let rec eval output (env : env) (e : T.expr) =
     | T.Call (T.Summary, [ x ]) -> snd (summarize x.typ (eval x))
     | T.Call (T.Report, [ x ; name ]) ->
         (match eval name with
-        | String n -> output.report n x.typ (eval x) (output.now ())
+        | String n -> output.report n x.typ (eval x) (output.instant ())
         | _ -> assert false) ;
         Void
     | T.Call ((T.Print | T.Print_err) as b, [ x ]) when x.typ <> A.Type.String ->
-        call e.loc b [ String (to_string x.typ (eval x)) ]
-             ~print:output.print ~print_err:output.print_err ~now:output.now
-             ~check_words:output.check_words
+        call e.loc b [ String (to_string x.typ (eval x)) ] output
     | T.Call (b, args) ->
-        call e.loc b (List.map eval args)
-             ~print:output.print ~print_err:output.print_err ~now:output.now
-             ~check_words:output.check_words
+        call e.loc b (List.map eval args) output
     | T.Encode { depth ; overlay ; layers } ->
         let held = ref [] in
         let written =
@@ -1466,11 +1480,13 @@ let print_report print name typ v _ =
     let typ, v = summarize typ v in
     print (name ^": "^ to_string typ v)
 
-let output_of power ?(format=Human) ?report ?(check_words=fun _ _ -> ()) ~print ~print_err () =
-    let now () =
-        let sim = power.SimTypes.sim in
-        Simulation.date_of sim (Simulation.now sim) in
-    { print ; print_err ; now ; format ; report = report |? print_report print ; check_words }
+let output_of power ?(format=Human) ?report ?(check_words=fun _ _ -> ())
+              ?(args=[||]) ?(resolver=system_resolver) ~print ~print_err () =
+    let sim = power.SimTypes.sim in
+    let instant () = Simulation.now sim in
+    let now () = Simulation.date_of sim (instant ()) in
+    { print ; print_err ; now ; instant ; format ; report = report |? print_report print ;
+      check_words ; prog_args = args ; resolver }
 
 let matches output tree (ps : filter) frame =
     List.exists (fun (p : T.pattern) ->
@@ -1519,7 +1535,7 @@ let self_values ~own (l : T.limits) =
         | "promiscuous" -> flag p.promiscuous
         | _ -> flag p.exfiltration)
 
-let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
+let run_on_tree power tree ?format ?report ?args ?resolver ~print ~print_err ?(on_exit=ignore)
                 ?(limits=T.no_limits) ?(on_start=ignore) ?(on_exception=fun _ -> true)
                 (program : T.block) =
     let status = ref Running in
@@ -1554,7 +1570,8 @@ let run_on_tree power tree ?format ?report ~print ~print_err ?(on_exit=ignore)
     let checkpoint () =
         incr statements ;
         if !statements land 0xffff = 0 && !status = Running && check_ram () then stop () in
-    let t = { power ; output = output_of power ?format ?report ~check_words ~print ~print_err () ;
+    let t = { power ; output = output_of power ?format ?report ?args ?resolver ~check_words
+                                         ~print ~print_err () ;
               tree ; awaited = ref [] ; checkpoint ;
               exit = (fun () -> cancel root ; exit Done) } in
     let own =
@@ -1639,7 +1656,7 @@ let print_status oc = function
 let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         ?(promisc=false)
         ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu ?router
-        ?limits ?format ?report ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
+        ?limits ?format ?report ?args ?resolver ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
         ?(on_warning=ignore) ?(on_closed=ignore) ?(rx_wire=true) ?on_exception
         (program : program) =
     let limits = limits |? program.limits in
@@ -1680,7 +1697,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     let started = ref None and stopped = ref false in
     Simulation.asap power (fun () ->
         if not !stopped then
-            ignore (run_on_tree power tree ?format ?report ~print ~print_err ~on_exit
+            ignore (run_on_tree power tree ?format ?report ?args ?resolver ~print ~print_err ~on_exit
                                 ~limits ~on_start:(fun h -> started := Some h)
                                 ?on_exception program.body)
     ) () ;
@@ -1698,7 +1715,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         | None -> if !stopped then Stopped else Running) ;
       idle = idle tree ;
       emitted = (fun frame -> Option.may (fun (h : handle) -> h.emitted frame) !started) ;
-      matches = matches (output_of power ?format ?report ~print ~print_err ()) tree ;
+      matches = matches (output_of power ?format ?report ?args ?resolver ~print ~print_err ()) tree ;
       open_streams = open_streams tree ;
       reset_streams = (fun () -> Crafty_tree.reset_streams tree) ;
       uses_port = tree.uses_port ;
@@ -1770,7 +1787,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   let reply ?(sport=53) ?(dport=1000) data =
       incoming (Ip.Pdu.pack (udp_packet sport dport data))
 
-  let runs ?stop_at ?(trees=false) ?(frames=false) ?(sent=false) ?(inject=[]) ?(promisc=false) ?format text =
+  let runs ?stop_at ?(trees=false) ?(frames=false) ?(sent=false) ?(inject=[]) ?(promisc=false) ?format ?args text =
       match Crafty_parser.parse text with
       | Error e -> IO.to_string Crafty_parser.print_error e
       | Ok p ->
@@ -1797,7 +1814,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
                   Simulation.at sim.root.power (Clock.Time.of_secs t)
                       (fun () -> eth.Eth.State.iface.Eth.Iface.recv frame) ()) inject ;
               let h =
-                  run_on_tree sim.root.power tree ?format ~print:(line "") ~print_err:(line "err ")
+                  run_on_tree sim.root.power tree ?format ?args ~print:(line "") ~print_err:(line "err ")
                       ~on_exit:(function
                           | Done -> line "" "done"
                           | Failed e ->
@@ -2064,9 +2081,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   ("0s: default "^ Sys.getenv "HOME" ^"\n0s: done") \
     (runs "print(\"${getenv(\"CRAFTY_NO_SUCH_VAR\", default=\"default\")} ${getenv(\"HOME\", default=\"\")}\")")
   "0s: 2 a b c\n0s: done" \
-    (prog_args := [| "a" ; "b" |] ; \
-     Fun.protect ~finally:(fun () -> prog_args := [||]) (fun () -> \
-       runs "print(\"${nargs()} ${arg(0)} ${arg(1, default=\"x\")} ${arg(2, default=\"c\")}\")"))
+    (runs ~args:[| "a" ; "b" |] \
+       "print(\"${nargs()} ${arg(0)} ${arg(1, default=\"x\")} ${arg(2, default=\"c\")}\")")
   "0s: failed: line 1, column 5: No argument 0: 0 given" \
     (runs "x = arg(0)")
   "0s: [127.0.0.1] [::1] localhost\n0s: done" \

@@ -563,18 +563,19 @@ let stats_line n =
 
 (** {2 Patterns} *)
 
-let next_seq = ref 0
+(* Increasing, across the trees of all threads: *)
+let next_seq = Atomic.make 0
 
 (** Registers cases of alternative patterns, each a node, the modes of the
  * layers of its stack below it, and layers starting with that of the node,
  * which it holds until the function returned unregisters them all. A packet
  * is told to at most one of them, which tells the [matched] of its case. *)
 let register cases ~hold ~failed ~missed =
-    incr next_seq ;
+    let seq = Atomic.fetch_and_add next_seq 1 + 1 in
     let ps =
         List.concat_map (fun (alternatives, matched) ->
             List.map (fun (node, below, layers) ->
-                let p = { seq = !next_seq ; layers ; below ; hold ; matched ; failed ; missed } in
+                let p = { seq ; layers ; below ; hold ; matched ; failed ; missed } in
                 acquire node ;
                 (match layers with
                 | { pmode = L.Driven ; _ } :: _ -> node.driven <- true ; node.ops.drive ()

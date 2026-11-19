@@ -256,7 +256,6 @@ let () =
             " end the options, even before a program from -e" ] ;
     (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
     Arg.parse !specs (program_or_arg ~stop:true) usage ;
-    Crafty_interp.prog_args := Array.of_list !prog_args ;
     if !cleanup then (
         (match Host_config.cleanup_stale () with
         | [] -> print_endline "Nothing to clean up."
@@ -597,7 +596,8 @@ let () =
             (* The kernel answers for its own address: *)
             ~answer_requests:(!own_ip <> None) ~promisc
             ~limits
-            ~format ~report
+            ~format ~report ~args:(Array.of_list !prog_args)
+            ~resolver:Crafty_interp.(cached system_resolver)
             ~print:(fun s ->
                 if format = Human then print_endline s
                 else emit "print" [ "text", `String s ])
