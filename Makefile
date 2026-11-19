@@ -65,6 +65,7 @@ LIB_SOURCES  = \
 	device.ml \
 	topology.ml \
 	host_config.ml \
+	crafty_run.ml \
 	netns.ml \
 	opache.ml \
 	search.ml \
