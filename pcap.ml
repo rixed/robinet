@@ -261,7 +261,11 @@ type global_header = { name          : string ; (** The file name. *)
                        this_zone     : int32 ;  (** Time zone (should be zero, unused). *)
                        sigfigs       : int32 ;  (** unused. *)
                        snaplen       : int32 ;  (** Indicate that no caplen will be smaller. We don't use this. *)
-                       dlt           : Dlt.t    (** The Data Link Type (see {!Pcap.Dlt}). *) }
+                       dlt           : Dlt.t ;  (** The Data Link Type (see {!Pcap.Dlt}). *)
+                       nano          : bool     (** Timestamps to the nanosecond rather than the microsecond. *) }
+
+(* What a file starts with, which tells the precision of its timestamps: *)
+let magic ~nano = if nano then 0xa1b23c4dl else 0xa1b2c3d4l
 
 (** {3 Captured packet} *)
 
@@ -287,9 +291,11 @@ struct
         and payload = Payload.o bits in
         { source_name ; caplen ; wirelen ; dlt ; ts ; payload }
 
-    (** Return the [bitstring] ready to be written into a pcap file (see {!Pcap.save}). *)
-    let pack t =
-        let sec, usec = Clock.Wall.to_ints t.ts in
+    (** Return the [bitstring] ready to be written into a pcap file (see
+     * {!Pcap.save}), with its timestamp to the nanosecond unless not [nano]. *)
+    let pack ?(nano=true) t =
+        let sec, subsec =
+            if nano then Clock.Wall.to_sec_ns t.ts else Clock.Wall.to_ints t.ts in
         let len = Payload.length t.payload in
         (* What is saved of the packet, which is not all of it when the caplen
          * is shorter than what is in hand. *)
@@ -299,7 +305,7 @@ struct
             else (t.payload :> bitstring) in
         let%bitstring pkt_hdr = {|
             Int32.of_int sec  : 32 : littleendian ;
-            Int32.of_int usec : 32 : littleendian ;
+            Int32.of_int subsec : 32 : littleendian ;
             Int32.of_int cap_len : 32 : littleendian ;
             (* How long the packet was on the wire, which is more than is in
              * hand whenever it was cut short -- by libpcap on the way in (see
@@ -308,10 +314,12 @@ struct
         concat [ pkt_hdr ; payload ]
 
     (** [output out] returns a function that will call [out] with the file header
-     * and then the binary encoding of all passed pdus. *)
-    let output ?(caplen=65535) ?(dlt=Dlt.en10mb) out =
+     * and then the binary encoding of all passed pdus, their timestamps to the
+     * nanosecond unless not [nano]. *)
+    let output ?(caplen=65535) ?(dlt=Dlt.en10mb) ?(nano=true) out =
+        let m = magic ~nano in
         let%bitstring file_hdr = {|
-            0xa1b2c3d4l : 32 : littleendian ;
+            m : 32 : littleendian ;
             2 (* version major *) : 16 : littleendian ;
             4 (* version minor *) : 16 : littleendian ;
             0l (* this TZ *) : 32 : littleendian ;
@@ -320,24 +328,24 @@ struct
             (dlt :> int32) : 32 : littleendian |} in
         out (string_of_bitstring file_hdr) ;
         fun pdu ->
-            pack pdu |>
+            pack ~nano pdu |>
             string_of_bitstring |>
             out
 
     (** [write out] returns a function that will write passed pdus into [out].
      * @param caplen can be used to cap saved packet to a given number of bytes
      * @param dlt can be used to change the file's DLT (you probably do not want to do that) *)
-    let write ?caplen ?dlt out_chan =
-        output ?caplen ?dlt (String.print out_chan)
+    let write ?caplen ?dlt ?nano out_chan =
+        output ?caplen ?dlt ?nano (String.print out_chan)
 
     (** [save "file.pcap"] returns a function that will save passed pdus in ["file.pcap"]
      * and another one that will close this file.
      * @param flush pushes every packet out as it is written.
      * @param caplen can be used to cap saved packet to a given number of bytes
      * @param dlt can be used to change the file's DLT (you probably do not want to do that) *)
-    let save ?(flush=false) ?caplen ?dlt fname =
+    let save ?(flush=false) ?caplen ?dlt ?nano fname =
         let out_chan = open_out_bin fname in
-        let write_pdu = write ?caplen ?dlt out_chan in
+        let write_pdu = write ?caplen ?dlt ?nano out_chan in
         (* The file's header is written as it is opened, but a buffered channel
            leaves it nowhere until something else pushes it out. Out at once,
            what is on disk from the start is a pcap that can be read -- an empty
@@ -695,8 +703,9 @@ let recorder ~parent ?location ?(flush=false) ?caplen ?(dlt=default_dlt) ?fname
 exception Not_a_pcap_file
 
 let bitstring_of_global_header h =
+    let m = magic ~nano:h.nano in
     let%bitstring hdr = {|
-        0xa1b2c3d4l : 32 : endian (h.endianness) ;
+        m : 32 : endian (h.endianness) ;
         h.version_major : 16 : endian (h.endianness) ;
         h.version_minor : 16 : endian (h.endianness) ;
         h.this_zone : 32 : endian (h.endianness) ;
@@ -705,16 +714,18 @@ let bitstring_of_global_header h =
         (h.dlt :> int32) : 32 : endian (h.endianness) |} in hdr
 
 let global_header_of_bitstring name header =
-    let endianness = match%bitstring (takebits 32 header) with
-        | {| 0xa1b2c3d4l : 32 : bigendian |} -> BigEndian
-        | {| 0xa1b2c3d4l : 32 : littleendian |} -> LittleEndian
+    let endianness, nano = match%bitstring (takebits 32 header) with
+        | {| 0xa1b2c3d4l : 32 : bigendian |} -> BigEndian, false
+        | {| 0xa1b2c3d4l : 32 : littleendian |} -> LittleEndian, false
+        | {| 0xa1b23c4dl : 32 : bigendian |} -> BigEndian, true
+        | {| 0xa1b23c4dl : 32 : littleendian |} -> LittleEndian, true
         | {| _ |} -> raise Not_a_pcap_file in
     match%bitstring (dropbits 32 header) with
     | {| version_major : 16 : endian (endianness) ; version_minor : 16 : endian (endianness) ;
         this_zone : 32 : endian (endianness) ; sigfigs : 32 : endian (endianness) ;
         snaplen : 32 : endian (endianness) ; dlt : 32 : endian (endianness) |} ->
         { name ; endianness ; version_major ; version_minor ;
-          this_zone ; sigfigs ; snaplen ; dlt = Dlt.o dlt }
+          this_zone ; sigfigs ; snaplen ; dlt = Dlt.o dlt ; nano }
    | {| _ |} -> raise Not_a_pcap_file
 
 (** [read_global_header filename] reads the pcap global header from the
@@ -851,7 +862,7 @@ let read_next_pkt global_header ic =
     let pkt_hdr = IO.really_nread ic 16 in
     match%bitstring (bitstring_of_string pkt_hdr) with
     | {| sec      : 32 : endian (global_header.endianness) ;
-         usec     : 32 : endian (global_header.endianness) ;
+         subsec   : 32 : endian (global_header.endianness) ;
          caplen   : 32 : endian (global_header.endianness) ;
          wire_len : 32 : endian (global_header.endianness) |} ->
         let pkt = IO.really_nread ic (Int32.to_int caplen) in
@@ -861,7 +872,8 @@ let read_next_pkt global_header ic =
                        concat [ bits ; zeroes_bitstring (Int32.to_int (Int32.sub wire_len caplen)*8) ]
                    ) in
         let u32 i = Int32.to_int i land 0xffff_ffff in
-        let ts = Clock.Wall.of_ns (u32 sec * 1_000_000_000 + u32 usec * 1_000) in
+        let ns = if global_header.nano then u32 subsec else u32 subsec * 1_000 in
+        let ts = Clock.Wall.of_ns (u32 sec * 1_000_000_000 + ns) in
         Pdu.make global_header.name
                  ~caplen:(Int32.to_int caplen)
                  ~dlt:global_header.dlt
@@ -890,20 +902,34 @@ let write_global_header fname gh =
 
 (** [write_next_pkt global_header ic] will return the next {!Pcap.Pdu.t} that's to
  * be read from the input stream [ic]. *)
-let write_next_pkt oc pdu =
-    let bytes = string_of_bitstring (Pdu.pack pdu) in
+let write_next_pkt ?nano oc pdu =
+    let bytes = string_of_bitstring (Pdu.pack ?nano pdu) in
     output_string oc bytes
 
-(** [file_of_enum filename e] will save an [Enum.t] of {!Pcap.Pdu.t} into the file named [filename]. *)
-let file_of_enum ?(dlt=Dlt.en10mb) fname e =
+(** [file_of_enum filename e] will save an [Enum.t] of {!Pcap.Pdu.t} into the
+ * file named [filename], their timestamps to the nanosecond unless not
+ * [nano]. *)
+let file_of_enum ?(dlt=Dlt.en10mb) ?(nano=true) fname e =
     let header = { name = fname ;
                    endianness = LittleEndian ;
                    version_major = 2 ; version_minor = 4 ;
                    this_zone = 0l ; sigfigs = 0l ;
-                   snaplen = 65535l ; dlt } in
+                   snaplen = 65535l ; dlt ; nano } in
     let oc = write_global_header fname header in
-    Enum.iter (write_next_pkt oc) e ;
+    Enum.iter (write_next_pkt ~nano oc) e ;
     close_out oc
+
+(* What is written is read back to the nanosecond, or to the microsecond: *)
+(*$T file_of_enum
+  let ts = Clock.Wall.of_ns 1_792_533_765_123_456_789 \
+  and fname = Filename.temp_file "robinet" ".pcap" in \
+  let back nano = \
+      file_of_enum ~nano fname (List.enum [ Pdu.make "x" ts (Bitstring.bitstring_of_string "abc") ]) ; \
+      let p = List.of_enum (enum_of_file fname) in \
+      Sys.remove fname ; \
+      List.map (fun (p : Pdu.t) -> Clock.Wall.to_ns p.ts) p in \
+  back true = [ 1_792_533_765_123_456_789 ] && back false = [ 1_792_533_765_123_456_000 ]
+*)
 
 (** {2 Tools} *)
 

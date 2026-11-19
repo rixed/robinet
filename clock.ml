@@ -431,6 +431,7 @@ module Wall : sig
     val max : t -> t -> t
     val trunc : t -> Interval.t -> t
     val to_ints : t -> int * int
+    val to_sec_ns : t -> int * int
     val of_date : ?utc_offset:Interval.t -> int -> int -> int -> int -> int -> float -> t
     val to_iso8601 : t -> string
     val beginning_of_time : t
@@ -557,6 +558,9 @@ end = struct
     let to_ints (t : t) =
         let sec, ns = split (t :> int) in
         sec, ns / 1000
+
+    (** Whole seconds, rounded down, and the nanoseconds after them: *)
+    let to_sec_ns (t : t) = split (t :> int)
 
     let is_leap y = y mod 4 = 0 && (y mod 100 <> 0 || y mod 400 = 0)
 
