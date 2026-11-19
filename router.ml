@@ -2000,7 +2000,7 @@ let make_from_addrs
     let routes = [ Route.make (Forward { out_iface = 2 ; via }) ] in
     let r = make ~parent:sim.root ~speeds:[ EthSpeed.Eth10Mbps ]
                  ~buffer_capacity:30_000 3 routes "r" in
-    Simulation.power_up r.widget.power ;
+    Simulation.run_startup sim ;
     Array.iter (fun iface ->
         (ports iface).set_capabilities 0 Capabilities.Any) r.ifaces ;
     let emitted = ref 0 in
@@ -2056,7 +2056,7 @@ let make_from_addrs
     let routes = [ Route.make (Forward { out_iface = 2 ; via }) ] in
     let r = make ~parent:sim.root
                  ~speeds:EthSpeed.[ Eth10Mbps ; Eth100Mbps ] 3 routes "r" in
-    Simulation.power_up r.widget.power ;
+    Simulation.run_startup sim ;
     assert_equal ~msg:"no link, no buffer" ~printer:string_of_int
                  0 (actual_buffer_capacity r) ;
     let slow = Capabilities.(Eth { speeds = [ EthSpeed.Eth10Mbps ] ;

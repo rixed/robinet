@@ -394,7 +394,7 @@ let make ~parent ?location ?(start=At_power_on) ?max_packets ?max_volume
                    ?max_throughput ?max_duration ~on_limit "p" in
       let passed = ref 0 in
       Tools.((t.widget.ports.dev 1) --> sink (fun _ -> incr passed)) ;
-      Simulation.power_up t.widget.power ;
+      Simulation.run_startup sim ;
       for i = first to 299 do
           Simulation.at sim.root.power (Clock.Time.of_secs (float_of_int i /. 1000.))
               (t.widget.ports.dev 0).write (Bitstring.create_bitstring (46 * 8))
@@ -457,7 +457,7 @@ let make ~parent ?location ?(start=At_power_on) ?max_packets ?max_volume
       let syns = ref 0 and others = ref 0 in
       Tools.((t.widget.ports.dev 1) --> sink (fun bits ->
           incr (if is_syn bits then syns else others))) ;
-      Simulation.power_up t.widget.power ;
+      Simulation.run_startup sim ;
       for i = 0 to 299 do
           List.iter (fun syn ->
               Simulation.at sim.root.power (Clock.Time.of_secs (float_of_int i /. 1000.))
@@ -483,7 +483,7 @@ let make ~parent ?location ?(start=At_power_on) ?max_packets ?max_volume
   let set name v = Option.get (prop name).setter v in
   let passed = ref 0 in
   Tools.((t.widget.ports.dev 1) --> sink (fun _ -> incr passed)) ;
-  Simulation.power_up t.widget.power ;
+  Simulation.run_startup sim ;
   let send () = (t.widget.ports.dev 0).write (Bitstring.create_bitstring 400) in
   send () ; send () ;
   assert_equal (`Bool false) (get "max packets reached") ;

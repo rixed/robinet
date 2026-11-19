@@ -3142,7 +3142,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
           let policer =
               Policer.make ~parent:sim.root ?max_packets ?max_packet_rate ?max_syns ?max_syn_rate
                   ~on_limit:(fun l -> line ("hit "^ Policer.string_of_limit l) ; h.stop ()) "policer" in
-          Simulation.power_up policer.widget.power ;
+          Simulation.run_startup sim ;
           Tools.(dev --> policer.widget.ports.dev 0) ;
           Tools.(policer.widget.ports.dev 1 --> sink (fun _ -> incr frames)) ;
           if stop then h.stop () ;
