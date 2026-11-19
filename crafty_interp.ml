@@ -270,8 +270,8 @@ let rec summarize (typ : A.Type.t) v =
         | _ -> v in
     T.summary_type typ, summarized
 
-(* What a setuid crafty, which drops the user's environment, prefixes their
- * variables with: *)
+(* What a privileged crafty, which drops the user's environment, prefixes
+ * their variables with: *)
 let user_env_prefix = "CRAFTY_USER_ENV_"
 
 (* The user's variable, renamed or not: *)

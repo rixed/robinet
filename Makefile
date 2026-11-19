@@ -12,6 +12,7 @@ LIB_SOURCES  = \
 	log.ml \
 	mark.ml \
 	tools.ml \
+	privileges.ml \
 	simTypes.ml \
 	capabilities.ml \
 	widget.ml \
@@ -107,7 +108,8 @@ C_SOURCES = \
 	iface_wrap.c \
 	sockopt_wrap.c \
 	route_wrap.c \
-	condvar_wrap.c
+	condvar_wrap.c \
+	privileges_wrap.c
 
 SOURCES = $(LIB_SOURCES) $(EXAMPLE_SOURCES) $(TEST_SOURCES) robinet.ml \
           crafty_manual.ml crafty.ml
@@ -266,7 +268,7 @@ examples: $(EXAMPLES)
 	@if which setcap > /dev/null 2>&1 ; then \
 	   echo "You should run:" ;\
 	   for f in $(EXAMPLES); do \
-	     echo "sudo setcap cap_net_raw,cap_net_admin=eip $$f" ;\
+	     echo "sudo setcap cap_net_raw,cap_net_admin=ep $$f" ;\
 	   done ;\
 	 fi
 
@@ -274,14 +276,14 @@ robinet.top: $(ARCHIVE)
 	$(OCAMLMKTOP) $(WARNS) -o $@ -package "findlib $(REQUIRES)" $(ARCHIVE)
 	@if which setcap > /dev/null 2>&1 ; then \
 	   echo "You should run:" ;\
-	   echo "sudo setcap cap_net_raw,cap_net_admin=eip $@" ;\
+	   echo "sudo setcap cap_net_raw,cap_net_admin=ep $@" ;\
 	 fi
 
 robinet: robinet.opt
 	@ln -f $< $@
 	@if which setcap > /dev/null 2>&1 ; then \
 	   echo "You should run:" ;\
-	   echo "sudo setcap cap_net_raw,cap_net_admin=eip $@" ;\
+	   echo "sudo setcap cap_net_raw,cap_net_admin=ep $@" ;\
 	 fi
 
 crafty.opt: $(XARCHIVE) crafty_manual.cmx crafty.cmx
@@ -325,7 +327,7 @@ crafty: crafty.opt
 	@ln -f $< $@
 	@if which setcap > /dev/null 2>&1 ; then \
 	   echo "You should run:" ;\
-	   echo "sudo setcap cap_net_raw,cap_net_admin=eip $@" ;\
+	   echo "sudo setcap cap_net_raw,cap_net_admin=ep $@" ;\
 	 fi
 
 MULTIARCH_BUILDER=multi-arch-builder

@@ -30,10 +30,9 @@
   This wants root, and is the only thing in robinet that does: opening an
   interface that is already there asks no more than the cap_net_raw and
   cap_net_admin the Makefile advises, which is why it is a separate ask made by
-  a separate option. Nothing clever is attempted about it -- a capability given
-  to robinet is not given to the [ip] it runs, and handing one over would want
-  cap_dac_override on top, which is root by another name. So [ip] is left to
-  fail, and to say what it lacked.
+  a separate option. Those robinet passes on to the [ip] it runs, but a
+  namespace wants cap_sys_admin and writing /run/netns as well, which is root
+  by another name. So [ip] is left to fail, and to say what it lacked.
 
   The end in the namespace sends with checksum offload off, and so without
   segmentation offload either: robinet passes on frames as it captures them, so

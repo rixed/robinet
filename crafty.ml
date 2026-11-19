@@ -72,21 +72,25 @@ let suspicious_stats =
       "TCP segments out of order", [ "ooo_in" ] ;
       "duplicate TCP segments", [ "dup_in" ] ]
 
-(* Setuid root, crafty becomes root entirely, for the commands it runs to be
- * root as well (busybox's sh drops an effective uid that is not the real
- * one), and starts over in an environment of its own, since the user's
- * (PATH, LD_PRELOAD...) would decide what runs as root. The user's variables
- * come along renamed, for the program's [getenv] only: *)
+(* Privileged (setuid root, or given capabilities with setcap), crafty runs
+ * the commands that configure the host with an environment of its own, since
+ * the user's (LD_PRELOAD...) would decide what they do. The user's variables
+ * stay, renamed, for the program's [getenv] only. Setuid root, crafty becomes
+ * root entirely, for these commands to be root as well (busybox's sh drops an
+ * effective uid that is not the real one). *)
 let () =
-    if Unix.geteuid () = 0 && Unix.getuid () <> 0 then (
-        (* Without CAP_SETUID, only the effective uid would change: *)
-        Unix.setuid 0 ;
-        if Unix.getuid () <> 0 then die "Setuid root, but without CAP_SETUID." ;
-        let user_env =
-            Unix.unsafe_environment () |>
-            Array.map ((^) Crafty_interp.user_env_prefix) in
-        Unix.execve Sys.executable_name Sys.argv
-            (Array.append [| "PATH=/usr/sbin:/usr/bin:/sbin:/bin" |] user_env))
+    if Privileges.is_secure () then (
+        if Unix.geteuid () = 0 && Unix.getuid () <> 0 then (
+            (* Without CAP_SETUID, only the effective uid would change: *)
+            Unix.setuid 0 ;
+            if Unix.getuid () <> 0 then die "Setuid root, but without CAP_SETUID.") ;
+        let user_env = Unix.unsafe_environment () in
+        Privileges.clearenv () ;
+        Unix.putenv "PATH" "/usr/sbin:/usr/bin:/sbin:/bin" ;
+        Array.iter (fun var ->
+            match String.split var ~by:"=" with
+            | name, v -> Unix.putenv (Crafty_interp.user_env_prefix ^ name) v
+            | exception Not_found -> ()) user_env)
 
 (* Ids, ISNs and ports differ from one run to the next, lest a peer take a
  * packet of this run for one of a previous run's: *)
@@ -459,9 +463,9 @@ let () =
             (rules permissions.local_ips) (rules permissions.remote_ips)
             (flag permissions.mac_spoofing) (flag permissions.exfiltration) promisc) ;
     let configure = !fw || !own_ip <> None in
-    if configure && Unix.geteuid () <> 0 then
-        die "Configuring interface %s is for root; Have you tried under sudo?"
-            !ifname ;
+    if configure && not (Privileges.has_net_admin ()) then
+        die "Configuring interface %s takes root or cap_net_admin; Have you \
+             tried under sudo?" !ifname ;
     let forward_drop =
         Option.map_default (fun ip -> Host_config.ip_forward ~v6:(Ip.Addr.is_v6 ip) ())
                            false !own_ip in

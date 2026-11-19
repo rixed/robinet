@@ -210,7 +210,7 @@ Options:
 
 - `-e PROG`: the program itself, rather than a file.
 - `-i IFACE`: the interface to send from and capture on, rather than that of
-  the default route. Crafty needs root.
+  the default route. Crafty needs root, or `setcap cap_net_raw,cap_net_admin=ep`.
 - `--routing kernel|manual`: `kernel` (default) uses kernel routes. `manual`
   takes gateway from the interface and then does ARP etc.
 - `--tcp LO-HI`, `--udp LO-HI` (repeatable): the ranges to pick source ports

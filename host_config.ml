@@ -24,8 +24,8 @@
   Through the usual commands ([ip], [ethtool]...) rather than through
   netlink: this is a handful of commands, and they are what anybody would
   check the result with by hand in any case.
-  Changing them wants root (or cap_net_admin), which is left to the commands
-  to ask for: a capability given to robinet is not given to what it runs.
+  Changing them wants root, or cap_net_admin, which robinet passes on to the
+  commands it runs (see {!Privileges.with_net_caps_passed_on}).
 *)
 open Batteries
 module EthSpeed = SimTypes.EthSpeed
@@ -37,12 +37,13 @@ let () =
     Printexc.register_printer (function
         | Command_failed (cmd, how) ->
             Some (Printf.sprintf "%S %s.%s" cmd how
-                (if Unix.geteuid () = 0 then "" else
-                 "\nChanging the configuration of the host is for root; \
-                  Have you tried under sudo?"))
+                (if Privileges.has_net_admin () then "" else
+                 "\nChanging the configuration of the host takes root or \
+                  cap_net_admin; Have you tried under sudo?"))
         | Not_installed progs ->
-            Some (Printf.sprintf "Not found in the PATH, /usr/sbin or /sbin: \
-                                  %s. Please install it."
+            Some (Printf.sprintf "Not found in the PATH or the system's \
+                                  bin and sbin directories: %s. \
+                                  Please install it."
                 (String.concat ", " progs))
         | _ -> None)
 
@@ -64,10 +65,12 @@ let quote arg =
 (** The command line of [prog] with [args], as a reader would type it. *)
 let command_line prog args = String.concat " " (List.map quote (prog :: args))
 
-(* [prog] as found on the PATH, or else in the sbin directories: a user's PATH
- * may lack them, although what is there can read the configuration. Commands
- * are run by that path, as a shell may prefer its own version of them
- * otherwise (busybox's sysctl, which cannot clear a setting). *)
+(* [prog] as found on the PATH, or else in the system's directories: a user's
+ * PATH may lack the sbin ones, although what is there can read the
+ * configuration, and a privileged process has no PATH ([Sys.getenv] ignores
+ * the environment then). Commands are run by that path, as a shell may prefer
+ * its own version of them otherwise (busybox's sysctl, which cannot clear a
+ * setting). *)
 let find_prog_opt prog =
     if String.contains prog '/' then Some prog else
     let path = try String.split_on_char ':' (Sys.getenv "PATH") with Not_found -> [] in
@@ -75,7 +78,7 @@ let find_prog_opt prog =
         d <> "" &&
         try Unix.access (Filename.concat d prog) [ Unix.X_OK ] ; true
         with Unix.Unix_error _ -> false in
-    List.find_opt executable (path @ [ "/usr/sbin" ; "/sbin" ]) |>
+    List.find_opt executable (path @ [ "/usr/sbin" ; "/sbin" ; "/usr/bin" ; "/bin" ]) |>
     Option.map (fun d -> Filename.concat d prog)
 
 let find_prog prog =
@@ -100,17 +103,30 @@ let require progs =
 let verbose = ref false
 let print_command = ref (fun cmd -> Printf.printf "%s\n%!" cmd)
 
-(** Run the command line [cmd], or say which command would not run; with
- * {!verbose}, print it first, so that a reader can see what was done to their
- * machine and undo it by hand.
+(** Run the command line [cmd], with [input] on its stdin if given, or say
+ * which command would not run; with {!verbose}, print it first, so that a
+ * reader can see what was done to their machine and undo it by hand.
  *
  * [quiet] silences what the command itself has to say: a command that is
  * undoing something reports on a state of affairs that is already being given
  * up on -- half of it may be gone before it runs -- and the error that matters
  * was reported before it. *)
-let run_line ?(quiet=false) cmd =
+let run_line ?(quiet=false) ?input cmd =
     if !verbose then !print_command cmd ;
-    match Unix.system (if quiet then cmd ^" >/dev/null 2>&1" else cmd) with
+    let cmd = if quiet then cmd ^" >/dev/null 2>&1" else cmd in
+    let status =
+        Privileges.with_net_caps_passed_on (fun () ->
+            match input with
+            | None -> Unix.system cmd
+            | Some input ->
+                (* A command that stops reading must not kill this process: *)
+                let sigpipe = Sys.signal Sys.sigpipe Sys.Signal_ignore in
+                let oc = Unix.open_process_out cmd in
+                (try output_string oc input with Sys_error _ -> ()) ;
+                let status = Unix.close_process_out oc in
+                Sys.set_signal Sys.sigpipe sigpipe ;
+                status) in
+    match status with
     | Unix.WEXITED 0 -> ()
     | Unix.WEXITED n ->
         raise (Command_failed (cmd, Printf.sprintf "exited with status %d" n))
@@ -118,7 +134,8 @@ let run_line ?(quiet=false) cmd =
         raise (Command_failed (cmd, Printf.sprintf "was signalled (%d)" n))
 
 (** As [run_line], for [prog] with [args]. *)
-let run ?quiet prog args = run_line ?quiet (command_line (find_prog prog) args)
+let run ?quiet ?input prog args =
+    run_line ?quiet ?input (command_line (find_prog prog) args)
 
 (** As [run], for a command that may fail without it mattering: what was asked
  * for and what is there may already agree, and a command that fails on the
@@ -137,8 +154,9 @@ let output ?(quiet=false) prog args =
         if quiet then UnixLabels.openfile "/dev/null" ~mode:[ O_WRONLY ; O_CLOEXEC ] ~perm:0
         else UnixLabels.stderr in
     let pid =
-        UnixLabels.create_process ~prog ~args:(Array.of_list (prog :: args))
-            ~stdin:UnixLabels.stdin ~stdout:w ~stderr:err in
+        Privileges.with_net_caps_passed_on (fun () ->
+            UnixLabels.create_process ~prog ~args:(Array.of_list (prog :: args))
+                ~stdin:UnixLabels.stdin ~stdout:w ~stderr:err) in
     UnixLabels.close w ;
     if quiet then UnixLabels.close err ;
     let ic = UnixLabels.in_channel_of_descr r in
@@ -571,7 +589,11 @@ let ruleset ~table ~ifname ?(ports=[]) ?forward_drop () =
  * the set, in {!state_dir}, named after the set, which also holds the pid of
  * its program. *)
 
-let state_dir = "/run/robinet"
+(* Root's, or else the user's, whose files only their programs read back: *)
+let state_dir =
+    let uid = Unix.getuid () in
+    if uid = 0 then "/run/robinet"
+    else Printf.sprintf "/run/user/%d/robinet" uid
 
 type changes =
     { name : string ;
@@ -594,14 +616,14 @@ let changes name =
         Printf.fprintf oc "pid %d\n" (Unix.getpid ())) ;
     { name ; file ; undo = [] ; undone = false }
 
-(** Make a change by running [prog] with [args], after having recorded that
- * running [undo] (a program and its arguments) undoes it. *)
-let change t ~undo prog args =
+(** Make a change by running [prog] with [args] (and [input]), after having
+ * recorded that running [undo] (a program and its arguments) undoes it. *)
+let change t ~undo ?input prog args =
     let undo = command_line (find_prog (List.hd undo)) (List.tl undo) in
     File.with_file_out ~mode:[ `append ] t.file (fun oc ->
         Printf.fprintf oc "%s\n" undo) ;
     t.undo <- undo :: t.undo ;
-    run prog args
+    run ?input prog args
 
 (* Undo [cmds], the latest first, as best as possible: *)
 let undo_lines cmds =
@@ -633,6 +655,38 @@ let running pid =
         | _, state -> not (String.starts_with state "Z" || String.starts_with state "X")
         | exception Not_found -> true)
 
+let reserved_ports_sysctl = "net.ipv4.ip_local_reserved_ports"
+
+(* The features of an interface that gather received packets: *)
+let rx_offloads = [ "generic-receive-offload" ; "large-receive-offload" ;
+                    "rx-gro-hw" ; "rx-gro-list" ; "rx-udp-gro-forwarding" ]
+
+(* Whether [cmd], read from the file of the changes [name], is a command that
+ * undoes a change of {!changes}, and nothing else: the file is the user's
+ * when the process is not root, and what it says is run with the
+ * capabilities of the process. *)
+let undoing ~name cmd =
+    let is prog path = find_prog_opt prog = Some path in
+    let words = String.split_on_char ' ' cmd in
+    (* Plain words, which the shell takes as they are: *)
+    List.for_all (fun w -> quote w = w) words &&
+    match words with
+    | [ nft ; "delete" ; "table" ; "inet" ; table ] ->
+        is "nft" nft && table = name
+    | [ ethtool ; "-K" ; _ifname ; feature ; "on" ] ->
+        is "ethtool" ethtool && List.mem feature rx_offloads
+    | [ sysctl ; "-q" ; "-w" ; setting ] ->
+        is "sysctl" sysctl && String.starts_with setting (reserved_ports_sysctl ^"=")
+    | _ -> false
+
+(*$T undoing
+  undoing ~name:"crafty_1" (command_line (find_prog "sh") []) = false
+  undoing ~name:"crafty_1" "nft delete table inet crafty_1; reboot" = false
+  match find_prog_opt "nft" with None -> true | Some nft -> \
+    undoing ~name:"crafty_1" (nft ^" delete table inet crafty_1") && \
+    not (undoing ~name:"crafty_1" (nft ^" delete table inet filter"))
+ *)
+
 (** Undo the changes left by processes that are no longer running, and
  * return their names. *)
 let cleanup_stale () =
@@ -645,7 +699,7 @@ let cleanup_stale () =
             let file = state_dir ^"/"^ name in
             match read_changes file with
             | Some (pid, cmds) when not (running pid) ->
-                undo_lines cmds ;
+                undo_lines (List.filter (undoing ~name) cmds) ;
                 try_run "rm" [ "-f" ; file ; file ^".nft" ] ;
                 Some name
             | _ -> None)
@@ -724,12 +778,12 @@ let fenced ~addresses ports sockets =
 
 let firewall t ~ifname ?ports ?forward_drop () =
     let script = t.file ^".nft" in
-    File.with_file_out script (fun oc ->
-        String.print oc (ruleset ~table:t.name ~ifname ?ports ?forward_drop ())) ;
+    let rules = ruleset ~table:t.name ~ifname ?ports ?forward_drop () in
+    (* For the reader. nft reads its stdin rather than this file, which the
+     * user may write to when the process is not root: *)
+    File.with_file_out script (fun oc -> String.print oc rules) ;
     change t ~undo:[ "nft" ; "delete" ; "table" ; "inet" ; t.name ]
-        "nft" [ "-f" ; script ]
-
-let reserved_ports_sysctl = "net.ipv4.ip_local_reserved_ports"
+        ~input:rules "nft" [ "-f" ; "-" ]
 
 (** [ports] added to the reserved ports [current] (as the sysctl gives them,
  * which is ranges and ports separated by commas). *)
@@ -761,12 +815,10 @@ let reserve_ports t ports =
 (** The features of [ethtool -k] output that gather received packets, and
  * are on and can be turned off. *)
 let rx_offloads_on ethtool_k =
-    let features = [ "generic-receive-offload" ; "large-receive-offload" ;
-                     "rx-gro-hw" ; "rx-gro-list" ; "rx-udp-gro-forwarding" ] in
     String.split_on_char '\n' ethtool_k |>
     List.filter_map (fun line ->
         match String.split (String.trim line) ~by:": " with
-        | feature, state when List.mem feature features &&
+        | feature, state when List.mem feature rx_offloads &&
                               String.starts_with state "on" &&
                               not (String.exists state "[fixed]") ->
             Some feature
