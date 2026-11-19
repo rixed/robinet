@@ -269,7 +269,8 @@ let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_i
  *   reports ([on_report] defaults to printing).
  * - [on_warning]: what the program, or the run, warns of.
  * - [on_packet]: each frame the program sends, through the firewall and the
- *   policer, and each it receives, through them.
+ *   policer, and each it receives, through them, with the instant libpcap
+ *   captured it.
  * - [on_recaptured]: each frame the program sent, as captured leaving the
  *   interface, with the marks of the frame sent, and the instant libpcap
  *   captured it rather than the later one it is told at.
@@ -434,6 +435,12 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     Fun.protect ~finally:(fun () -> Pcap.close_iface pcap) (fun () ->
     let instant () = Simulation.now sim in
     let secs () = Clock.Time.to_secs (instant ()) in
+    (* When libpcap captured [bits], on the timeline of the simulation, which
+     * dispatches a frame captured in its past at once: *)
+    let captured_at bits =
+        match Pcap.captured bits with
+        | Some ts -> Simulation.of_wall_clock sim ts
+        | None -> instant () in
     let warn w = on_warning (instant ()) w in
     let tell_stream what n =
         let t = instant () in
@@ -567,7 +574,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             "firewall" in
     let tell dir bits =
         if Option.map_default (fun f -> h.matches f bits) true packet_filter then
-            on_packet dir (instant ()) bits in
+            on_packet dir (if dir = In then captured_at bits else instant ()) bits in
     let before = Hub.VirtTap.make ~rev_mirror:ignore (fun _ -> incr sent)
     and after =
         Hub.VirtTap.make
@@ -639,12 +646,6 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             pcap_dropped := Pcap.dropped pcap.handler ;
             if not_captured () > !told_uncaptured then
                 Simulation.asap sim.root.power tell_uncaptured ()) in
-    (* When libpcap captured [bits], on the timeline of the simulation, which
-     * dispatches a frame captured in its past at once: *)
-    let captured_at bits =
-        match Pcap.captured bits with
-        | Some ts -> Simulation.of_wall_clock sim ts
-        | None -> instant () in
     (* What leaves is what was injected, or else what the host sends, which
      * has the interface's address: *)
     let sniffer =
