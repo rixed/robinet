@@ -434,7 +434,7 @@ struct
 
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) (fun _ -> \
-          make "f" ~dlt:(Dlt.random ()) (Clock.Wall.o (Random.float 1e9)) \
+          make "f" ~dlt:(Dlt.random ()) (Clock.Wall.of_secs (Random.float 1e9)) \
                (randbs (Random.int 40)))) (fun t -> \
         let auto_ts = function \
           | `Assoc l -> \
@@ -446,7 +446,7 @@ struct
         auto_ts (to_json (of_synth (Generator.fields_of_synth kind (auto_ts synth)) \
                                    [||])) = auto_ts (to_json t))
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) (fun _ -> \
-          make "f" ~dlt:(Dlt.random ()) (Clock.Wall.o (Random.float 1e9)) \
+          make "f" ~dlt:(Dlt.random ()) (Clock.Wall.of_secs (Random.float 1e9)) \
                (randbs (Random.int 40)))) \
         (Generator.reads_autos (fun js g -> \
             of_synth (Generator.fields_of_synth kind js) g) kind to_json)
@@ -454,7 +454,7 @@ struct
 
     (*$Q kind
       (Q.make (fun _ -> \
-          make "f" ~dlt:(Dlt.random ()) (Clock.Wall.o (Random.float 1e9)) \
+          make "f" ~dlt:(Dlt.random ()) (Clock.Wall.of_secs (Random.float 1e9)) \
                (randbs (Random.int 40)))) (fun t -> \
         try Widget.check_value kind (to_json t) ; true \
         with _ -> false)
@@ -860,7 +860,8 @@ let read_next_pkt global_header ic =
                    else (
                        concat [ bits ; zeroes_bitstring (Int32.to_int (Int32.sub wire_len caplen)*8) ]
                    ) in
-        let ts = Clock.Wall.o (Int32.to_float sec +. (Int32.to_float usec) *. 0.000001) in
+        let u32 i = Int32.to_int i land 0xffff_ffff in
+        let ts = Clock.Wall.of_ns (u32 sec * 1_000_000_000 + u32 usec * 1_000) in
         Pdu.make global_header.name
                  ~caplen:(Int32.to_int caplen)
                  ~dlt:global_header.dlt
@@ -915,30 +916,30 @@ type infos = { filename : string ; data_link_type : Dlt.t ;
  * so depending on the file size it may take some time). *)
 let infos_of filename =
     let pkts = enum_of_file filename in
-    let min_ts = ref Float.max_num and max_ts = ref Float.min_num
+    let min_ts = ref Clock.Wall.end_of_time and max_ts = ref Clock.Wall.beginning_of_time
     and num_packets = ref 0 and data_size = ref 0L in
     let dlt = match Enum.peek pkts with Some p -> p.Pdu.dlt | None -> Dlt.en10mb in
     Enum.iter (fun pdu ->
         incr num_packets ;
         data_size := Int64.add !data_size (Int64.of_int (Payload.length pdu.Pdu.payload)) ;
-        min_ts := min !min_ts (Clock.Wall.to_secs pdu.Pdu.ts) ;
-        max_ts := max !max_ts (Clock.Wall.to_secs pdu.Pdu.ts)) pkts ;
+        min_ts := Clock.Wall.min !min_ts pdu.Pdu.ts ;
+        max_ts := Clock.Wall.max !max_ts pdu.Pdu.ts) pkts ;
     { filename ; data_link_type = dlt ;
       num_packets = !num_packets ; data_size = !data_size ;
-      start_time = Clock.Wall.o !min_ts ; stop_time = Clock.Wall.o !max_ts }
+      start_time = !min_ts ; stop_time = !max_ts }
 
 (* Check that we found the same values than capinfo *)
 (*$= infos_of & ~printer:BatPervasives.dump
     (infos_of "tests/someweb.pcap") ({ filename = "tests/someweb.pcap" ;\
                                        data_link_type = Dlt.en10mb ;\
                                        num_packets = 173 ; data_size = 149461L ;\
-                                       start_time = Clock.Wall.o 1332451938.3774271 ;\
-                                       stop_time = Clock.Wall.o 1332451941.92178106 })
+                                       start_time = Clock.Wall.of_ns 1332451938_377427000 ;\
+                                       stop_time = Clock.Wall.of_ns 1332451941_921781000 })
     (infos_of "tests/someweb_cut.pcap") ({ filename = "tests/someweb_cut.pcap" ;\
                                            data_link_type = Dlt.en10mb ;\
                                            num_packets = 173 ; data_size = 149461L ;\
-                                           start_time = Clock.Wall.o 1332451938.3774271 ;\
-                                           stop_time = Clock.Wall.o 1332451941.92178106 })
+                                           start_time = Clock.Wall.of_ns 1332451938_377427000 ;\
+                                           stop_time = Clock.Wall.of_ns 1332451941_921781000 })
  *)
 
 (** [merge [e1 ; e2 ; e3]] will merge the three [Enumt.t] of packets in chronological

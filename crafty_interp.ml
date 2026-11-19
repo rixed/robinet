@@ -387,9 +387,10 @@ let rec call loc (b : T.builtin) args (output : output) =
             error loc "%s is not a number of seconds" (A.string_of_float (float_of x)))
     | T.To_time, [ x ] ->
         let s = float_of x in
-        if not (Float.is_finite s) then
-            error loc "%s is not a number of seconds" (A.string_of_float s) ;
-        Time (Clock.Wall.of_secs s)
+        (match Clock.Wall.of_secs s with
+        | t -> Time t
+        | exception Invalid_argument _ ->
+            error loc "%s is not a number of seconds" (A.string_of_float s))
     | T.Now, [] -> Time (now ())
     | T.To_bytes, [ Byte _ as b ] -> Array [| b |]
     | T.To_bytes, [ b ] -> b
@@ -555,19 +556,19 @@ let arith ~check_words loc op a b =
     | A.Div, Interval a, Float b -> Interval (Interval.div a b)
     | A.Div, Interval a, Interval b -> Float (Interval.to_secs a /. Interval.to_secs b)
     | A.Sub, Time a, Time b ->
-        let d = Clock.Wall.to_secs a -. Clock.Wall.to_secs b in
         (* As many picoseconds as an int holds: *)
-        if Float.abs d *. 1e12 >= float_of_int max_int then
+        (match Clock.Wall.diff a b with
+        | d -> Interval d
+        | exception Invalid_argument _ ->
             error loc "%s - %s is too long an interval"
-                (Clock.Wall.to_iso8601 a) (Clock.Wall.to_iso8601 b) ;
-        Interval (Interval.of_secs d)
+                (Clock.Wall.to_iso8601 a) (Clock.Wall.to_iso8601 b))
     | A.Add, Time t, Interval i | A.Add, Interval i, Time t ->
         Time (Clock.Wall.add t i)
     | A.Sub, Time t, Interval i -> Time (Clock.Wall.sub t i)
     | A.Add, Time t, Float s | A.Add, Float s, Time t ->
-        Time (Clock.Wall.of_secs (Clock.Wall.to_secs t +. s))
+        Time (Clock.Wall.add t (Interval.of_secs s))
     | A.Sub, Time t, Float s ->
-        Time (Clock.Wall.of_secs (Clock.Wall.to_secs t -. s))
+        Time (Clock.Wall.sub t (Interval.of_secs s))
     | A.BitAnd, Int a, Int b -> Int (a land b)
     | A.BitOr, Int a, Int b -> Int (a lor b)
     | A.BitXor, Int a, Int b -> Int (a lxor b)
@@ -2267,7 +2268,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (* A packet sent into a variable is waited for until seen leaving, and is
  * then that very frame, even among others alike: *)
 (*$= runs & ~printer:identity
-  "4µs640ns2ps: true true true 0.003ns 4.639999e-06\n9µs280ns2ps: pong\n9µs280ns2ps: done" \
+  "4µs640ns2ps: true true true 0s 4.64e-06\n9µs280ns2ps: pong\n9µs280ns2ps: done" \
     (runs ~sent:true \
         "/IP!(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n\
            a = Raw(\"ping\")\n\
@@ -2295,7 +2296,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 *)
 (* Through self-driven layers too, by the first frame that carries some of it: *)
 (*$= runs & ~printer:identity
-  "4µs640ns3ps: true true 1 4.639999e-06 #70696e67\n4µs640ns3ps: done" \
+  "4µs640ns3ps: true true 1 4.64e-06 #70696e67\n4µs640ns3ps: done" \
     (runs ~sent:true \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n\
            a = Raw(\"ping\")\n\

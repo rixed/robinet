@@ -262,11 +262,11 @@ retry:
     memcpy((char *)String_val(pkt), bytes, hdr->caplen);
     // caml_alloc_string already placed a nul terminator at the end
 
-    // tv_usec holds nanoseconds when the handle has that precision:
-    double const subsec =
-        pcap_get_tstamp_precision(handle) == PCAP_TSTAMP_PRECISION_NANO ?
-            1e-9 : 1e-6;
-    ts = caml_copy_double(hdr->ts.tv_sec + (double)hdr->ts.tv_usec * subsec);
+    // Nanoseconds since 1970, as a Clock.Wall.t; tv_usec holds nanoseconds
+    // when the handle has that precision:
+    long const subsec_ns =
+        pcap_get_tstamp_precision(handle) == PCAP_TSTAMP_PRECISION_NANO ? 1 : 1000;
+    ts = Val_long((long)hdr->ts.tv_sec * 1000000000L + (long)hdr->ts.tv_usec * subsec_ns);
 
     result = caml_alloc_tuple(4);
     Field(result, 0) = ts;
