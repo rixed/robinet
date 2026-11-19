@@ -46,6 +46,10 @@ val pkt : Pcap.Pdu.t =
 
 See [examples](https://github.com/rixed/robinet/tree/master/examples).
 
+To run compiled crafty programs on a real interface, several at once and for
+as long as needed, while recording what they send, receive and report, see
+`Crafty_run` (crafty_run.ml), which crafty itself uses.
+
 4. Using the API:
 
 See [the doc](https://github.com/rixed/robinet/blob/master/docs/openapi.yaml).

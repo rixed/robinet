@@ -320,6 +320,25 @@ wait $!
 "$CRAFTY" --cleanup > "$DIR/out" 2>&1
 check "cleaned up after being killed" 0 $? "Cleaned up after crafty_"
 
+# Two at once, keeping the kernel off ports of their own: the first to
+# start ends first, and frees its ports, and only those:
+"$CRAFTY" -i $HOST_IF --udp 40000-40010 --fw --max-duration 2s "$DIR/flood.cfty" > /dev/null 2>&1 &
+FIRST=$!
+sleep 1
+"$CRAFTY" -i $HOST_IF --udp 40020-40030 --fw --max-duration 3s "$DIR/flood.cfty" > "$DIR/out" 2>&1 &
+SECOND=$!
+wait $FIRST
+code=$?
+reserved=$(cat /proc/sys/net/ipv4/ip_local_reserved_ports)
+if [ $code = 3 ] && echo "$reserved" | grep -q '40020-40030' &&
+   ! echo "$reserved" | grep -q '40000' ; then
+    echo "ok   two at once, the first over"
+else
+    echo "FAIL two at once, the first over (exit $code, reserved: $reserved)" ; FAILED=1
+fi
+wait $SECOND
+check "two at once, both over" 3 $?
+
 "$CRAFTY" -i $HOST_IF --udp 40000-40010 --fw "$DIR/bad.cfty" > "$DIR/out" 2>&1
 check "a broken program changes nothing" 2 $? "Cannot apply +"
 
@@ -332,7 +351,7 @@ ip route add unreachable 10.80.0.0/24
 
 ping_prog() {
     echo "try { /IP(dst=$1)/ICMP/Echo { Request(\"x\")
-      expect timeout=500ms Reply { print(\"reply from \${MATCH[IP].src}\") } } }"
+      expect timeout=500ms Reply { print(\"reply from \${MATCH[IP].src}\") } } } else {}"
 }
 
 "$CRAFTY" --linger 0s -i $HOST_IF -e "$(ping_prog 10.79.0.1)" > "$DIR/out" 2>&1
@@ -360,7 +379,7 @@ ip route del 10.79.0.0/24
   Request("x")
   wait dur=1s
   Request("y")
-  try { expect timeout=500ms Reply { print("reply from ${MATCH[IP].src}") } }
+  try { expect timeout=500ms Reply { print("reply from ${MATCH[IP].src}") } } else {}
 }' > "$DIR/out" 2>&1
 code=$?
 wait $!
