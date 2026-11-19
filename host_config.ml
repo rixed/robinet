@@ -583,11 +583,11 @@ let ruleset ~table ~ifname ?(ports=[]) ?forward_drop () =
 
 (** {2 Changes and their undoing}
  *
- * A set of changes is undone in the reverse order of its changes, at the end
- * of the program that made it, and also by any later one if that program was
- * killed: each change first writes the command that undoes it to a file of
- * the set, in {!state_dir}, named after the set, which also holds the pid of
- * its program. *)
+ * A set of changes is undone in the reverse order of its changes by {!undo},
+ * or else when the program that made it exits, and also by any later one if
+ * that program was killed: each change first writes what undoes it to a file
+ * of the set, in {!state_dir}, named after the set, which also holds the pid
+ * of its program. A program may have several sets at once. *)
 
 (* Root's, or else the user's, whose files only their programs read back: *)
 let state_dir =
@@ -595,18 +595,103 @@ let state_dir =
     if uid = 0 then "/run/robinet"
     else Printf.sprintf "/run/user/%d/robinet" uid
 
+let with_lock m f =
+    Mutex.lock m ;
+    Fun.protect ~finally:(fun () -> Mutex.unlock m) f
+
+(** {3 Reserved ports} *)
+
+let reserved_ports_sysctl = "net.ipv4.ip_local_reserved_ports"
+
+(* Sorted, disjoint and not adjacent inclusive ranges of ports, as the kernel
+ * gives back what it is told: *)
+let merge_ranges rs =
+    List.sort compare rs |>
+    List.fold_left (fun acc (lo, hi) ->
+        match acc with
+        | (lo', hi') :: rest when lo <= hi' + 1 -> (lo', max hi hi') :: rest
+        | _ -> (lo, hi) :: acc) [] |>
+    List.rev
+
+(* The ports of [a] that are not in [b]: *)
+let subtract_ranges a b =
+    List.concat_map (fun r ->
+        List.fold_left (fun pieces (blo, bhi) ->
+            List.concat_map (fun (lo, hi) ->
+                if bhi < lo || blo > hi then [ lo, hi ]
+                else (if blo > lo then [ lo, blo - 1 ] else []) @
+                     (if bhi < hi then [ bhi + 1, hi ] else [])) pieces) [ r ] b) a
+
+(* A value of the sysctl: ranges and ports separated by commas. *)
+let ranges_of_sysctl s =
+    String.split_on_char ',' (String.trim s) |>
+    List.filter_map (fun r ->
+        if String.trim r = "" then None else
+        let r = port_range_of_string Tcp r in
+        Some (r.lo, r.hi)) |>
+    merge_ranges
+
+let sysctl_of_ranges rs =
+    String.concat "," (List.map (fun (lo, hi) -> string_of_range { proto = Tcp ; lo ; hi }) rs)
+
+(*$= ranges_of_sysctl & ~printer:dump
+  [] (ranges_of_sysctl "\n")
+  [ 53, 54 ; 8080, 8080 ; 14000, 14099 ] (ranges_of_sysctl "14000-14099,8080,54,53\n")
+ *)
+(*$= subtract_ranges & ~printer:dump
+  [ 10, 19 ; 31, 40 ] (subtract_ranges [ 10, 40 ] [ 20, 30 ])
+  [] (subtract_ranges [ 10, 40 ] [ 5, 50 ])
+  [ 10, 10 ; 50, 60 ] (subtract_ranges [ 10, 10 ; 20, 30 ; 50, 60 ] [ 15, 40 ])
+ *)
+(*$= sysctl_of_ranges & ~printer:identity
+  "53,14000-14099" (sysctl_of_ranges [ 53, 53 ; 14000, 14099 ])
+  "" (sysctl_of_ranges [])
+ *)
+
+(* Every read-modify-write of the sysctl from this process: *)
+let reserved_ports_lock = Mutex.create ()
+
+let read_reserved () =
+    File.with_file_in ("/proc/sys/net/ipv4/ip_local_reserved_ports") IO.read_all |>
+    ranges_of_sysctl
+
+let write_reserved rs =
+    run "sysctl" [ "-q" ; "-w" ; reserved_ports_sysctl ^"="^ sysctl_of_ranges rs ]
+
+(* What undoes reserving ports [rs] (as {!sysctl_of_ranges} gives them):
+ * those, and only those, are no longer reserved. *)
+let unreserve_command = "unreserve"
+
+let unreserve rs =
+    with_lock reserved_ports_lock (fun () ->
+        write_reserved (subtract_ranges (read_reserved ()) (ranges_of_sysctl rs)))
+
+(** {3 Sets of changes} *)
+
 type changes =
     { name : string ;
       file : string ;
-      (* The commands undoing what was done, the latest first: *)
+      (* What undoes what was done, the latest first: command lines, or
+       * {!unreserve_command} and its ranges: *)
       mutable undo : string list ;
-      mutable undone : bool }
+      mutable undone : bool ;
+      lock : Mutex.t }
+
+(* The sets of changes of this process not undone yet, the latest first,
+ * which its exit undoes: *)
+let pending = ref []
+let pending_lock = Mutex.create ()
+
+(* Distinguishes the sets of this process: *)
+let next_changes = Atomic.make 0
 
 (** A new set of changes called [name] (made of letters, digits and
  * underscores, as it names an nftables table too), which the pid of this
- * process is appended to. *)
+ * process and a number of its own are appended to. *)
 let changes name =
-    let name = Printf.sprintf "%s_%d" name (Unix.getpid ()) in
+    let name =
+        Printf.sprintf "%s_%d_%d" name (Unix.getpid ())
+                       (Atomic.fetch_and_add next_changes 1) in
     if not (String.for_all (fun c -> Char.is_letter c || Char.is_digit c ||
                                       c = '_') name) then
         invalid_arg (Printf.sprintf "Not a name for changes: %S" name) ;
@@ -614,27 +699,54 @@ let changes name =
     let file = state_dir ^"/"^ name in
     File.with_file_out file (fun oc ->
         Printf.fprintf oc "pid %d\n" (Unix.getpid ())) ;
-    { name ; file ; undo = [] ; undone = false }
+    let t = { name ; file ; undo = [] ; undone = false ; lock = Mutex.create () } in
+    with_lock pending_lock (fun () -> pending := t :: !pending) ;
+    t
+
+(* Record that [line] undoes the next change of [t]: *)
+let record t line =
+    File.with_file_out ~mode:[ `append ] t.file (fun oc ->
+        Printf.fprintf oc "%s\n" line) ;
+    t.undo <- line :: t.undo
 
 (** Make a change by running [prog] with [args] (and [input]), after having
  * recorded that running [undo] (a program and its arguments) undoes it. *)
 let change t ~undo ?input prog args =
-    let undo = command_line (find_prog (List.hd undo)) (List.tl undo) in
-    File.with_file_out ~mode:[ `append ] t.file (fun oc ->
-        Printf.fprintf oc "%s\n" undo) ;
-    t.undo <- undo :: t.undo ;
+    record t (command_line (find_prog (List.hd undo)) (List.tl undo)) ;
     run ?input prog args
 
-(* Undo [cmds], the latest first, as best as possible: *)
+(* Undo [cmds], the latest first, as best as possible, and return those that
+ * failed: *)
 let undo_lines cmds =
-    List.iter (fun cmd -> try run_line ~quiet:true cmd with _ -> ()) cmds
+    List.filter (fun cmd ->
+        try
+            (match String.split cmd ~by:" " with
+            | c, rs when c = unreserve_command -> unreserve rs
+            | _ | exception Not_found -> run_line ~quiet:true cmd) ;
+            false
+        with _ -> true) cmds
 
-(** Undo what [t] did, once. *)
+(** Undo what [t] did, once, from any thread. What fails to be undone stays
+ * in its file, for {!cleanup_stale} to try again once this process is
+ * gone. *)
 let undo t =
-    if not t.undone then (
-        t.undone <- true ;
-        undo_lines t.undo ;
-        try_run "rm" [ "-f" ; t.file ; t.file ^".nft" ])
+    with_lock t.lock (fun () ->
+        if not t.undone then (
+            t.undone <- true ;
+            (match undo_lines t.undo with
+            | [] -> try_run "rm" [ "-f" ; t.file ; t.file ^".nft" ]
+            | failed ->
+                (try
+                    File.with_file_out t.file (fun oc ->
+                        Printf.fprintf oc "pid %d\n" (Unix.getpid ()) ;
+                        List.iter (Printf.fprintf oc "%s\n") (List.rev failed))
+                with _ -> ())) ;
+            with_lock pending_lock (fun () ->
+                pending := List.filter ((!=) t) !pending)))
+
+let () =
+    at_exit (fun () ->
+        List.iter undo (with_lock pending_lock (fun () -> !pending)))
 
 (* The pid and the undoing commands, the latest first, of a file of
  * changes: *)
@@ -655,8 +767,6 @@ let running pid =
         | _, state -> not (String.starts_with state "Z" || String.starts_with state "X")
         | exception Not_found -> true)
 
-let reserved_ports_sysctl = "net.ipv4.ip_local_reserved_ports"
-
 (* The features of an interface that gather received packets: *)
 let rx_offloads = [ "generic-receive-offload" ; "large-receive-offload" ;
                     "rx-gro-hw" ; "rx-gro-list" ; "rx-udp-gro-forwarding" ]
@@ -675,13 +785,17 @@ let undoing ~name cmd =
         is "nft" nft && table = name
     | [ ethtool ; "-K" ; _ifname ; feature ; "on" ] ->
         is "ethtool" ethtool && List.mem feature rx_offloads
-    | [ sysctl ; "-q" ; "-w" ; setting ] ->
-        is "sysctl" sysctl && String.starts_with setting (reserved_ports_sysctl ^"=")
+    | [ c ; rs ] when c = unreserve_command ->
+        (try ranges_of_sysctl rs <> [] with Invalid_argument _ -> false)
     | _ -> false
 
 (*$T undoing
   undoing ~name:"crafty_1" (command_line (find_prog "sh") []) = false
   undoing ~name:"crafty_1" "nft delete table inet crafty_1; reboot" = false
+  undoing ~name:"crafty_1" "unreserve 53,14000-14099"
+  not (undoing ~name:"crafty_1" "unreserve 53;reboot")
+  not (undoing ~name:"crafty_1" "unreserve x")
+  not (undoing ~name:"crafty_1" "unreserve ")
   match find_prog_opt "nft" with None -> true | Some nft -> \
     undoing ~name:"crafty_1" (nft ^" delete table inet crafty_1") && \
     not (undoing ~name:"crafty_1" (nft ^" delete table inet filter"))
@@ -699,7 +813,8 @@ let cleanup_stale () =
             let file = state_dir ^"/"^ name in
             match read_changes file with
             | Some (pid, cmds) when not (running pid) ->
-                undo_lines (List.filter (undoing ~name) cmds) ;
+                (* The last try: *)
+                ignore (undo_lines (List.filter (undoing ~name) cmds)) ;
                 try_run "rm" [ "-f" ; file ; file ^".nft" ] ;
                 Some name
             | _ -> None)
@@ -785,32 +900,18 @@ let firewall t ~ifname ?ports ?forward_drop () =
     change t ~undo:[ "nft" ; "delete" ; "table" ; "inet" ; t.name ]
         ~input:rules "nft" [ "-f" ; "-" ]
 
-(** [ports] added to the reserved ports [current] (as the sysctl gives them,
- * which is ranges and ports separated by commas). *)
-let add_reserved_ports current ports =
-    let current = String.trim current in
-    let added =
-        List.map string_of_range ports |> List.unique |>
-        List.filter (fun r -> not (List.mem r (String.split_on_char ',' current))) in
-    String.concat "," ((if current = "" then [] else [ current ]) @ added)
-
-(*$= add_reserved_ports & ~printer:identity
-  "14000-14099,53" \
-    (add_reserved_ports "\n" [ port_range_of_string Tcp "14000-14099" ; \
-                                port_range_of_string Udp "53" ])
-  "8080,53" (add_reserved_ports "8080\n" [ port_range_of_string Udp "53" ; \
-                                           port_range_of_string Tcp "53" ])
- *)
-
 (** Keep the kernel from picking [ports] as local ports of its own (TCP and
- * UDP alike, IPv4 and IPv6). Undoing restores the reserved ports as they
- * were, whatever reserved others since. *)
+ * UDP alike, IPv4 and IPv6). Undoing frees those that were not reserved
+ * already, and only those, whatever others reserved or freed since. *)
 let reserve_ports t ports =
-    let current =
-        File.with_file_in ("/proc/sys/net/ipv4/ip_local_reserved_ports") IO.read_all in
-    let set v = [ "sysctl" ; "-q" ; "-w" ; reserved_ports_sysctl ^"="^ v ] in
-    change t ~undo:(set (String.trim current))
-        "sysctl" (List.tl (set (add_reserved_ports current ports)))
+    with_lock reserved_ports_lock (fun () ->
+        let current = read_reserved () in
+        let wanted = merge_ranges (List.map (fun r -> r.lo, r.hi) ports) in
+        match subtract_ranges wanted current with
+        | [] -> ()
+        | added ->
+            record t (unreserve_command ^" "^ sysctl_of_ranges added) ;
+            write_reserved (merge_ranges (current @ added)))
 
 (** The features of [ethtool -k] output that gather received packets, and
  * are on and can be turned off. *)
