@@ -138,8 +138,8 @@ type entry = { node : node ; mode : L.mode ; options : (int * value) list }
 let siblings n (l : L.layer) = Hashtbl.find_option n.children l.name
 
 (* A value of field [i] of [l] within one of the [ranges] (inclusive and
- * disjoint) that no sibling has: *)
-let pick_random loc parent (l : L.layer) i ranges =
+ * disjoint) that no sibling has, else an error of kind [kind]: *)
+let pick_random ?kind loc parent (l : L.layer) i ranges =
     let within v = List.exists (fun (lo, hi) -> v >= lo && v <= hi) ranges in
     let taken =
         Option.map_default (fun s ->
@@ -149,7 +149,8 @@ let pick_random loc parent (l : L.layer) i ranges =
                 | _ -> taken) s Set.Int.empty) Set.Int.empty (siblings parent l) in
     let n = List.fold_left (fun n (lo, hi) -> n + hi - lo + 1) 0 ranges in
     if Set.Int.cardinal taken >= n then
-        error loc "No %s left for another %s" l.fields.(i).name (L.N.to_string l.name) ;
+        raise (Runtime_error (kind, loc, Printf.sprintf "No %s left for another %s"
+                                    l.fields.(i).name (L.N.to_string l.name))) ;
     (* The [j]th value of all the ranges: *)
     let rec nth j = function
         | [] -> assert false
@@ -236,7 +237,8 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
                     Some (pick_random loc parent l i [ lo, hi ])
                 | Some L.Local_port ->
                     random := true ;
-                    let v = pick_random loc parent l i (parent.ports (L.N.to_string l.name)) in
+                    let v = pick_random ~kind:A.Error_name.No_port loc parent l i
+                                        (parent.ports (L.N.to_string l.name)) in
                     (match v with Int p -> parent.local_port loc l p | _ -> ()) ;
                     Some v
                 | Some L.Required | None ->
@@ -1034,7 +1036,8 @@ let to_string n = IO.to_string print n
   let udp () = src (child loc ip Crafty_layers.udp [ 1, port 53 ]) in
   let picked = List.sort Int.compare [ udp () ; udp () ; udp () ] in
   assert_equal ~printer:dump [ 10 ; 11 ; 20 ] picked ;
-  assert_raises (Crafty_value.Runtime_error (None, loc, "No src left for another UDP"))
+  assert_raises (Crafty_value.Runtime_error (Some Crafty_ast.Error_name.No_port, loc,
+                                             "No src left for another UDP"))
       (fun () -> udp ()) ;
   let tcp = child loc ip Crafty_layers.tcp [ 1, port 80 ] in
   assert_bool "other layers keep the dynamic ports" (src tcp >= 49152)

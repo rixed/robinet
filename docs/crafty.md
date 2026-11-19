@@ -68,9 +68,9 @@ program.
 
 Only these errors can be caught: `Timeout` (of `expect` or `on`), `Closed` (a
 TCP connection), `CannotConnect` (writing to a TCP connection refused or timed
-out), `NoRoute`, `Unset` (`getenv`, `arg`, a missing map key or packet
-layer), `Invalid` (converting a string or bytes), `Unresolved` (`resolve`,
-`hostname`) and `Assertion` (`assert`). In a handler, `ERROR` is the message
+out), `NoRoute`, `NoPort` (no source port left to pick), `Unset` (`getenv`,
+`arg`, a missing map key or packet layer), `Invalid` (converting a string or
+bytes), `Unresolved` (`resolve`, `hostname`) and `Assertion` (`assert`). In a handler, `ERROR` is the message
 and `MATCH` the packet that caused the error (the RST or ICMP error refusing a
 connection), else empty.
 

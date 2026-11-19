@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 6e515cf807a71ae55f20e492a31fca2b) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 c997349532cfad866a3fc20088cefa3a) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -57,11 +57,11 @@ program.
 
 Only these errors can be caught: `Timeout` (of `expect` or `on`), `Closed` (a
 TCP connection), `CannotConnect` (writing to a TCP connection refused or timed
-out), `NoRoute`, `Unset` (`getenv`, `arg`, a missing map key or packet layer),
-`Invalid` (converting a string or bytes), `Unresolved` (`resolve`, `hostname`)
-and `Assertion` (`assert`). In a handler, `ERROR` is the message and `MATCH` the
-packet that caused the error (the RST or ICMP error refusing a connection), else
-empty.
+out), `NoRoute`, `NoPort` (no source port left to pick), `Unset` (`getenv`,
+`arg`, a missing map key or packet layer), `Invalid` (converting a string or
+bytes), `Unresolved` (`resolve`, `hostname`) and `Assertion` (`assert`). In a
+handler, `ERROR` is the message and `MATCH` the packet that caused the error
+(the RST or ICMP error refusing a connection), else empty.
 
     n = 1
     try {

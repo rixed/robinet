@@ -3774,9 +3774,9 @@ let check_patterns (ps : A.patterns) =
     (types "x = 1 + try { 1 } Unset { 2 }")
   "line 1, column 5: The branches of this try are of different types: an int and a string" \
     (types "x = try { 1 } Unset { \"a\" }")
-  "line 1, column 1: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, CannotConnect, NoRoute, Unset, Invalid, Unresolved, Assertion)" \
+  "line 1, column 1: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, CannotConnect, NoRoute, NoPort, Unset, Invalid, Unresolved, Assertion)" \
     (types "retry Timout {}")
-  "line 1, column 8: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, CannotConnect, NoRoute, Unset, Invalid, Unresolved, Assertion)" \
+  "line 1, column 8: Unknown error Timout, do you mean Timeout? (errors are Timeout, Closed, CannotConnect, NoRoute, NoPort, Unset, Invalid, Unresolved, Assertion)" \
     (types "try {} Closed | Timout {}")
   "line 1, column 1: retry needs the errors it retries on, as in retry Timeout|Closed max=3 { ... }" \
     (types "retry {}")

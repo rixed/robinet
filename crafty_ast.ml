@@ -85,15 +85,15 @@ end
  * a fault of the program, which ends it. *)
 module Error_name =
 struct
-    type t = Timeout | Closed | Cannot_connect | No_route | Unset | Invalid | Unresolved
-           | Assertion
+    type t = Timeout | Closed | Cannot_connect | No_route | No_port | Unset | Invalid
+           | Unresolved | Assertion
 
-    let all = [ Timeout ; Closed ; Cannot_connect ; No_route ; Unset ; Invalid ; Unresolved ;
-                Assertion ]
+    let all = [ Timeout ; Closed ; Cannot_connect ; No_route ; No_port ; Unset ; Invalid ;
+                Unresolved ; Assertion ]
 
     let to_string = function
         | Timeout -> "Timeout" | Closed -> "Closed" | Cannot_connect -> "CannotConnect"
-        | No_route -> "NoRoute"
+        | No_route -> "NoRoute" | No_port -> "NoPort"
         | Unset -> "Unset" | Invalid -> "Invalid" | Unresolved -> "Unresolved"
         | Assertion -> "Assertion"
 

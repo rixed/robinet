@@ -3475,6 +3475,21 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   List.iter (fun _ -> ignore (route (Ip.Addr.of_string "10.9.9.9"))) !answers ;
   assert_equal ~printer:dump [ "b" ; "a" ; "a" ] !told
 *)
+(* A stream that finds no local port left fails with NoPort, which can be
+ * caught: *)
+(*$R routed_run
+  let run text =
+      let status, _, _ =
+          routed_run ("PORTS = {udp: [[5000, 5000]]}\n\
+                       /IP(dst=10.9.9.9)/UDP(dst=7) {\n"^ text ^"\n}")
+                     ~lookup:(fun _ _ -> via ()) in
+      status in
+  assert_equal ~printer:identity
+      "line 3, column 19: No src left for another UDP"
+      (run "/IP(dst=10.9.9.9)/UDP(dst=8)/Raw(\"x\")") ;
+  assert_equal ~printer:identity "done"
+      (run "try { /IP(dst=10.9.9.9)/UDP(dst=8)/Raw(\"x\") } NoPort {}")
+*)
 
 (* [filters text frame] is whether that frame matches the filter of that
  * text, or why it is no filter: *)
