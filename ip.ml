@@ -1180,7 +1180,8 @@ module Pdu = struct
         r
 
     (* The checksum to write [offset] bits into [pld] for it to cover
-     * [pseudo_header] too, unless it has one already: *)
+     * [pseudo_header] too, unless it has one already or [pld] is too short to
+     * hold one, as a packet forged on purpose may be: *)
     let missing_checksum ?(fixit=identity) offset pseudo_header (pld : Payload.t) =
         match%bitstring (pld :> bitstring) with
         | {| head : offset : bitstring ;
@@ -1190,10 +1191,7 @@ module Pdu = struct
                 Some (sum_list [ pseudo_header () ; head ; zeroes_bitstring 16 ; tail ] |>
                       fixit)
             else None
-        | {| _ |} ->
-            Printf.eprintf "Ip: Cannot patch checksum at offset %d, payload: %s\n"
-                offset (hexstring_of_bitstring_abbrev ~bits:(offset + 16) (pld :> bitstring)) ;
-            None
+        | {| _ |} -> None
 
     (* [offset] is whole bytes, as the checksum of every protocol lies: *)
     let patch_checksum ?fixit offset pseudo_header (pld : Payload.t) =
@@ -1226,14 +1224,24 @@ module Pdu = struct
 
     let is_fragment t = t.more_frags || t.frag_offset > 0
 
+    (* Whether [t] lacks the end of the payload it announces, as a packet an
+     * ICMP error quotes: *)
+    let is_truncated t = Payload.length t.payload < t.tot_len - hdr_len t
+
     (* Where the TCP/UDP checksum lies in the payload, in bits, since it uses
-     * some fields of the IP header. It covers the whole L4 PDU, so a fragment
-     * has none of its own: *)
+     * some fields of the IP header. It covers the whole L4 PDU, so neither a
+     * fragment nor a truncated packet has one to compute: *)
     let checksum_offset t =
-        if is_fragment t then None
+        if is_fragment t || is_truncated t then None
         else if t.proto = Proto.tcp then Some 128
         else if t.proto = Proto.udp then Some 48
         else None
+
+    (*$T checksum_offset
+      let a = Addr.of_string "10.0.0.1" and b = Addr.of_string "10.0.0.2" in \
+      checksum_offset (make Proto.tcp a b (zeroes_bitstring 160)) = Some 128 && \
+      checksum_offset (make ~tot_len:60 Proto.tcp a b (zeroes_bitstring 64)) = None
+     *)
 
     let pack_payload t =
         match checksum_offset t with
@@ -1257,6 +1265,13 @@ module Pdu = struct
             concat [ header ; (pack_payload t :> bitstring) ]
         | None ->
             concat [ header ; (t.payload :> bitstring) ]
+
+    (* A UDP header quoted with no checksum keeps none: *)
+    (*$T pack
+      let a = Addr.of_string "10.0.0.1" and b = Addr.of_string "10.0.0.2" in \
+      Bitstring.equals (zeroes_bitstring 64) \
+        (dropbits 160 (pack (make ~tot_len:100 Proto.udp a b (zeroes_bitstring 64))))
+     *)
 
     (** [bits], a packet [unpack] accepted with a TTL above 0, with that TTL
      * one less and its header checksum adjusted to match (RFC 1624), cut to
