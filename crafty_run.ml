@@ -225,18 +225,18 @@ end
 
 (** {2 Running} *)
 
-(** The limits [program] runs with, given [extra] ones (default: none), or
+(** The limits [program] runs with, given [extra_limits] (default: none), or
  * why it cannot run with them: the budget and ports that both allow, and the
- * permissions of {!Crafty_typing.resolve_permissions}, where [extra]'s rules
- * go first and its flags win. *)
-let effective_limits ?(extra=Crafty_typing.no_limits) (program : Crafty_interp.program) =
-    Crafty_typing.combine ~program:program.limits ~cli:extra |>
+ * permissions of {!Crafty_typing.resolve_permissions}, where the rules of
+ * [extra_limits] go first and its flags win. *)
+let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_interp.program) =
+    Crafty_typing.combine ~program:program.limits ~cli:extra_limits |>
     Result.map (fun (l : Crafty_typing.limits) ->
         { l with permissions =
             Crafty_typing.resolve_permissions ~program:program.limits.permissions
-                                              ~cli:extra.permissions })
+                                              ~cli:extra_limits.permissions })
 
-(** Run [program] on [iface], with its {!effective_limits} given [extra], and
+(** Run [program] on [iface], with its {!effective_limits} given [extra_limits], and
  * return how it went, once it is over and what it changed on the host undone;
  * or why it did not run.
  *
@@ -271,13 +271,14 @@ let effective_limits ?(extra=Crafty_typing.no_limits) (program : Crafty_interp.p
  * - [on_packet]: each frame the program sends, through the firewall and the
  *   policer, and each it receives, through them.
  * - [on_recaptured]: each frame the program sent, as captured leaving the
- *   interface, with the marks of the frame sent.
+ *   interface, with the marks of the frame sent, and the instant libpcap
+ *   captured it rather than the later one it is told at.
  * - [on_stream]: each stream as it closes, then those still open at the end.
  * - [on_suspicious]: with the same streams, each of their stats among
  *   {!suspicious_stats} that is not 0. *)
 let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         ?speed ?full_duplex ?mtu ?(linger=Clock.Interval.sec 2.) ?format ?args
-        ~resolver ?extra ?packet_filter
+        ~resolver ?extra_limits ?packet_filter
         ?(on_start=ignore) ?(info=ignore)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
         ?(on_warning=fun _ _ -> ()) ?(on_packet=fun _ _ _ -> ())
@@ -287,7 +288,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     let refuse cond e = if cond then Error (Setup e) else Ok () in
     let* limits =
         Result.map_error (fun e -> Setup (e ^" the program's PORTS and the extra ports."))
-                         (effective_limits ?extra program) in
+                         (effective_limits ?extra_limits program) in
     let ifname = iface.ifname and host = iface.host in
     let ports =
         Option.map_default (fun (p : Crafty_typing.ports) ->
@@ -638,12 +639,18 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             pcap_dropped := Pcap.dropped pcap.handler ;
             if not_captured () > !told_uncaptured then
                 Simulation.asap sim.root.power tell_uncaptured ()) in
+    (* When libpcap captured [bits], on the timeline of the simulation, which
+     * dispatches a frame captured in its past at once: *)
+    let captured_at bits =
+        match Pcap.captured bits with
+        | Some ts -> Simulation.of_wall_clock sim ts
+        | None -> instant () in
     (* What leaves is what was injected, or else what the host sends, which
      * has the interface's address: *)
     let sniffer =
         Pcap.sniffer pcap ~while_:(fun () -> ask_dropped () ; not !finished) (fun bits ->
             let injected = was_injected bits in
-            if injected then on_recaptured (instant ()) bits ;
+            if injected then on_recaptured (captured_at bits) bits ;
             if injected ||
                (match Eth.Pdu.unpack bits with
                | Ok f -> Eth.Addr.eq f.src host.mac

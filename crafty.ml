@@ -269,7 +269,7 @@ let () =
                         promiscuous = !promiscuous } in
     (* What the command line allows, with a default duration if neither it
      * nor the program sets one: *)
-    let extra =
+    let extra_limits =
         let budget =
             List.filter_map identity Crafty_ast.[
                 Option.map (fun d -> "max_duration", Interval d) !max_duration ;
@@ -296,7 +296,7 @@ let () =
             permissions = cli_permissions } in
     (* What both allow, which the run computes as well: *)
     let limits =
-        match Crafty_run.effective_limits ~extra program with
+        match Crafty_run.effective_limits ~extra_limits program with
         | Ok l -> l
         | Error e -> die "%s: %s its PORTS and --tcp/--udp." prog_name e in
     let format = !format in
@@ -451,7 +451,7 @@ let () =
                         ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger
                         ~format ~args:(Array.of_list !prog_args)
                         ~resolver:Crafty_interp.(cached system_resolver)
-                        ~extra ?packet_filter:print_only
+                        ~extra_limits ?packet_filter:print_only
                         ~on_start ~info:(info "%s") ~on_report:report
                         ~on_print:(fun t s ->
                             if format = Human then print_endline s
