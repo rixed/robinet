@@ -225,9 +225,20 @@ end
 
 (** {2 Running} *)
 
-(** Run [program] on [iface], with [limits] (the program's combined with the
- * caller's, its permissions resolved), and return how it went, once it is
- * over and what it changed on the host undone; or why it did not run.
+(** The limits [program] runs with, given [extra] ones (default: none), or
+ * why it cannot run with them: the budget and ports that both allow, and the
+ * permissions of {!Crafty_typing.resolve_permissions}, where [extra]'s rules
+ * go first and its flags win. *)
+let effective_limits ?(extra=Crafty_typing.no_limits) (program : Crafty_interp.program) =
+    Crafty_typing.combine ~program:program.limits ~cli:extra |>
+    Result.map (fun (l : Crafty_typing.limits) ->
+        { l with permissions =
+            Crafty_typing.resolve_permissions ~program:program.limits.permissions
+                                              ~cli:extra.permissions })
+
+(** Run [program] on [iface], with its {!effective_limits} given [extra], and
+ * return how it went, once it is over and what it changed on the host undone;
+ * or why it did not run.
  *
  * Runs on the same interface at once must not capture each other's frames:
  * with addresses of their own, or else ports of their own.
@@ -266,7 +277,7 @@ end
  *   {!suspicious_stats} that is not 0. *)
 let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         ?speed ?full_duplex ?mtu ?(linger=Clock.Interval.sec 2.) ?format ?args
-        ~resolver ~(limits : Crafty_typing.limits) ?packet_filter
+        ~resolver ?extra ?packet_filter
         ?(on_start=ignore) ?(info=ignore)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
         ?(on_warning=fun _ _ -> ()) ?(on_packet=fun _ _ _ -> ())
@@ -274,6 +285,9 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         (program : Crafty_interp.program) =
     let ( let* ) = Stdlib.Result.bind in
     let refuse cond e = if cond then Error (Setup e) else Ok () in
+    let* limits =
+        Result.map_error (fun e -> Setup (e ^" the program's PORTS and the extra ports."))
+                         (effective_limits ?extra program) in
     let ifname = iface.ifname and host = iface.host in
     let ports =
         Option.map_default (fun (p : Crafty_typing.ports) ->

@@ -267,8 +267,9 @@ let () =
         Crafty_typing.{ local_ips = rules !local_ips ; remote_ips = rules !remote_ips ;
                         mac_spoofing = !mac_spoofing ; exfiltration = !exfiltration ;
                         promiscuous = !promiscuous } in
-    (* What both the command line and the program allow: *)
-    let limits =
+    (* What the command line allows, with a default duration if neither it
+     * nor the program sets one: *)
+    let extra =
         let budget =
             List.filter_map identity Crafty_ast.[
                 Option.map (fun d -> "max_duration", Interval d) !max_duration ;
@@ -279,27 +280,25 @@ let () =
                 Option.map (fun n -> "max_syns", Int n) !max_syns ;
                 Option.map (fun x -> "max_syns_per_secs", Float x) !max_syn_rate ;
                 Option.map (fun n -> "max_ram", Int n) !max_ram ] in
+        let budget =
+            if List.mem_assoc "max_duration" budget ||
+               List.mem_assoc "max_duration" program.limits.budget then budget
+            else ("max_duration", Crafty_ast.Interval default_max_duration) :: budget in
         let ranges proto =
             List.filter_map (fun (r : Host_config.port_range) ->
                 if r.proto = proto then Some (r.lo, r.hi) else None) !ports |>
             Crafty_typing.merge_ranges in
-        let cli =
-            Crafty_typing.{
-                budget ;
-                ports = if !ports = [] then None
-                        else Some { tcp = ranges Host_config.Tcp ;
-                                    udp = ranges Host_config.Udp } ;
-                permissions = cli_permissions } in
-        match Crafty_typing.combine ~program:program.limits ~cli with
-        | Ok l when List.mem_assoc "max_duration" l.budget -> l
-        | Ok l ->
-            { l with budget = ("max_duration", Crafty_ast.Interval default_max_duration)
-                              :: l.budget }
-        | Error e -> die "%s: %s its PORTS and --tcp/--udp." prog_name e in
+        Crafty_typing.{
+            budget ;
+            ports = if !ports = [] then None
+                    else Some { tcp = ranges Host_config.Tcp ;
+                                udp = ranges Host_config.Udp } ;
+            permissions = cli_permissions } in
+    (* What both allow, which the run computes as well: *)
     let limits =
-        { limits with permissions =
-            Crafty_typing.resolve_permissions ~program:program.limits.permissions
-                                              ~cli:cli_permissions } in
+        match Crafty_run.effective_limits ~extra program with
+        | Ok l -> l
+        | Error e -> die "%s: %s its PORTS and --tcp/--udp." prog_name e in
     let format = !format in
     (* What crafty tells of how it goes, on stderr unless as text, out of the
      * way of the records: *)
@@ -452,7 +451,7 @@ let () =
                         ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger
                         ~format ~args:(Array.of_list !prog_args)
                         ~resolver:Crafty_interp.(cached system_resolver)
-                        ~limits ?packet_filter:print_only
+                        ~extra ?packet_filter:print_only
                         ~on_start ~info:(info "%s") ~on_report:report
                         ~on_print:(fun t s ->
                             if format = Human then print_endline s
