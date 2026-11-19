@@ -402,6 +402,8 @@ let () =
         else emit t "warning" (("text", `String text) :: json) in
     let on_warning t = function
         | Crafty_run.Not_injected msg -> info "Cannot inject: %s." msg
+        (* Told in the summary: *)
+        | Not_captured _ -> ()
         | _ when !no_warning -> ()
         | Program e ->
             if format = Human then

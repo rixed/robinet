@@ -102,6 +102,9 @@ type warning =
     | Host_refused of Host_config.proto * int
     (* Why the first frame not injected was not: *)
     | Not_injected of string
+    (* How many more frames went uncaptured, the capture having dropped them
+     * or never seen those injected; at most once a second: *)
+    | Not_captured of int
 
 (* Of a frame, as seen after the firewall and the policer: *)
 type dir = Out | In
@@ -116,7 +119,8 @@ type counters =
       denied_out : int ; denied_in : int ;
       (* That the interface refused to send: *)
       not_injected : int ;
-      (* That the capture dropped: *)
+      (* That the capture dropped, or that were injected but never seen
+       * leaving: *)
       not_captured : int ;
       (* Captured going out, the host's included: *)
       wire_pkts : int ; wire_bytes : int }
@@ -139,7 +143,9 @@ type control =
     { (* Stop the program, and then once lingering is over the run; called
        * again, stop the run now: *)
       stop : unit -> unit ;
-      now : unit -> Clock.Time.t }
+      now : unit -> Clock.Time.t ;
+      (* As of now: *)
+      counters : unit -> counters }
 
 (** {2 Interfaces} *)
 
@@ -152,7 +158,11 @@ struct
           speed : EthSpeed.t option ;
           full_duplex : bool option ;
           rx_offloads_off : bool ;
-          changes : Host_config.changes option }
+          changes : Host_config.changes option ;
+          (* The runs in progress, by their own address (unless promiscuous)
+           * and ports, which say what they capture: *)
+          mutable runs : (Ip.Addr.t option * Host_config.port_range list) list ;
+          lock : Mutex.t }
 
     (** Read interface [ifname], and with [rx_offloads_off] have it pass on
      * received packets as they came rather than gathered, which a run that
@@ -164,7 +174,8 @@ struct
         | host ->
             let speed, full_duplex = Host_config.link ifname in
             let t changes =
-                { ifname ; host ; speed ; full_duplex ; rx_offloads_off ; changes } in
+                { ifname ; host ; speed ; full_duplex ; rx_offloads_off ; changes ;
+                  runs = [] ; lock = Mutex.create () } in
             if not rx_offloads_off then Ok (t None)
             else if not (Privileges.has_net_admin ()) then Error (Setup (needs_net_admin ifname))
             else match Host_config.require [ "ethtool" ] with
@@ -179,6 +190,37 @@ struct
 
     (** Undo what {!setup} changed, once the runs on it are over. *)
     let release t = Option.may Host_config.undo t.changes
+
+    let locked t f =
+        Mutex.lock t.lock ;
+        Fun.protect ~finally:(fun () -> Mutex.unlock t.lock) f
+
+    (* Why a run capturing for address [ip] (or any) and [ports] (or any)
+     * cannot run alongside those in progress, if it cannot: none may capture
+     * what is for another, and two may not answer for the same address.
+     * Otherwise it is in progress until the function returned is called. *)
+    let enter t ip ports =
+        let overlap (r : Host_config.port_range) (r' : Host_config.port_range) =
+            r.proto = r'.proto && r.lo <= r'.hi && r'.lo <= r.hi in
+        let conflicts (ip', ports') =
+            (match ip, ip' with
+             | Some a, Some b -> Ip.Addr.compare a b = 0
+             | _ -> ports = [] || ports' = [] ||
+                    List.exists (fun r -> List.exists (overlap r) ports') ports) in
+        let me = (ip, ports) in
+        locked t (fun () ->
+            match List.find_opt conflicts t.runs with
+            | Some (Some a, _) when ip <> None ->
+                Error (Setup (Printf.sprintf
+                    "Another run on interface %s has address %s already."
+                    t.ifname (Ip.Addr.to_dotted_string a)))
+            | Some _ ->
+                Error (Setup (Printf.sprintf
+                    "Another run on interface %s may capture what is for this \
+                     one: give them addresses, or ports, of their own." t.ifname))
+            | None ->
+                t.runs <- me :: t.runs ;
+                Ok (fun () -> locked t (fun () -> t.runs <- List.filter ((!=) me) t.runs)))
 end
 
 (** {2 Running} *)
@@ -186,6 +228,9 @@ end
 (** Run [program] on [iface], with [limits] (the program's combined with the
  * caller's, its permissions resolved), and return how it went, once it is
  * over and what it changed on the host undone; or why it did not run.
+ *
+ * Runs on the same interface at once must not capture each other's frames:
+ * with addresses of their own, or else ports of their own.
  *
  * - [own_ip]: an address of its own, on the network of the interface's first
  *   one of its family (else on no network), rather than the interface's.
@@ -214,6 +259,8 @@ end
  * - [on_warning]: what the program, or the run, warns of.
  * - [on_packet]: each frame the program sends, through the firewall and the
  *   policer, and each it receives, through them.
+ * - [on_recaptured]: each frame the program sent, as captured leaving the
+ *   interface, with the marks of the frame sent.
  * - [on_stream]: each stream as it closes, then those still open at the end.
  * - [on_suspicious]: with the same streams, each of their stats among
  *   {!suspicious_stats} that is not 0. *)
@@ -223,7 +270,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         ?(on_start=ignore) ?(info=ignore)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
         ?(on_warning=fun _ _ -> ()) ?(on_packet=fun _ _ _ -> ())
-        ?(on_stream=fun _ _ _ -> ()) ?(on_suspicious=fun _ _ _ _ -> ())
+        ?(on_recaptured=fun _ _ -> ()) ?(on_stream=fun _ _ _ -> ()) ?(on_suspicious=fun _ _ _ _ -> ())
         (program : Crafty_interp.program) =
     let ( let* ) = Stdlib.Result.bind in
     let refuse cond e = if cond then Error (Setup e) else Ok () in
@@ -327,6 +374,9 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         refuse ((fw || own_ip <> None) && not iface.rx_offloads_off)
             (Printf.sprintf "Interface %s was set up with its RX offloads on, \
                              which a run that changes the host needs off." ifname) in
+    let* leave =
+        Iface.enter iface (if promisc then None else own_ip) ports in
+    Fun.protect ~finally:leave (fun () ->
     let changes_host = fw || forward_drop in
     let* () = refuse (changes_host && not (Privileges.has_net_admin ())) (needs_net_admin ifname) in
     let* () =
@@ -515,9 +565,15 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     Tools.(firewall.widget.ports.dev 1 <--> policer.widget.ports.dev 0) ;
     Tools.(policer.widget.ports.dev 1 <--> after.ins) ;
     (* What was injected and not seen leaving yet, oldest first, of which
-     * those that are never seen are passed by the next that is. A frame seen
-     * leaving takes the marks of the one injected: *)
-    let injected = Queue.create () in
+     * those that are never seen are passed by the next that is, or else
+     * pushed out by the newest. A frame seen leaving takes the marks of the
+     * one injected: *)
+    let injected = Queue.create () and max_injected = 1000 in
+    (* Injected and pushed out of [injected] unseen, and dropped by the
+     * capture as of when last asked, which only the thread of the sniffer
+     * does: *)
+    let unseen = ref 0 and pcap_dropped = ref 0 in
+    let not_captured () = !unseen + !pcap_dropped in
     let was_injected frame =
         let is_it bits = Crafty_tree.(is_emitted (Frame bits) frame) in
         if Queue.fold (fun found bits -> found || is_it bits) false injected then (
@@ -530,6 +586,9 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     let not_injected = ref 0 in
     Tools.(after.out --> sink (fun bits ->
         Queue.push bits injected ;
+        if Queue.length injected > max_injected then (
+            ignore (Queue.pop injected) ;
+            incr unseen) ;
         try Pcap.inject injector.handler bits
         with Failure msg ->
             if !not_injected = 0 then warn (Not_injected msg) ;
@@ -548,11 +607,29 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             Hashtbl.add refused (proto, p) () ;
             warn (Host_refused (proto, p))
         | _ -> () in
+    (* How many uncaptured frames were warned of: *)
+    let told_uncaptured = ref 0 in
+    let tell_uncaptured () =
+        let n = not_captured () in
+        if n > !told_uncaptured then (
+            warn (Not_captured (n - !told_uncaptured)) ;
+            told_uncaptured := n) in
+    (* Before each capture, from the thread of the sniffer, which alone uses
+     * the handle: *)
+    let last_asked = ref 0. in
+    let ask_dropped () =
+        let now = Unix.gettimeofday () in
+        if now -. !last_asked >= 1. then (
+            last_asked := now ;
+            pcap_dropped := Pcap.dropped pcap.handler ;
+            if not_captured () > !told_uncaptured then
+                Simulation.asap sim.root.power tell_uncaptured ()) in
     (* What leaves is what was injected, or else what the host sends, which
      * has the interface's address: *)
     let sniffer =
-        Pcap.sniffer pcap ~while_:(fun () -> not !finished) (fun bits ->
+        Pcap.sniffer pcap ~while_:(fun () -> ask_dropped () ; not !finished) (fun bits ->
             let injected = was_injected bits in
+            if injected then on_recaptured (instant ()) bits ;
             if injected ||
                (match Eth.Pdu.unpack bits with
                | Ok f -> Eth.Addr.eq f.src host.mac
@@ -562,26 +639,35 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
                 incr wire_pkts ; wire_bytes := !wire_bytes + Tools.bytelength bits ;
                 h.emitted bits
             ) else after.out.write bits) in
+    let counters () =
+        { sent = !sent ; pkts_out = !pkts_out ; bytes_out = !bytes_out ;
+          pkts_in = !pkts_in ; bytes_in = !bytes_in ;
+          denied_out = !denied_out ; denied_in = !denied_in ;
+          not_injected = !not_injected ; not_captured = not_captured () ;
+          wire_pkts = !wire_pkts ; wire_bytes = !wire_bytes } in
     let stops = Atomic.make 0 in
     on_start
         { stop = (fun () ->
             if Atomic.fetch_and_add stops 1 = 0 then
                 Simulation.asap sim.root.power (fun () -> hurry := true ; h.stop ()) ()
             else ignore (Thread.create (Simulation.stop sim) ())) ;
-          now = instant } ;
-    Fun.protect ~finally:(fun () ->
+          now = instant ;
+          counters } ;
+    let sniffing = ref true in
+    let stop_sniffing () =
         finished := true ;
-        Thread.join sniffer ;
+        if !sniffing then (sniffing := false ; Thread.join sniffer) in
+    Fun.protect ~finally:(fun () ->
+        stop_sniffing () ;
         Option.may Thread.join ram_watch ;
         Simulation.delete sim) (fun () ->
     Simulation.run sim true ;
     List.iter (tell_stream `Open) (h.open_streams ()) ;
+    (* The simulation is over, and so is the sniffer then: *)
+    stop_sniffing () ;
+    pcap_dropped := Pcap.dropped pcap.handler ;
+    tell_uncaptured () ;
     { status = !status ; limit = !limit ; denied = !denied ;
       stopped = Atomic.get stops > 0 ; over_ram = h.over_ram () ;
       duration = Clock.Time.to_interval (instant ()) ;
-      counters =
-        { sent = !sent ; pkts_out = !pkts_out ; bytes_out = !bytes_out ;
-          pkts_in = !pkts_in ; bytes_in = !bytes_in ;
-          denied_out = !denied_out ; denied_in = !denied_in ;
-          not_injected = !not_injected ; not_captured = Pcap.dropped pcap.handler ;
-          wire_pkts = !wire_pkts ; wire_bytes = !wire_bytes } })))))
+      counters = counters () }))))))
