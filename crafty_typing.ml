@@ -2907,58 +2907,6 @@ and stmt errors env (s : A.stmt) =
         tell errors ex ;
         env, None
 
-(** The variables a program declares, with their types, in order. *)
-let rec declarations (b : block) =
-    List.concat_map (fun s ->
-        match s.stmt with
-        | Declare (v, e) -> v :: expr_declarations e
-        | Assign { path ; value ; _ } ->
-            List.concat_map (expr_declarations % snd) path @ expr_declarations value
-        | Expr e -> expr_declarations e
-        | Stack { body = b ; _ } | Retry { body = b ; _ }
-        | Spawn { body = b ; _ } -> declarations b
-        | On { cases ; _ } ->
-            List.concat_map (fun (c : case) -> declarations c.body) cases
-        | Repeat { var ; body ; _ } -> var :: declarations body
-        | _ -> []) b
-
-and expr_declarations e =
-    match e.desc with
-    | Block b -> declarations b
-    | If { cond ; then_ ; else_ } ->
-        expr_declarations cond @ declarations then_ @ declarations else_
-    | Case { subject ; arms ; else_ } ->
-        expr_declarations subject @
-        List.concat_map (fun a -> (match a.held with Some v -> [ v ] | None -> []) @ declarations a.branch) arms @
-        Option.map_default declarations [] else_
-    | Expect { timeout ; cases ; else_ } ->
-        Option.map_default expr_declarations [] timeout @
-        List.concat_map (fun (c : case) -> declarations c.body) cases @
-        Option.map_default declarations [] else_
-    | Try { body ; handlers } ->
-        declarations body @ List.concat_map (fun h -> declarations h.handler) handlers
-    | Field (e, _) | Unop (_, e) | Convert e | Select { packet = e ; _ }
-    | Memo { value = e ; _ } ->
-        expr_declarations e
-    | Index (a, b) | Binop (_, a, b) -> expr_declarations a @ expr_declarations b
-    | Slice (a, from, to_) ->
-        List.concat_map expr_declarations (a :: List.filter_map identity [ from ; to_ ])
-    | Call (_, es) | Record es | Array es -> List.concat_map expr_declarations es
-    | Encode { layers ; _ } ->
-        List.concat_map (fun l ->
-            List.concat_map (expr_declarations % snd) l.options) layers
-    | Map kvs ->
-        List.concat_map (fun (k, v) -> expr_declarations k @ expr_declarations v) kvs
-    | Comprehension { key ; value ; clauses } ->
-        List.concat_map (function
-            | Bind (v, items) -> v :: expr_declarations items
-            | Filter c -> expr_declarations c) clauses @
-        Option.map_default expr_declarations [] key @ expr_declarations value
-    | String parts ->
-        List.concat_map (function Interp e -> expr_declarations e | Text _ -> []) parts
-    | Construct (_, e) -> Option.map_default expr_declarations [] e
-    | Lit _ | Var _ | Packet_field _ -> []
-
 (* Errors in the order of the source: *)
 let in_order es =
     List.rev_map (fun (where, message) -> Crafty_parser.{ where ; message ; kind = None ; packet = None }) es |>
@@ -3035,17 +2983,55 @@ let expr_conds e =
     | Expect { cases ; _ } -> case_conds cases
     | _ -> []
 
-(** Calls [f] on every statement of [b], outer ones first, including those
+(** Folds [f] over every statement of [b], outer ones first, including those
  * in the blocks of expressions. *)
-let rec iter_stmts f (b : block) =
-    List.iter (fun s ->
-        f s ;
-        List.iter (iter_expr_stmts f) (stmt_exprs s) ;
-        List.iter (iter_stmts f) (stmt_blocks s)) b
+let rec fold_stmts f acc (b : block) =
+    List.fold_left (fun acc s ->
+        let acc = f acc s in
+        let acc = List.fold_left (fold_expr_stmts f) acc (stmt_exprs s) in
+        List.fold_left (fold_stmts f) acc (stmt_blocks s)) acc b
 
-and iter_expr_stmts f e =
-    List.iter (iter_stmts f) (expr_blocks e) ;
-    List.iter (iter_expr_stmts f) (sub_exprs e)
+and fold_expr_stmts f acc e =
+    let acc = List.fold_left (fold_stmts f) acc (expr_blocks e) in
+    List.fold_left (fold_expr_stmts f) acc (sub_exprs e)
+
+(** Calls [f] on every statement of [b], in the order of [fold_stmts]. *)
+let iter_stmts f = fold_stmts (fun () s -> f s) ()
+
+(** Folds [f] over every expression of [b], outer ones first, including the
+ * conditions of patterns and those in the blocks of expressions. *)
+let fold_exprs f acc (b : block) =
+    let rec expr acc e =
+        List.fold_left expr (f acc e) (sub_exprs e @ expr_conds e) in
+    fold_stmts (fun acc s ->
+        List.fold_left expr acc (stmt_exprs s @ stmt_conds s)) acc b
+
+(** Calls [f] on every expression of [b], in the order of [fold_exprs]. *)
+let iter_exprs f = fold_exprs (fun () e -> f e) ()
+
+(** The variables a program declares, with their types, statement by
+ * statement in the order of [fold_stmts]. *)
+let declarations (b : block) =
+    (* Those bound by [e], not within its blocks: *)
+    let rec bound acc e =
+        let acc =
+            match e.desc with
+            | Case { arms ; _ } ->
+                List.fold_left (fun acc a ->
+                    Option.map_default (fun v -> v :: acc) acc a.held) acc arms
+            | Comprehension { clauses ; _ } ->
+                List.fold_left (fun acc -> function
+                    | Bind (v, _) -> v :: acc
+                    | Filter _ -> acc) acc clauses
+            | _ -> acc in
+        List.fold_left bound acc (sub_exprs e) in
+    fold_stmts (fun acc s ->
+        let acc =
+            match s.stmt with
+            | Declare (v, _) | Repeat { var = v ; _ } -> v :: acc
+            | _ -> acc in
+        List.fold_left bound acc (stmt_exprs s)) [] b |>
+    List.rev
 
 (** The literal addresses that the stacks of [b] send from or to and that are
  * not permitted, as errors where they are written: an IP source by the
@@ -3148,9 +3134,9 @@ let exfiltrations (b : block) =
     let flows (v : var) e =
         if is_packet e then mark packets v ;
         if taints e then mark tainted v in
-    (* What a case or a comprehension binds, in any expression: *)
-    let rec bind_cases e =
-        (match e.desc with
+    (* What [e] binds, as a case, a comprehension, an expect or a try: *)
+    let bind_cases e =
+        match e.desc with
         | Case { subject ; arms ; _ } ->
             List.iter (fun a -> Option.may (fun v -> flows v subject) a.held) arms
         | Comprehension { clauses ; _ } ->
@@ -3159,12 +3145,11 @@ let exfiltrations (b : block) =
             List.iter (fun (c : case) -> mark packets c.match_) cases
         | Try { handlers ; _ } ->
             List.iter (fun (h : handler) -> mark packets h.match_) handlers
-        | _ -> ()) ;
-        List.iter bind_cases (sub_exprs e) in
+        | _ -> () in
     while !changed do
         changed := false ;
+        iter_exprs bind_cases b ;
         iter_stmts (fun s ->
-            List.iter bind_cases (stmt_exprs s) ;
             match s.stmt with
             | Declare (v, e) -> flows v e
             | Assign { var ; value ; _ } -> flows var value
@@ -3173,19 +3158,18 @@ let exfiltrations (b : block) =
                 List.iter (fun (c : case) -> mark packets c.match_) cases
             | _ -> ()) b
     done ;
-    let errors = ref [] in
-    iter_stmts (fun s ->
+    fold_stmts (fun errors s ->
         match s.stmt with
         | Stack { layers ; _ } | Send { layers ; _ } ->
-            List.iter (fun l ->
-                List.iter (fun (i, e) ->
+            List.fold_left (fun errors l ->
+                List.fold_left (fun errors (i, e) ->
                     if is_payload l.layer l.layer.L.fields.(i) && taints e then
-                        errors := (e.loc, "This payload is made of what was received or \
-                                           of the environment, which \
-                                           PERMISSIONS.exfiltration does not allow") ::
-                                  !errors) l.options) layers
-        | _ -> ()) b ;
-    in_order !errors
+                        (e.loc, "This payload is made of what was received or \
+                                 of the environment, which \
+                                 PERMISSIONS.exfiltration does not allow") :: errors
+                    else errors) errors l.options) errors layers
+        | _ -> errors) [] b |>
+    in_order
 
 (* [exfiltrated text] is what [exfiltrations] says of that program: *)
 (*$inject
@@ -3328,12 +3312,8 @@ let cache_constants (b : block) =
       match check (Result.get_ok (Crafty_parser.parse text)) with
       | Error _ -> -1
       | Ok b ->
-          let n = ref 0 in
-          let rec count e =
-              (match e.desc with Memo _ -> incr n | _ -> ()) ;
-              List.iter count (sub_exprs e @ expr_conds e) in
-          iter_stmts (fun s -> List.iter count (stmt_exprs s @ stmt_conds s)) b ;
-          !n
+          fold_exprs (fun n e ->
+              match e.desc with Memo _ -> n + 1 | _ -> n) 0 b
 *)
 (*$= memos & ~printer:string_of_int
   0 (memos "x = #00 * 3")

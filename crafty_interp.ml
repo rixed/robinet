@@ -1853,14 +1853,11 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       Crafty_parser.parse "repeat count=2 { if I > 5 { x = #00 * 3 } else { x = #00 * 4 } }" |>
       Result.get_ok |> Crafty_typing.check |> Result.get_ok in
   let cached () =
-      let found = ref [] in
-      let rec look (e : T.expr) =
-          (match e.desc with
-          | T.Memo m -> found := Option.is_some m.cached :: !found
-          | _ -> ()) ;
-          List.iter look (T.sub_exprs e) in
-      T.iter_stmts (fun s -> List.iter look (T.stmt_exprs s)) program ;
-      List.sort Bool.compare !found in
+      T.fold_exprs (fun found (e : T.expr) ->
+          match e.desc with
+          | T.Memo m -> Option.is_some m.cached :: found
+          | _ -> found) [] program |>
+      List.sort Bool.compare in
   assert_equal [ false ; false ] (cached ()) ;
   let sim = Simulation.make ~realtime:false "crafty" in
   let tree = Crafty_tree.make_root (crafty_eth sim) in
