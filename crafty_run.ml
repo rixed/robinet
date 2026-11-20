@@ -271,12 +271,10 @@ let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_i
  * - [on_print], [on_print_err], [on_report]: what the program prints and
  *   reports ([on_report] defaults to printing).
  * - [on_warning]: what the program, or the run, warns of.
- * - [on_packet]: each frame the program sends, through the firewall and the
- *   policer, and each it receives, through them, with the instant libpcap
- *   captured it.
- * - [on_recaptured]: each frame the program sent, as captured leaving the
- *   interface, with the marks of the frame sent, and the instant libpcap
- *   captured it rather than the later one it is told at.
+ * - [on_packet]: each frame on the wire, as libpcap captured it and with the
+ *   instant it did: leaving the interface, what the program sent (with the
+ *   marks of the frame sent) and what the host sent from its address;
+ *   arriving, what is for the program, before the firewall and the policer.
  * - [on_stream]: each stream as it closes, then those still open at the end.
  * - [on_suspicious]: with the same streams, each of their stats among
  *   {!suspicious_stats} that is not 0. *)
@@ -286,7 +284,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         ?(on_start=ignore) ?(info=ignore)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
         ?(on_warning=fun _ _ -> ()) ?(on_packet=fun _ _ _ -> ())
-        ?(on_recaptured=fun _ _ -> ()) ?(on_stream=fun _ _ _ -> ()) ?(on_suspicious=fun _ _ _ _ -> ())
+        ?(on_stream=fun _ _ _ -> ()) ?(on_suspicious=fun _ _ _ _ -> ())
         (program : Crafty_interp.program) =
     let ( let* ) = Stdlib.Result.bind in
     let refuse cond e = if cond then Error (Setup e) else Ok () in
@@ -578,14 +576,14 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             "firewall" in
     let tell dir bits =
         if Option.map_default (fun f -> h.matches f bits) true packet_filter then
-            on_packet dir (if dir = In then captured_at bits else instant ()) bits in
+            on_packet dir (captured_at bits) bits in
     let before = Hub.VirtTap.make ~rev_mirror:ignore (fun _ -> incr sent)
     and after =
         Hub.VirtTap.make
             ~rev_mirror:(fun bits ->
                 incr pkts_in ; bytes_in := !bytes_in + Tools.bytelength bits ; tell In bits)
             (fun bits ->
-                incr pkts_out ; bytes_out := !bytes_out + Tools.bytelength bits ; tell Out bits) in
+                incr pkts_out ; bytes_out := !bytes_out + Tools.bytelength bits) in
     Tools.(dev <--> before.ins) ;
     Tools.(before.out <--> firewall.widget.ports.dev 0) ;
     Tools.(firewall.widget.ports.dev 1 <--> policer.widget.ports.dev 0) ;
@@ -655,13 +653,13 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     let sniffer =
         Pcap.sniffer pcap ~while_:(fun () -> ask_dropped () ; not !finished) (fun bits ->
             let injected = was_injected bits in
-            if injected then on_recaptured (captured_at bits) bits ;
             if injected ||
                (match Eth.Pdu.unpack bits with
                | Ok f -> Eth.Addr.eq f.src host.mac
                | Error _ -> false)
             then (
                 if not injected then warn_refused bits ;
+                tell Out bits ;
                 incr wire_pkts ; wire_bytes := !wire_bytes + Tools.bytelength bits ;
                 h.emitted bits
             ) else after.out.write bits) in
