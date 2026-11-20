@@ -280,11 +280,11 @@ struct
     (** These informations are present as the first layer of every packet
      * read from a pcap file. *)
     type t = { source_name : string ; caplen : int ; wirelen : int ;
+               dlt : Dlt.t ; payload : Payload.t ;
                (* When the packet was captured, by the clock of the world
-                  outside: that is what a pcap file holds, whoever wrote it.
-                  A simulation that wants to schedule it must bring it across
-                  first (see [Simulation.of_wall_clock]). *)
-               dlt : Dlt.t ; ts : Clock.Wall.t ; payload : Payload.t }
+                  outside.  A simulation that wants to schedule it must bring
+                  it across first (see [Simulation.of_wall_clock]). *)
+               ts : Clock.Wall.t }
 
     let make source_name ?(caplen=65535) ?wirelen ?(dlt=Dlt.en10mb) ts bits =
         let wirelen = wirelen |? bytelength bits
