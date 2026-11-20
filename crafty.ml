@@ -84,7 +84,7 @@ let () =
     and print_only = ref None and stats = ref false and cleanup = ref false
     and check = ref false and normalize = ref false and format = ref Human
     and warn_error = ref false and no_warning = ref false
-    and linger = ref (Clock.Interval.sec 2.)
+    and linger = ref (Clock.Interval.sec 2.) and time_wait = ref None
     (* What the errors name it after, and its text: *)
     and prog = ref None and prog_args = ref []
     and max_duration = ref None and max_packets = ref None
@@ -200,6 +200,9 @@ let () =
             "BOOL receive the frames for other addresses too, whatever the program says" ;
         "--linger", interval linger,
             "DURATION once done, stop after that long without traffic (default 2s)" ;
+        "--time-wait", some_interval time_wait,
+            "DURATION pick no source port again until that long after its stream closed \
+             (default 0)" ;
         "-p", print_packets_spec,
             "[/PATTERN] print every packet sent and received, or those that match" ;
         "--print-packets", print_packets_spec, "[/PATTERN] same as -p" ;
@@ -448,7 +451,7 @@ let () =
                     Option.may (fun c -> c.Crafty_run.stop ()) !control)
                 (fun () ->
                     Crafty_run.run iface ?own_ip:!own_ip ~fw:!fw ~kernel_routing ~any_iface
-                        ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger
+                        ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger ?time_wait:!time_wait
                         ~format ~args:(Array.of_list !prog_args)
                         ~resolver:Crafty_interp.(cached system_resolver)
                         ~extra_limits ?packet_filter:print_only

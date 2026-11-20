@@ -94,6 +94,9 @@ type node =
       local_port : A.location -> L.layer -> int -> unit ;
       (* Whether a layer of that name used that local port: *)
       uses_port : string -> int -> bool ;
+      (* The local ports of the children of a node for a layer that went away
+       * less than the time wait ago, which are not picked again: *)
+      waiting : node -> L.layer -> int list ;
       (* Told the nodes of streams that go away, messages aside: *)
       removed : node -> unit ;
       (* The kernel's routes, if they are to be followed: *)
@@ -138,8 +141,9 @@ type entry = { node : node ; mode : L.mode ; options : (int * value) list }
 let siblings n (l : L.layer) = Hashtbl.find_option n.children l.name
 
 (* A value of field [i] of [l] within one of the [ranges] (inclusive and
- * disjoint) that no sibling has, else an error of kind [kind]: *)
-let pick_random ?kind loc parent (l : L.layer) i ranges =
+ * disjoint) that no sibling has nor [waiting] holds, else an error of kind
+ * [kind]: *)
+let pick_random ?kind ?(waiting=[]) loc parent (l : L.layer) i ranges =
     let within v = List.exists (fun (lo, hi) -> v >= lo && v <= hi) ranges in
     let taken =
         Option.map_default (fun s ->
@@ -147,10 +151,15 @@ let pick_random ?kind loc parent (l : L.layer) i ranges =
                 match List.assoc_opt i k with
                 | Some (Int v) when within v -> Set.Int.add v taken
                 | _ -> taken) s Set.Int.empty) Set.Int.empty (siblings parent l) in
+    let held = List.filter (fun v -> within v && not (Set.Int.mem v taken)) waiting in
+    let taken = List.fold_left (fun t v -> Set.Int.add v t) taken held in
     let n = List.fold_left (fun n (lo, hi) -> n + hi - lo + 1) 0 ranges in
     if Set.Int.cardinal taken >= n then
-        raise (Runtime_error (kind, loc, Printf.sprintf "No %s left for another %s"
-                                    l.fields.(i).name (L.N.to_string l.name))) ;
+        raise (Runtime_error (kind, loc, Printf.sprintf "No %s left for another %s%s"
+            l.fields.(i).name (L.N.to_string l.name)
+            (match List.length held with
+            | 0 -> ""
+            | h -> Printf.sprintf " (%d in time wait)" h))) ;
     (* The [j]th value of all the ranges: *)
     let rec nth j = function
         | [] -> assert false
@@ -181,6 +190,7 @@ let make_child parent (l : L.layer) key =
               received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
               closing = false ; driven = false ; eth = parent.eth ; ports = parent.ports ;
               local_port = parent.local_port ; uses_port = parent.uses_port ;
+              waiting = parent.waiting ;
               removed = parent.removed ; router = parent.router ;
               ops = l.node { eth = parent.eth ;
                              key = (fun name -> key_fields l (current ()) name) ;
@@ -237,7 +247,8 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
                     Some (pick_random loc parent l i [ lo, hi ])
                 | Some L.Local_port ->
                     random := true ;
-                    let v = pick_random ~kind:A.Error_name.No_port loc parent l i
+                    let v = pick_random ~kind:A.Error_name.No_port
+                                        ~waiting:(parent.waiting parent l) loc parent l i
                                         (parent.ports (L.N.to_string l.name)) in
                     (match v with Int p -> parent.local_port loc l p | _ -> ()) ;
                     Some v
@@ -912,8 +923,10 @@ let dynamic_ports = [ 49152, 65535 ]
  * that a stack leaves out are picked from [ports] for each layer that has
  * some (inclusive and disjoint ranges, by layer name), and else from
  * {!dynamic_ports}; those it gives out of its layer's [ports] are told to
- * [on_foreign_port], with these ranges. The root tells which were used. *)
-let make_root ?(ports=[]) ?(on_removed=ignore) ?router
+ * [on_foreign_port], with these ranges. The root tells which were used.
+ * A local port is not picked again for [time_wait] (default: none) after
+ * its stream went away, towards the same peer. *)
+let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?time_wait
               ?(on_foreign_port=fun _ _ _ _ -> ()) (eth : Eth.State.t) =
     let restricted name =
         match List.assoc_opt (String.uppercase_ascii name) ports with
@@ -929,12 +942,44 @@ let make_root ?(ports=[]) ?(on_removed=ignore) ?router
                 on_foreign_port loc l p ranges) in
     let uses_port name p = Hashtbl.mem used (String.uppercase_ascii name, p) in
     let ports name = restricted name |? dynamic_ports in
+    (* By path of the parent and layer name, when each port went away: *)
+    let freed = Hashtbl.create 7 in
+    let rec path n =
+        match n.parent with
+        | None -> ""
+        | Some p -> path p ^"/"^ L.N.to_string n.layer.name ^"("^ key_string n ^")" in
+    let waiting parent (l : L.layer) =
+        match Hashtbl.find_option freed (path parent, l.name) with
+        | Some ports -> Hashtbl.keys ports |> List.of_enum
+        | None -> [] in
+    let removed n =
+        (match time_wait, n.parent with
+        | Some d, Some p when Clock.Interval.compare d Clock.Interval.zero > 0 ->
+            let power = eth.iface.widget.power in
+            let now = Simulation.now power.sim in
+            List.iter (fun (i, v) ->
+                match n.layer.fields.(i).pick, v with
+                | Some L.Local_port, Int port ->
+                    let k = path p, n.layer.name in
+                    let ports =
+                        match Hashtbl.find_option freed k with
+                        | Some ports -> ports
+                        | None -> let ports = Hashtbl.create 7 in Hashtbl.add freed k ports ; ports in
+                    Hashtbl.replace ports port now ;
+                    (* Unless it went away again meanwhile: *)
+                    Simulation.delay ~background:true power d (fun () ->
+                        if Hashtbl.find_option ports port = Some now then (
+                            Hashtbl.remove ports port ;
+                            if Hashtbl.length ports = 0 then Hashtbl.remove freed k)) ()
+                | _ -> ()) n.key
+        | _ -> ()) ;
+        on_removed n in
     let root =
         { layer = L.root ; key = [] ; parent = None ;
           children = Hashtbl.create 10 ; users = 0 ; received = 0 ; failed_by = None ;
           received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
           closing = false ; driven = false ; eth ; ports ; local_port ; uses_port ;
-          removed = on_removed ; router ;
+          waiting ; removed ; router ;
           ops = L.eth_node ?router { eth ; key = (fun _ -> None) ;
                               below_key = (fun _ -> None) ; below = None } ;
           patterns = [] } in
@@ -1041,6 +1086,31 @@ let to_string n = IO.to_string print n
       (fun () -> udp ()) ;
   let tcp = child loc ip Crafty_layers.tcp [ 1, port 80 ] in
   assert_bool "other layers keep the dynamic ports" (src tcp >= 49152)
+*)
+(* A local port that went away is not picked again towards the same peer
+ * for the time wait, which fails as NoPort meanwhile: *)
+(*$R child
+  let sim = Simulation.make ~realtime:false "crafty-time-wait" in
+  let eth =
+      Eth.State.make ~parent:sim.root ~name:"crafty"
+          ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
+          ~my_addresses:[ Eth.State.make_my_ip_address
+                              (Ip.Addr.of_string "10.0.0.1") ] () in
+  let root = make_root ~ports:[ "UDP", [ 10, 11 ] ] ~time_wait:(Clock.Interval.sec 1.) eth in
+  let ip_of s = let ip = child loc root Crafty_layers.ip (ip_to s) in acquire ip ; ip in
+  let ip = ip_of "1.2.3.4" in
+  let udp ip = let u = child loc ip Crafty_layers.udp [ 1, port 53 ] in acquire u ; u in
+  let src n = match List.assoc_opt 0 n.key with Some (Crafty_value.Int p) -> p | _ -> -1 in
+  let a = udp ip in
+  let b = udp ip in
+  release a ;
+  assert_raises (Crafty_value.Runtime_error (Some Crafty_ast.Error_name.No_port, loc,
+                                             "No src left for another UDP (1 in time wait)"))
+      (fun () -> udp ip) ;
+  ignore (udp (ip_of "5.6.7.8")) ;
+  Simulation.delay sim.root.power (Clock.Interval.sec 2.) ignore () ;
+  Simulation.run sim false ;
+  assert_equal ~printer:string_of_int (21 - src b) (src (udp ip))
 *)
 (* The root tells the local ports used, given or picked, and those given
  * out of the ranges: *)

@@ -1642,7 +1642,8 @@ let print_status oc = function
  * MAC one for both), or wherever [router] says if given, answering ARP and neighbor solicitations for its
  * addresses unless [answer_requests] is false,
  * taking the frames for other addresses too if [promisc],
- * picking the local ports it is not given from the ports of [limits] (as
+ * picking the local ports it is not given from the ports of [limits], not
+ * one that went away less than [time_wait] ago (as
  * {!Crafty_tree.make_root} does), [limits] (default: the program's) being
  * what [BUDGET] and [PORTS] are, printing with [print] and [print_err],
  * telling [on_warning] of what is likely not what was meant (once each),
@@ -1655,7 +1656,7 @@ let print_status oc = function
  * Told what an event handler of the simulation raised, [on_exception] says
  * whether the program fails of it, which by default it does. *)
 let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
-        ?(promisc=false)
+        ?(promisc=false) ?time_wait
         ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu ?router
         ?limits ?format ?report ?args ?resolver ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
         ?(on_warning=ignore) ?(on_closed=ignore) ?(rx_wire=true) ?on_exception
@@ -1693,7 +1694,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
                         if lo = hi then string_of_int lo
                         else Printf.sprintf "%d-%d" lo hi) ranges)) }) in
     let tree =
-        Crafty_tree.make_root ?ports ?router eth
+        Crafty_tree.make_root ?ports ?router ?time_wait eth
             ~on_removed:on_closed ~on_foreign_port in
     let started = ref None and stopped = ref false in
     Simulation.asap power (fun () ->

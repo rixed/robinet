@@ -254,6 +254,8 @@ let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_i
  *   (or else 1Gbps, full duplex).
  * - [linger]: once the program is over, stop after that long without
  *   traffic.
+ * - [time_wait]: how long a local port is not picked again once its stream
+ *   went away (default: none).
  * - [format]: what [format()] writes.
  * - [args], [resolver]: for [arg()], and [resolve()] and [hostname()].
  * - [packet_filter]: which frames to tell [on_packet] of (default: all).
@@ -278,7 +280,7 @@ let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_i
  * - [on_suspicious]: with the same streams, each of their stats among
  *   {!suspicious_stats} that is not 0. *)
 let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
-        ?speed ?full_duplex ?mtu ?(linger=Clock.Interval.sec 2.) ?format ?args
+        ?speed ?full_duplex ?mtu ?(linger=Clock.Interval.sec 2.) ?time_wait ?format ?args
         ~resolver ?extra_limits ?packet_filter
         ?(on_start=ignore) ?(info=ignore)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
@@ -372,10 +374,11 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             String.concat ", " (List.map (fun (n, l) ->
                 n ^" "^ Crafty_value.(to_string (Crafty_typing.type_of_literal l) (of_literal l)))
                 limits.budget))) ;
-        info (Printf.sprintf "Ports: %s." (if ports = [] then "any" else
+        info (Printf.sprintf "Ports: %s%s." (if ports = [] then "any" else
             String.concat ", " (List.map (fun (r : Host_config.port_range) ->
                 String.uppercase_ascii (Host_config.string_of_proto r.proto) ^" "^
-                Host_config.string_of_range r) ports))) ;
+                Host_config.string_of_range r) ports))
+            (Option.map_default (fun d -> "; time wait "^ Clock.Interval.to_string d) "" time_wait)) ;
         let rules rs =
             String.concat ", " (List.map Firewall.string_of_rule
                                     (Firewall.of_address_rules (rules rs))) in
@@ -484,7 +487,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             ~speed ~full_duplex ~mtu ?router
             ~gateways:(List.map (fun gw -> Eth.Gateway.Ip gw) host.gateways)
             (* The kernel answers for its own address: *)
-            ~answer_requests:(own_ip <> None) ~promisc
+            ~answer_requests:(own_ip <> None) ~promisc ?time_wait
             ~limits ?format ?args ~resolver
             ?report:on_report
             ~print:(fun s -> on_print (instant ()) s)
