@@ -257,7 +257,8 @@ let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_i
  * - [time_wait]: how long a local port is not picked again once its stream
  *   went away (default: none).
  * - [format]: what [format()] writes.
- * - [args], [resolver]: for [arg()], and [resolve()] and [hostname()].
+ * - [args], [resolver], [getenv]: for [arg()], [resolve()] and [hostname()],
+ *   and [getenv()].
  * - [packet_filter]: which frames to tell [on_packet] of (default: all).
  *
  * The callbacks are given the instant of the simulation. They run in its
@@ -281,7 +282,7 @@ let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_i
  *   {!suspicious_stats} that is not 0. *)
 let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         ?speed ?full_duplex ?mtu ?(linger=Clock.Interval.sec 2.) ?time_wait ?format ?args
-        ~resolver ?extra_limits ?packet_filter
+        ~resolver ~getenv ?extra_limits ?packet_filter
         ?(on_start=ignore) ?(info=ignore)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
         ?(on_warning=fun _ _ -> ()) ?(on_packet=fun _ _ _ -> ())
@@ -488,7 +489,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             ~gateways:(List.map (fun gw -> Eth.Gateway.Ip gw) host.gateways)
             (* The kernel answers for its own address: *)
             ~answer_requests:(own_ip <> None) ~promisc ?time_wait
-            ~limits ?format ?args ~resolver
+            ~limits ?format ?args ~resolver ~getenv
             ?report:on_report
             ~print:(fun s -> on_print (instant ()) s)
             ~print_err:(fun s -> on_print_err (instant ()) s)

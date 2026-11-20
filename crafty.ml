@@ -454,6 +454,7 @@ let () =
                         ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger ?time_wait:!time_wait
                         ~format ~args:(Array.of_list !prog_args)
                         ~resolver:Crafty_interp.(cached system_resolver)
+                        ~getenv:Crafty_interp.getenv
                         ~extra_limits ?packet_filter:print_only
                         ~on_start ~info:(info "%s") ~on_report:report
                         ~on_print:(fun t s ->

@@ -274,7 +274,7 @@ let rec summarize (typ : A.Type.t) v =
  * their variables with: *)
 let user_env_prefix = "CRAFTY_USER_ENV_"
 
-(* The user's variable, renamed or not: *)
+(** The user's variable, renamed or not: *)
 let getenv name =
     match Tools.unsafe_getenv_opt (user_env_prefix ^ name) with
     | None -> Tools.unsafe_getenv_opt name
@@ -341,10 +341,12 @@ type output =
       check_words : A.location -> int -> unit ;
       (* The arguments that follow the program on the command line: *)
       prog_args : string array ;
-      resolver : resolver }
+      resolver : resolver ;
+      (* What [getenv()] reads: *)
+      getenv : string -> string option }
 
 let rec call loc (b : T.builtin) args (output : output) =
-    let { print ; print_err ; now ; check_words ; prog_args ; resolver ; _ } = output in
+    let { print ; print_err ; now ; check_words ; prog_args ; resolver ; getenv ; _ } = output in
     let number = function Bool _ | Int _ | Float _ -> true | _ -> false in
     let reparse what ok s = call loc b [ parsed loc what ok s ] output in
     match b, args with
@@ -1482,12 +1484,12 @@ let print_report print name typ v _ =
     print (name ^": "^ to_string typ v)
 
 let output_of power ?(format=Human) ?report ?(check_words=fun _ _ -> ())
-              ?(args=[||]) ?(resolver=system_resolver) ~print ~print_err () =
+              ?(args=[||]) ?(resolver=system_resolver) ?(getenv=getenv) ~print ~print_err () =
     let sim = power.SimTypes.sim in
     let instant () = Simulation.now sim in
     let now () = Simulation.date_of sim (instant ()) in
     { print ; print_err ; now ; instant ; format ; report = report |? print_report print ;
-      check_words ; prog_args = args ; resolver }
+      check_words ; prog_args = args ; resolver ; getenv }
 
 let matches output tree (ps : filter) frame =
     List.exists (fun (p : T.pattern) ->
@@ -1536,7 +1538,7 @@ let self_values ~own (l : T.limits) =
         | "promiscuous" -> flag p.promiscuous
         | _ -> flag p.exfiltration)
 
-let run_on_tree power tree ?format ?report ?args ?resolver ~print ~print_err ?(on_exit=ignore)
+let run_on_tree power tree ?format ?report ?args ?resolver ?getenv ~print ~print_err ?(on_exit=ignore)
                 ?(limits=T.no_limits) ?(on_start=ignore) ?(on_exception=fun _ -> true)
                 (program : T.block) =
     let status = ref Running in
@@ -1571,7 +1573,7 @@ let run_on_tree power tree ?format ?report ?args ?resolver ~print ~print_err ?(o
     let checkpoint () =
         incr statements ;
         if !statements land 0xffff = 0 && !status = Running && check_ram () then stop () in
-    let t = { power ; output = output_of power ?format ?report ?args ?resolver ~check_words
+    let t = { power ; output = output_of power ?format ?report ?args ?resolver ?getenv ~check_words
                                          ~print ~print_err () ;
               tree ; awaited = ref [] ; checkpoint ;
               exit = (fun () -> cancel root ; exit Done) } in
@@ -1658,7 +1660,7 @@ let print_status oc = function
 let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         ?(promisc=false) ?time_wait
         ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu ?router
-        ?limits ?format ?report ?args ?resolver ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
+        ?limits ?format ?report ?args ?resolver ?getenv ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
         ?(on_warning=ignore) ?(on_closed=ignore) ?(rx_wire=true) ?on_exception
         (program : program) =
     let limits = limits |? program.limits in
@@ -1699,7 +1701,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     let started = ref None and stopped = ref false in
     Simulation.asap power (fun () ->
         if not !stopped then
-            ignore (run_on_tree power tree ?format ?report ?args ?resolver ~print ~print_err ~on_exit
+            ignore (run_on_tree power tree ?format ?report ?args ?resolver ?getenv ~print ~print_err ~on_exit
                                 ~limits ~on_start:(fun h -> started := Some h)
                                 ?on_exception program.body)
     ) () ;
@@ -1789,7 +1791,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   let reply ?(sport=53) ?(dport=1000) data =
       incoming (Ip.Pdu.pack (udp_packet sport dport data))
 
-  let runs ?stop_at ?(trees=false) ?(frames=false) ?(sent=false) ?(inject=[]) ?(promisc=false) ?format ?args text =
+  let runs ?stop_at ?(trees=false) ?(frames=false) ?(sent=false) ?(inject=[]) ?(promisc=false) ?format ?args ?getenv text =
       match Crafty_parser.parse text with
       | Error e -> IO.to_string Crafty_parser.print_error e
       | Ok p ->
@@ -1816,7 +1818,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
                   Simulation.at sim.root.power (Clock.Time.of_secs t)
                       (fun () -> eth.Eth.State.iface.Eth.Iface.recv frame) ()) inject ;
               let h =
-                  run_on_tree sim.root.power tree ?format ?args ~print:(line "") ~print_err:(line "err ")
+                  run_on_tree sim.root.power tree ?format ?args ?getenv ~print:(line "") ~print_err:(line "err ")
                       ~on_exit:(function
                           | Done -> line "" "done"
                           | Failed e ->
@@ -2082,6 +2084,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (runs "x = getenv(\"CRAFTY_NO_SUCH_VAR\")")
   ("0s: default "^ Sys.getenv "HOME" ^"\n0s: done") \
     (runs "print(\"${getenv(\"CRAFTY_NO_SUCH_VAR\", default=\"default\")} ${getenv(\"HOME\", default=\"\")}\")")
+  "0s: given d\n0s: done" \
+    (runs ~getenv:(function "HOME" -> Some "given" | _ -> None) \
+       "print(\"${getenv(\"HOME\")} ${getenv(\"USER\", default=\"d\")}\")")
   "0s: 2 a b c\n0s: done" \
     (runs ~args:[| "a" ; "b" |] \
        "print(\"${nargs()} ${arg(0)} ${arg(1, default=\"x\")} ${arg(2, default=\"c\")}\")")
