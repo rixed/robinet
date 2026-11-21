@@ -147,16 +147,24 @@ cat > "$DIR/echo_back.cfty" <<'EOF'
   expect timeout=1s Raw { print("echoed back") }
 }
 EOF
-# Addresses that only running tells, then literal ones:
+# Addresses that only running tells, as assigned variables are not
+# computed before; then computed ones, and literal ones:
 cat > "$DIR/to.cfty" <<'EOF'
+dst = 0.0.0.0
+dst := ip_addr(arg(0))
+/IP(dst=dst)/UDP(dst=7)/Raw("x")
+EOF
+cat > "$DIR/to_arg.cfty" <<'EOF'
 /IP(dst=ip_addr(arg(0)))/UDP(dst=7)/Raw("x")
 EOF
 cat > "$DIR/spoof_ip.cfty" <<'EOF'
-src = 10.77.0.9
+src = 0.0.0.0
+src := 10.77.0.9
 /IP!(src=src, dst=10.77.0.2)/UDP(dst=7)/Raw("spoofed")
 EOF
 cat > "$DIR/spoof_mac.cfty" <<'EOF'
-src = 02:00:00:00:00:99
+src = 00:00:00:00:00:00
+src := 02:00:00:00:00:99
 /Eth!(src=src, dst=ff:ff:ff:ff:ff:ff)/IP!(src=10.77.0.5, dst=10.77.0.2)/UDP(dst=7)/Raw("spoofed")
 EOF
 cat > "$DIR/spoof_ip_literal.cfty" <<'EOF'
@@ -276,6 +284,9 @@ check "a remote address the program permits" 0 $? "permitted"
 
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --remote-ip deny:10.77.0.2 "$DIR/to.cfty" 10.77.0.2 > "$DIR/out" 2>&1
 check "a remote address the command line denies" 4 $? "stopped: remote address 10.77.0.2 not permitted"
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --remote-ip deny:10.77.0.2 "$DIR/to_arg.cfty" 10.77.0.2 > "$DIR/out" 2>&1
+check "a computed remote address denied" 2 $? "Destination address 10.77.0.2 is not permitted"
 
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --remote-ip deny:10.77.0.2 "$DIR/permitted.cfty" > "$DIR/out" 2>&1
 check "a literal remote address denied" 2 $? "Destination address 10.77.0.2 is not permitted"

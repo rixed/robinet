@@ -311,7 +311,7 @@ let make_router ~ifname ~lookup ~on_unrouted =
 let check_route route dst =
     match route dst with
     | Ok _ -> ()
-    | Error e -> V.fail_as Error_name.No_route "Cannot send to %s: %s" (Ip.Addr.to_dotted_string dst) e
+    | Error e -> V.fail_as Error_name.NoRoute "Cannot send to %s: %s" (Ip.Addr.to_dotted_string dst) e
 
 (* Sends the IP packet [bits] along the route to [dst], which [Eth.TRX.tx]
  * would otherwise find from the configuration of [st], or drops it if there is
@@ -824,7 +824,7 @@ type tcp_state = Idle | Listening | Stream of tcp_stream
 (* A node without a connection is idle, or listening if a self-driven
  * pattern made it, until a SYN comes; the first packet sent self-driven
  * connects it, and waits for the connection, as what follows does; what is
- * sent to a connection that could not be made fails as [Cannot_connect]. A
+ * sent to a connection that could not be made fails as [CannotConnect]. A
  * manual segment takes the sequence and ack numbers of the connection if not
  * given, and the connection then accounts for it. The connection's data is
  * seen in self-driven mode, as it comes in order, and each segment in manual
@@ -969,7 +969,7 @@ let tcp_node ctx =
         let s = stream fields in
         if bitstring_length payload > 0 then
             match s.failure with
-            | Some msg -> V.fail_as Error_name.Cannot_connect "%s" msg
+            | Some msg -> V.fail_as Error_name.CannotConnect "%s" msg
             | None ->
             if s.trx.closed then V.fail_as Error_name.Closed "This TCP connection is closed"
             else if Tcp.TRX.is_established s.trx then Tcp.TRX.tx s.trx payload

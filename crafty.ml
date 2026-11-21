@@ -323,6 +323,12 @@ let () =
             match Crafty_typing.exfiltrations program.body with
             | [] -> ()
             | es -> fail es) ;
+        (* Not before: what [getenv()] reads would no longer taint. *)
+        let program =
+            let body =
+                Crafty_interp.Partial.block ~getenv:Crafty_interp.getenv
+                    ~args:(Array.of_list !prog_args) program.body in
+            Crafty_interp.{ program with body } in
         (* Without the interface, rules about its addresses are not checked: *)
         let known rs =
             let rs = Option.default [] rs in

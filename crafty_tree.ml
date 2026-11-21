@@ -247,7 +247,7 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
                     Some (pick_random loc parent l i [ lo, hi ])
                 | Some L.Local_port ->
                     random := true ;
-                    let v = pick_random ~kind:A.Error_name.No_port
+                    let v = pick_random ~kind:A.Error_name.NoPort
                                         ~waiting:(parent.waiting parent l) loc parent l i
                                         (parent.ports (L.N.to_string l.name)) in
                     (match v with Int p -> parent.local_port loc l p | _ -> ()) ;
@@ -1081,7 +1081,7 @@ let to_string n = IO.to_string print n
   let udp () = src (child loc ip Crafty_layers.udp [ 1, port 53 ]) in
   let picked = List.sort Int.compare [ udp () ; udp () ; udp () ] in
   assert_equal ~printer:dump [ 10 ; 11 ; 20 ] picked ;
-  assert_raises (Crafty_value.Runtime_error (Some Crafty_ast.Error_name.No_port, loc,
+  assert_raises (Crafty_value.Runtime_error (Some Crafty_ast.Error_name.NoPort, loc,
                                              "No src left for another UDP"))
       (fun () -> udp ()) ;
   let tcp = child loc ip Crafty_layers.tcp [ 1, port 80 ] in
@@ -1104,7 +1104,7 @@ let to_string n = IO.to_string print n
   let a = udp ip in
   let b = udp ip in
   release a ;
-  assert_raises (Crafty_value.Runtime_error (Some Crafty_ast.Error_name.No_port, loc,
+  assert_raises (Crafty_value.Runtime_error (Some Crafty_ast.Error_name.NoPort, loc,
                                              "No src left for another UDP (1 in time wait)"))
       (fun () -> udp ip) ;
   ignore (udp (ip_of "5.6.7.8")) ;

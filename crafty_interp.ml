@@ -84,13 +84,16 @@ type env =
     { vars : value ref Lazy.t Env.t ;
       (* The current protocol stack, its top first: *)
       stack : Crafty_tree.entry list ;
-      (* What a stack is on top of, without a [depth]: *)
-      tree : Crafty_tree.node ;
+      (* What a stack is on top of, without a [depth]; none before the run,
+       * when building a stack or an encoding raises [No_tree]: *)
+      tree : Crafty_tree.node option ;
       (* In a condition, the packet being matched up to its layer, the top
        * first: *)
       packet : Crafty_tree.packet ;
       (* The value of [LAST], as most sends are never read back: *)
       last : value Lazy.t ref }
+
+exception No_tree
 
 let lookup (env : env) (v : T.var) =
     try Lazy.force (Env.find v.id env.vars)
@@ -616,7 +619,7 @@ let push_layers ~eval ~hold env depth overlay (layers : T.layer list) =
             match stack with
             | [] ->
                 assert (l.layer == Crafty_layers.root) ;
-                env.tree
+                Option.get_exn env.tree No_tree
             | (below : Crafty_tree.entry) :: _ ->
                 let node =
                     Crafty_tree.child l.layer_loc below.node l.layer options in
@@ -970,7 +973,7 @@ let match_value packet = packet_value (Crafty_tree.complete packet)
 (* Fails [b] at [loc] as a stack does that will never send, for that reason
  * and because of that packet, if one: *)
 let cannot_send b loc (message, packet) =
-    b.fail Crafty_parser.{ where = loc ; message ; kind = Some A.Error_name.Cannot_connect ;
+    b.fail Crafty_parser.{ where = loc ; message ; kind = Some A.Error_name.CannotConnect ;
                            packet = Option.map match_value packet }
 
 (* Calls [k] with the packet that the interface emits as [e], once it is
@@ -1498,7 +1501,7 @@ let matches output tree (ps : filter) frame =
             Crafty_tree.{
                 player = pl.pl_layer ; pmode = pl.pl_mode ;
                 test = Option.map (fun c packet ->
-                    match eval output { vars = Env.empty ; stack = [] ; tree ; packet ; last = ref (Lazy.from_val Void) } c with
+                    match eval output { vars = Env.empty ; stack = [] ; tree = Some tree ; packet ; last = ref (Lazy.from_val Void) } c with
                     | Bool b -> b
                     | _ -> assert false) pl.cond }) p.pat_layers in
     Crafty_tree.matches tree layers frame) ps
@@ -1584,7 +1587,7 @@ let run_on_tree power tree ?format ?report ?args ?resolver ?getenv ~print ~print
     let budget, ports, permissions = self_values ~own limits in
     let own_ip = match own with [] -> Void | a :: _ -> Ip a in
     let vars =
-        { vars = Env.empty ; stack = [] ; tree ; packet = [] ; last = ref (Lazy.from_val Void) } |>
+        { vars = Env.empty ; stack = [] ; tree = Some tree ; packet = [] ; last = ref (Lazy.from_val Void) } |>
         fun env -> bind (bind (bind (bind (bind env T.budget_var budget) T.ports_var ports)
                                     T.permissions_var permissions)
                               T.own_ip_var own_ip)
@@ -1611,6 +1614,340 @@ let run_on_tree power tree ?format ?report ?args ?resolver ?getenv ~print ~print
                 ~fail:root.fail ~break_:root.break_
                 (fun _ -> t.exit ())) ;
     h
+
+(** {2 Partial evaluation}
+
+   Of typed programs: what can be computed before
+   the program runs is replaced by its value.
+
+   Computed are the expressions made of literals, pure builtins and the
+   variables declared with such a value and never assigned; an [if] or a
+   [case] on such a value is replaced by the branch it takes. What would fail
+   is left for the run to fail on, and so are the values too large to be
+   written in the program ([max_words]).
+
+   [getenv()], [arg()] and [nargs()] are computed only when the environment
+   and arguments of the run are given; [format()] never is, which depends on
+   the run's options. *)
+module Partial =
+struct
+    (* Raised when computing an expression needs what only the run has: *)
+    exception Not_folded
+
+    (* The largest value computed, as [check_words] counts: *)
+    let max_words = 256
+
+    (* The value of [v], of type [typ], written as an expression: *)
+    let rec expr_of_value loc (typ : A.Type.t) v : T.expr option =
+        let mk desc = Some T.{ loc ; typ ; desc } in
+        let all f xs =
+            let es = List.filter_map f xs in
+            if List.compare_lengths es xs = 0 then Some es else None in
+        match v, typ with
+        | Void, _ -> None
+        | Bool b, _ -> mk (Lit (A.Bool b))
+        | Byte b, _ -> mk (Lit (A.Byte b))
+        | Int i, _ -> mk (Lit (A.Int i))
+        | Float f, _ -> mk (Lit (A.Float f))
+        | Interval i, _ -> mk (Lit (A.Interval i))
+        | Time t, _ -> mk (Lit (A.Time t))
+        | Ip a, _ -> mk (Lit (A.Ip a))
+        | Mac m, _ -> mk (Lit (A.Mac m))
+        | Cidr c, _ -> mk (Lit (A.Cidr c))
+        | String s, _ -> mk (String [ Text s ])
+        | Array a, A.Type.Array t ->
+            Option.bind (all (expr_of_value loc t) (Array.to_list a)) (fun es -> mk (Array es))
+        | Record a, A.Type.Record fs ->
+            Option.bind (all (fun (x, (_, t)) -> expr_of_value loc t x)
+                             (List.combine (Array.to_list a) fs))
+                (fun es -> mk (Record es))
+        | Map (m, None), A.Type.Map (kt, vt) ->
+            Option.bind (all (fun (k, x) ->
+                            match expr_of_value loc kt k, expr_of_value loc vt x with
+                            | Some k, Some x -> Some (k, x)
+                            | _ -> None) (Map.PMap.bindings m))
+                (fun kvs -> mk (Map kvs))
+        | Variant (c, Void), A.Type.Variant _ -> mk (Construct (c, None))
+        | Variant (c, x), A.Type.Variant cs ->
+            Option.bind (Option.bind (List.assoc_opt c cs) (fun t -> expr_of_value loc t x))
+                (fun x -> mk (Construct (c, Some x)))
+        | _ -> None
+
+    (* Whether [e] is written as a value: *)
+    let rec is_value (e : T.expr) =
+        match e.desc with
+        | Lit _ -> true
+        | String parts -> List.for_all (function T.Text _ -> true | Interp _ -> false) parts
+        | Array es | Record es -> List.for_all is_value es
+        | Map kvs -> List.for_all (fun (k, v) -> is_value k && is_value v) kvs
+        | Construct (_, x) -> Option.map_default is_value true x
+        | _ -> false
+
+    let unused _ = raise Not_folded
+
+    (* What an expression is computed with, before the run: *)
+    let output ?getenv ?args () =
+        let read = Option.default unused getenv
+        and prog_args = Option.default [||] args in
+        { print = unused ; print_err = unused ; now = unused ; instant = unused ;
+            format = Human ; report = (fun _ _ _ _ -> raise Not_folded) ;
+            check_words = (fun _ n -> if n > max_words then raise Not_folded) ;
+            prog_args ; resolver = { resolve = unused ; hostname = unused } ;
+            getenv = read }
+
+    let env =
+        { vars = Env.empty ; stack = [] ; tree = None ;
+            packet = [] ; last = ref (lazy (raise Not_folded)) }
+
+    (* The value of [e], unless it fails or needs the run: *)
+    let value output e =
+        try Some (eval output env e)
+        with Not_folded | No_tree | Runtime_error _ | Invalid_argument _ | Failure _
+           | Division_by_zero -> None
+
+    (** [b] with what can be computed before running it computed; with [getenv]
+     * and [args], those of the run. Shares nothing with [b], so that it can be
+     * run alongside. *)
+    let block ?getenv ?args (b : T.block) =
+        let value = value (output ?getenv ?args ()) in
+        let assigned = Hashtbl.create 7 in
+        T.iter_stmts (fun s ->
+            match s.stmt with
+            | Assign { var ; _ } -> Hashtbl.replace assigned var.id ()
+            | _ -> ()) b ;
+        (* The values of the constant variables, by id: *)
+        let consts = Hashtbl.create 7 in
+        let computable = function
+            | T.Getenv -> getenv <> None
+            | T.Arg | T.Nargs -> args <> None
+            | T.Format -> false
+            | b -> T.is_pure b in
+        (* Whether [e] is made of values, computable builtins and the variables
+         * [bound] within it: *)
+        let rec closed bound (e : T.expr) =
+            match e.desc with
+            | Lit _ -> true
+            | Var v -> List.mem v.id bound
+            | Call (b, _) when not (computable b) -> false
+            | Comprehension { key ; value ; clauses } ->
+                let bound, ok =
+                    List.fold_left (fun (bound, ok) -> function
+                        | T.Bind (v, items) -> v.id :: bound, ok && closed bound items
+                        | T.Filter c -> bound, ok && closed bound c) (bound, true) clauses in
+                ok && closed bound value && Option.map_default (closed bound) true key
+            | String _ | Field _ | Index _ | Slice _ | Call _ | Unop _ | Binop _
+            | Record _ | Array _ | Map _ | Convert _ | Construct _ ->
+                List.for_all (closed bound) (T.sub_exprs e)
+            | Packet_field _ | Select _ | Encode _ | Block _ | If _ | Case _
+            | Expect _ | Try _ | Memo _ ->
+                false in
+        let opt f = Option.map f in
+        let rec expr (e : T.expr) : T.expr =
+            let mk desc = { e with desc } in
+            let e =
+                match e.desc with
+                | Lit _ | Packet_field _ -> mk e.desc
+                | Var v ->
+                    (match Hashtbl.find_option consts v.id with
+                    | Some x -> Option.default (mk e.desc) (expr_of_value e.loc e.typ x)
+                    | None -> mk e.desc)
+                | Memo { value ; _ } -> expr value
+                | String parts ->
+                    (* Values written as text, adjacent texts merged: *)
+                    let text e =
+                        if is_value e then Option.map (to_string e.typ) (value e) else None in
+                    mk (String (List.fold_right (fun p parts ->
+                        let p =
+                            match p with
+                            | T.Text _ -> p
+                            | T.Interp e ->
+                                let e = expr e in
+                                Option.map_default (fun s -> T.Text s) (T.Interp e) (text e) in
+                        match p, parts with
+                        | T.Text a, T.Text b :: parts -> T.Text (a ^ b) :: parts
+                        | p, parts -> p :: parts) parts []))
+                | Field (r, i) -> mk (Field (expr r, i))
+                | Index (a, i) -> mk (Index (expr a, expr i))
+                | Slice (a, from, to_) -> mk (Slice (expr a, opt expr from, opt expr to_))
+                | Select s -> mk (Select { s with packet = expr s.packet })
+                | Call (b, args) -> mk (Call (b, List.map expr args))
+                | Encode en -> mk (Encode { en with layers = List.map layer en.layers })
+                | Unop (op, a) -> mk (Unop (op, expr a))
+                | Binop (op, a, b) -> mk (Binop (op, expr a, expr b))
+                | Record es -> mk (Record (List.map expr es))
+                | Array es -> mk (Array (List.map expr es))
+                | Map kvs -> mk (Map (List.map (fun (k, v) -> expr k, expr v) kvs))
+                | Comprehension { key ; value ; clauses } ->
+                    mk (Comprehension {
+                        key = opt expr key ; value = expr value ;
+                        clauses = List.map (function
+                            | T.Bind (v, items) -> T.Bind (v, expr items)
+                            | T.Filter c -> T.Filter (expr c)) clauses })
+                | Convert a -> mk (Convert (expr a))
+                | Construct (c, a) -> mk (Construct (c, opt expr a))
+                | Block b ->
+                    (* Declarations of values do nothing else than be read: *)
+                    let b = block b in
+                    (match List.rev b with
+                    | T.{ stmt = Expr x ; _ } :: decls
+                      when is_value x &&
+                           List.for_all (function
+                               | T.{ stmt = Declare (_, d) ; _ } -> is_value d
+                               | _ -> false) decls -> x
+                    | _ -> mk (Block b))
+                | If { cond ; then_ ; else_ } ->
+                    let cond = expr cond in
+                    (match cond.desc with
+                    | Lit (A.Bool c) -> expr (mk (Block (if c then then_ else else_)))
+                    | _ -> mk (If { cond ; then_ = block then_ ; else_ = block else_ }))
+                | Case { subject ; arms ; else_ } ->
+                    let subject = expr subject in
+                    let taken =
+                        match subject.desc with
+                        | Construct (c, x) when is_value subject ->
+                            (match List.find_opt (fun (a : T.arm) -> a.ctor = c) arms, x with
+                            | Some { held = Some v ; branch ; _ }, Some x ->
+                                let decl = T.{ stmt_loc = subject.loc ; stmt = Declare (v, x) } in
+                                Some (decl :: branch)
+                            | Some { held = None ; branch ; _ }, _ -> Some branch
+                            | None, _ -> else_
+                            | Some _, None -> None)
+                        | _ -> None in
+                    (match taken with
+                    | Some b -> expr (mk (Block b))
+                    | None ->
+                        mk (Case { subject ;
+                                   arms = List.map (fun (a : T.arm) -> { a with branch = block a.branch }) arms ;
+                                   else_ = opt block else_ }))
+                | Expect { timeout ; cases ; else_ } ->
+                    mk (Expect { timeout = opt expr timeout ; cases = List.map case cases ;
+                                 else_ = opt block else_ })
+                | Try { body ; handlers } ->
+                    mk (Try { body = block body ;
+                              handlers = List.map (fun (h : T.handler) ->
+                                  { h with handler = block h.handler }) handlers }) in
+            if is_value e || not (closed [] e) then e else
+            Option.bind (value e) (expr_of_value e.loc e.typ) |? e
+        and layer (l : T.layer) =
+            { l with options = List.map (fun (i, e) -> i, expr e) l.options }
+        and case (c : T.case) =
+            { c with patterns = List.map (fun (p : T.pattern) ->
+                        { p with pat_layers = List.map (fun (pl : T.pattern_layer) ->
+                            { pl with cond = opt expr pl.cond }) p.pat_layers }) c.patterns ;
+                     body = block c.body }
+        and stmt (s : T.stmt) =
+            let mk stmt = { s with stmt } in
+            match s.stmt with
+            | Stack st -> mk (Stack { st with layers = List.map layer st.layers ; body = block st.body })
+            | Send se -> mk (Send { se with layers = List.map layer se.layers })
+            | Expr e -> mk (Expr (expr e))
+            | Declare (v, e) ->
+                let e = expr e in
+                if is_value e && not (Hashtbl.mem assigned v.id) then
+                    Option.may (Hashtbl.replace consts v.id) (value e) ;
+                mk (Declare (v, e))
+            | Assign { var ; path ; value } ->
+                mk (Assign { var ; path = List.map (fun (v, i) -> v, expr i) path ;
+                             value = expr value })
+            | Repeat r ->
+                mk (Repeat { r with count = opt expr r.count ; items = opt expr r.items ;
+                                    every = opt expr r.every ; for_ = opt expr r.for_ ;
+                                    body = block r.body })
+            | Retry r -> mk (Retry { r with max = opt expr r.max ; body = block r.body })
+            | Break _ | Exit -> mk s.stmt
+            | Wait e -> mk (Wait (expr e))
+            | On o ->
+                mk (On { for_ = opt expr o.for_ ; linger = opt expr o.linger ;
+                         timeout = opt expr o.timeout ; max = opt expr o.max ;
+                         cases = List.map case o.cases })
+            | Spawn sp -> mk (Spawn { for_ = opt expr sp.for_ ; body = block sp.body })
+        and block b = List.map stmt b in
+        let b = block b in
+        T.cache_constants b ;
+        b
+
+    (** [s], as [block] makes it. *)
+    let stmt ?getenv ?args s =
+        match block ?getenv ?args [ s ] with
+        | [ s ] -> s
+        | _ -> assert false
+end
+
+(* [folded ?env ?args text] are the top level declarations of that program
+ * once partially evaluated, with their values if computed, and the names of
+ * the variables of the environment it still reads: *)
+(*$inject
+  let folded ?env ?args text =
+      match Crafty_interp.compile text with
+      | Error es -> String.concat "\n" (List.map (IO.to_string Crafty_interp.print_error) es)
+      | Ok p ->
+          let getenv = Option.map (fun env n -> List.assoc_opt n env) env in
+          let b = Crafty_interp.Partial.block ?getenv ?args p.body in
+          let decls =
+              List.filter_map (fun (s : Crafty_typing.stmt) ->
+                  match s.stmt with
+                  | Declare (v, e) ->
+                      Some (v.name ^"="^
+                            match Crafty_interp.Partial.(is_value e, value (output ()) e) with
+                            | true, Some x -> Crafty_value.to_string e.typ x
+                            | _ -> "_")
+                  | _ -> None) b
+          and reads =
+              Crafty_typing.fold_exprs (fun acc (e : Crafty_typing.expr) ->
+                  match e.desc with
+                  | Call (Getenv, { desc = String [ Text n ] ; _ } :: _) -> ("$"^ n) :: acc
+                  | Call (Getenv, _) -> "$?" :: acc
+                  | _ -> acc) [] b |> List.rev in
+          String.concat " " (decls @ reads)
+*)
+(*$= folded & ~printer:identity
+  "x=3" (folded "x = 1 + 2")
+  "x=3 y=6" (folded "x = 1 + 2\ny = x * 2")
+  "x=3 y=_" (folded "x = 1 + 2\ny = x * 2\nx := 5")
+  "x=ab" (folded "x = \"a\" + \"b\"")
+  "x=3" (folded "x = length([1, 2] + [3])")
+  "x=[2, 4, 6]" (folded "x = [i * 2 for i in [1, 2, 3]]")
+  "x=1" (folded "x = if 2 > 1 { 1 } else { 2 }")
+  "x=_" (folded "x = rand(3)")
+  "x=_" (folded "x = 1 / 0")
+  "x=_" (folded "x = #00 * 1000")
+  "x=_ $HOME" (folded "x = getenv(\"HO\" + \"ME\")")
+  "x=/root" (folded ~env:[ "HOME", "/root" ] "x = getenv(\"HOME\")")
+  "x=_ $HOME" (folded ~env:[] "x = getenv(\"HOME\")")
+  "x=d" (folded ~env:[] "x = getenv(\"HOME\", default=\"d\")")
+  "x=_" (folded "x = arg(0)")
+  "x=a" (folded ~args:[| "a" |] "x = arg(0)")
+  "x=Some 1 y=2" (folded "x = if 1 > 0 { Some(1) } else { None }\ny = case x Some { I + 1 } | None { 0 }")
+  "x=_ y=_ $A $?" (folded "x = getenv(\"A\")\ny = getenv(x)")
+  "x=_ y=_ $A $B" (folded "x = getenv(\"A\")\ny = \"${1 + 1}${x}\" + getenv(\"B\")")
+  "x=_" (folded "x = rand(3) + 1 * 2")
+*)
+
+(* [both text] is what that program prints, then what it prints once
+ * partially evaluated, with HOME set: *)
+(*$inject
+  let both text =
+      let getenv = function "HOME" -> Some "/root" | _ -> None in
+      match Result.bind (Result.map_error (fun e -> [ e ]) (Crafty_parser.parse text))
+                        Crafty_typing.check with
+      | Error es -> String.concat "\n" (List.map (IO.to_string Crafty_interp.print_error) es)
+      | Ok body ->
+      let run body =
+          let sim = Simulation.make ~realtime:false "crafty" in
+          let eth =
+              Eth.State.make ~parent:sim.SimTypes.root ~name:"crafty"
+                  ~mac:(Eth.Addr.of_string "02:00:00:00:00:01") () in
+          let out = ref [] in
+          ignore (Crafty_interp.run_on_tree sim.root.power (Crafty_tree.make_root eth)
+                      ~getenv ~print:(fun s -> out := s :: !out) ~print_err:ignore body) ;
+          Simulation.run sim false ;
+          String.concat "," (List.rev !out) in
+      run body ^" | "^ run (Crafty_interp.Partial.block ~getenv body)
+*)
+(*$= both & ~printer:identity
+  "6,7,8,ok,/root,x[] | 6,7,8,ok,/root,x[]" \
+    (both "a = [1, 2] + [3]\nrepeat count=3 { print(sum(a) + I) }\nr = if length(a) > 2 { Some(\"ok\") } else { None }\ncase r Some { print(I) } | None { print(\"none\") }\nprint(getenv(\"HOME\"))\nprint(\"x${[i for i in a if i > 3] * 2}\")")
+*)
 
 (* With what it declares of itself: *)
 type program = { body : Crafty_typing.block ; limits : Crafty_typing.limits }

@@ -427,7 +427,6 @@ type load_balancing =
     | RoundRobin (* Take the matching routes in turn, one packet each *)
     [@@deriving enum]
 
-(* TODO: to_string_array with ppx_deriving.show if it happens again: *)
 let all_load_balancing =
     [| "first matching" ; "track flow" ; "random" ; "round robin" |]
 

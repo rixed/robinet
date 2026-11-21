@@ -305,6 +305,11 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         match Crafty_typing.exfiltrations program.body with
         | [] -> Ok ()
         | es -> Error (Denied es) in
+    (* Not before: what [getenv()] reads would no longer taint. Computed
+     * addresses are then literals, which the permissions check: *)
+    let program =
+        let body = Crafty_interp.Partial.block ~getenv ~args:(args |? [||]) program.body in
+        Crafty_interp.{ program with body } in
     let* kernel_routing =
         match kernel_routing with
         | Some true when not (Kernel_route.available ()) ->

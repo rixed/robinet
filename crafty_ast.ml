@@ -43,24 +43,11 @@ struct
         | Eth | IP | IP6 | TCP | UDP | ICMP | ICMP6 | Echo | Request | Reply
         | DestUnreachable | TimeExceeded | PacketTooBig | RouterSolicit
         | RouterAdvert | Redirect | DNS | Query | Answer | HTTP | HttpRequest | HttpUpgrade | HttpAnswer | WebSocket | Raw
+        [@@deriving show { with_path = false }, enum]
 
-    let all =
-        [ Eth ; IP ; IP6 ; TCP ; UDP ; ICMP ; ICMP6 ; Echo ; Request ; Reply ;
-          DestUnreachable ; TimeExceeded ; PacketTooBig ; RouterSolicit ;
-          RouterAdvert ; Redirect ; DNS ; Query ; Answer ;
-          HTTP ; HttpRequest ; HttpUpgrade ; HttpAnswer ; WebSocket ; Raw ]
+    let all = List.init (max + 1) (Option.get % of_enum)
 
-    let to_string = function
-        | Eth -> "Eth" | IP -> "IP" | IP6 -> "IP6" | TCP -> "TCP" | UDP -> "UDP"
-        | ICMP -> "ICMP" | ICMP6 -> "ICMP6" | Echo -> "Echo" | Request -> "Request"
-        | Reply -> "Reply" | DestUnreachable -> "DestUnreachable"
-        | TimeExceeded -> "TimeExceeded" | PacketTooBig -> "PacketTooBig"
-        | RouterSolicit -> "RouterSolicit" | RouterAdvert -> "RouterAdvert"
-        | Redirect -> "Redirect"
-        | DNS -> "DNS" | Query -> "Query" | Answer -> "Answer" | HTTP -> "HTTP"
-        | HttpRequest -> "HttpRequest" | HttpUpgrade -> "HttpUpgrade"
-        | HttpAnswer -> "HttpAnswer"
-        | WebSocket -> "WebSocket" | Raw -> "Raw"
+    let to_string = show
 
     (* However written; IP4 is an alias for IP: *)
     let of_string s =
@@ -85,22 +72,28 @@ end
  * a fault of the program, which ends it. *)
 module Error_name =
 struct
-    type t = Timeout | Closed | Cannot_connect | No_route | No_port | Unset | Invalid
+    (* As programs name them: *)
+    type t = Timeout | Closed | CannotConnect | NoRoute | NoPort | Unset | Invalid
            | Unresolved | Assertion
+        [@@deriving show { with_path = false }, enum]
 
-    let all = [ Timeout ; Closed ; Cannot_connect ; No_route ; No_port ; Unset ; Invalid ;
-                Unresolved ; Assertion ]
+    let all = List.init (max + 1) (Option.get % of_enum)
 
-    let to_string = function
-        | Timeout -> "Timeout" | Closed -> "Closed" | Cannot_connect -> "CannotConnect"
-        | No_route -> "NoRoute" | No_port -> "NoPort"
-        | Unset -> "Unset" | Invalid -> "Invalid" | Unresolved -> "Unresolved"
-        | Assertion -> "Assertion"
+    let to_string = show
 
     let of_string s = List.find_opt (fun n -> to_string n = s) all
 
     let names = List.map to_string all
 end
+
+(*$= & ~printer:identity
+  "Timeout Closed CannotConnect NoRoute NoPort Unset Invalid Unresolved Assertion" \
+    (String.concat " " Error_name.names)
+*)
+(*$T
+  Error_name.of_string "NoPort" = Some Error_name.NoPort
+  Error_name.of_string "No_port" = None
+*)
 
 (** Types of values. *)
 module Type =
@@ -434,6 +427,9 @@ let print_literal oc = function
         String.print oc (Tools.hexstring ~sep:":"
             (Bitstring.string_of_bitstring (mac :> Bitstring.bitstring)))
     | Cidr c -> String.print oc (Ip.Cidr.to_string c)
+
+let string_of_literal lit =
+    IO.to_string print_literal lit
 
 let print_text oc s =
     String.iter (function
