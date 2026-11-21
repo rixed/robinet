@@ -485,10 +485,12 @@ let string_lit expr =
             | c -> reject "Unknown escape sequence \\%c" c
     and interp =
         word "${" -- nl_sp -+ expr +- nl_sp +- item '}' >>: fun e -> Interp e in
-    here ++ (item '"' -+
-             repeat ~sep:none (plain ||| dollar ||| hex_escape ||| escape ||| interp) +-
-             item '"') >>:
-    (fun (loc, parts) -> { loc ; desc = String (merge_texts parts) }) |? "string"
+    here +- item '"' ++
+    repeat ~sep:none (plain ||| dollar ||| hex_escape ||| escape ||| interp) ++
+    ((item '"' >>: fun _ -> true) ||| (eof >>: fun _ -> false)) >>:
+    (fun ((loc, parts), closed) ->
+        if not closed then reject_at loc "Unterminated string" ;
+        { loc ; desc = String (merge_texts parts) }) |? "string"
 
 (** {2 Expressions} *)
 
@@ -1088,8 +1090,11 @@ let message_of what =
         | [] -> "Syntax error"
         | w :: ctx ->
             let ctx = List.filter ((<>) w) ctx in
-            let w = if String.length w = 1 then quoted (String.escaped w)
-                    else w in
+            (* A character in quotes, escaped only if not printable: *)
+            let w =
+                if String.length w <> 1 then w
+                else if w.[0] >= ' ' && w.[0] <= '~' then quoted w
+                else quoted (String.escaped w) in
             "Expected "^ w ^ in_ ctx)
 
 (* Where two readings of a program differ first, and how: *)
@@ -1516,7 +1521,10 @@ let parse_patterns text =
     (reads "if x\ny := 1")
   "line 1, column 11: x would only be declared in this branch" (reads "if a x = 1")
   "line 1, column 1: Expected end of statement (';' or new line)" (reads "else {}")
-  "line 1, column 9: Expected '\\\"' in string" (reads "x = \"abc")
+  "line 1, column 5: Unterminated string" (reads "x = \"abc")
+  "line 1, column 1: Unterminated string" (reads "\"helo")
+  "line 1, column 3: Unterminated string" (reads "{ \"a\nb }")
+  "line 1, column 11: Expected escaped character in string" (reads "x = \"${1}\\")
   "line 1, column 9: Unknown escape sequence \\q" (reads "x = \"a\\qb\"")
   "line 1, column 9: Odd number of hexadecimal digits in #123" (reads "x = #123")
   "line 1, column 14: Invalid IP address 300.1.2.3" (reads "x = 300.1.2.3")
