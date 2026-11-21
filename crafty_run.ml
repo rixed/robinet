@@ -100,6 +100,16 @@ let suspicious_stats =
       "TCP segments out of order", [ "ooo_in" ] ;
       "duplicate TCP segments", [ "dup_in" ] ]
 
+(** The stats of stream [n] among {!suspicious_stats} that are not 0: *)
+let suspicious n =
+    List.filter_map (fun (name, v) ->
+        match v with
+        | Crafty_value.Int c
+          when c <> 0 && List.exists (List.mem name % snd) suspicious_stats ->
+            Some (name, c)
+        | _ -> None
+    ) (Crafty_tree.stats n)
+
 type warning =
     | Program of Crafty_parser.error
     (* No route to that address, and why: *)
@@ -151,6 +161,9 @@ type control =
        * again, stop the run now: *)
       stop : unit -> unit ;
       now : unit -> Clock.Time.t ;
+      (* Whether a frame, sent or received, matches a filter; from the
+       * callbacks only: *)
+      matches : Crafty_interp.filter -> Bitstring.bitstring -> bool ;
       (* As of now: *)
       counters : unit -> counters }
 
@@ -266,13 +279,12 @@ let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_i
  * - [format]: what [format()] writes.
  * - [args], [resolver], [getenv]: for [arg()], [resolve()] and [hostname()],
  *   and [getenv()].
- * - [packet_filter]: which frames to tell [on_packet] of (default: all).
  *
  * The callbacks are given the instant of the simulation. They run in its
  * thread, under its lock, and must neither take long nor stop it otherwise
  * than through [control.stop]:
  *
- * - [on_start]: once running, with what controls it.
+ * - [on_start]: once running and before any frame, with what controls it.
  * - [info]: with {!Host_config.verbose}, the settings of the run; and when a
  *   limit of the budget is reached.
  * - [on_print], [on_print_err], [on_report]: what the program prints and
@@ -282,16 +294,14 @@ let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_i
  *   instant it did: leaving the interface, what the program sent (with the
  *   marks of the frame sent) and what the host sent from its address;
  *   arriving, what is for the program, before the firewall and the policer.
- * - [on_stream]: each stream as it closes, then those still open at the end.
- * - [on_suspicious]: with the same streams, each of their stats among
- *   {!suspicious_stats} that is not 0. *)
+ * - [on_stream]: each stream as it closes, then those still open at the end. *)
 let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         ?speed ?full_duplex ?mtu ?(linger=Clock.Interval.sec 2.) ?time_wait ?format ?args
-        ~resolver ~getenv ?extra_limits ?packet_filter
+        ~resolver ~getenv ?extra_limits
         ?(on_start=ignore) ?(info=ignore)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
         ?(on_warning=fun _ _ -> ()) ?(on_packet=fun _ _ _ -> ())
-        ?(on_stream=fun _ _ _ -> ()) ?(on_suspicious=fun _ _ _ _ -> ())
+        ?(on_stream=fun _ _ _ -> ())
         (program : Crafty_interp.program) =
     let ( let* ) = Stdlib.Result.bind in
     let refuse cond e = if cond then Error (Setup e) else Ok () in
@@ -458,16 +468,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         | Some ts -> Simulation.of_wall_clock sim ts
         | None -> instant () in
     let warn w = on_warning (instant ()) w in
-    let tell_stream what n =
-        let t = instant () in
-        on_stream t what n ;
-        List.iter (fun (name, v) ->
-            match v with
-            | Crafty_value.Int c
-              when c <> 0 && List.exists (List.mem name % snd) suspicious_stats ->
-                on_suspicious t n name c
-            | _ -> ()
-        ) (Crafty_tree.stats n) in
+    let tell_stream what n = on_stream (instant ()) what n in
     let sent = ref 0 and pkts_out = ref 0 and pkts_in = ref 0
     and bytes_out = ref 0 and bytes_in = ref 0
     and wire_pkts = ref 0 and wire_bytes = ref 0 in
@@ -588,9 +589,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
                         denied := Some (cause, bits) ;
                         h.stop ()))
             "firewall" in
-    let tell dir bits =
-        if Option.map_default (fun f -> h.matches f bits) true packet_filter then
-            on_packet dir (captured_at bits) bits in
+    let tell dir bits = on_packet dir (captured_at bits) bits in
     let before = Hub.VirtTap.make ~rev_mirror:ignore (fun _ -> incr sent)
     and after =
         Hub.VirtTap.make
@@ -662,6 +661,21 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             pcap_dropped := Pcap.dropped pcap.handler ;
             if not_captured () > !told_uncaptured then
                 Simulation.asap sim.root.power tell_uncaptured ()) in
+    let counters () =
+        { sent = !sent ; pkts_out = !pkts_out ; bytes_out = !bytes_out ;
+          pkts_in = !pkts_in ; bytes_in = !bytes_in ;
+          denied_out = !denied_out ; denied_in = !denied_in ;
+          not_injected = !not_injected ; not_captured = not_captured () ;
+          wire_pkts = !wire_pkts ; wire_bytes = !wire_bytes } in
+    let stops = Atomic.make 0 in
+    on_start
+        { stop = (fun () ->
+            if Atomic.fetch_and_add stops 1 = 0 then
+                Simulation.asap sim.root.power (fun () -> hurry := true ; h.stop ()) ()
+            else ignore (Thread.create (Simulation.stop sim) ())) ;
+          now = instant ;
+          matches = h.matches ;
+          counters } ;
     (* What leaves is what was injected, or else what the host sends, which
      * has the interface's address: *)
     let sniffer =
@@ -677,20 +691,6 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
                 incr wire_pkts ; wire_bytes := !wire_bytes + Tools.bytelength bits ;
                 h.emitted bits
             ) else after.out.write bits) in
-    let counters () =
-        { sent = !sent ; pkts_out = !pkts_out ; bytes_out = !bytes_out ;
-          pkts_in = !pkts_in ; bytes_in = !bytes_in ;
-          denied_out = !denied_out ; denied_in = !denied_in ;
-          not_injected = !not_injected ; not_captured = not_captured () ;
-          wire_pkts = !wire_pkts ; wire_bytes = !wire_bytes } in
-    let stops = Atomic.make 0 in
-    on_start
-        { stop = (fun () ->
-            if Atomic.fetch_and_add stops 1 = 0 then
-                Simulation.asap sim.root.power (fun () -> hurry := true ; h.stop ()) ()
-            else ignore (Thread.create (Simulation.stop sim) ())) ;
-          now = instant ;
-          counters } ;
     let sniffing = ref true in
     let stop_sniffing () =
         finished := true ;

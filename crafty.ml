@@ -432,20 +432,22 @@ let () =
                     "it is outside the ports that --fw keeps the host off"
                  else "keep the host off it with --fw, or give crafty \
                        an address of its own with --ip")) in
-    let on_packet dir t bits =
-        let packet = Packet.of_frame bits in
-        let summary = Packet.Pdu.Printer.oneline packet in
-        if format = Human then
-            Printf.printf "%s %.6f %s\n" (if dir = Crafty_run.Out then ">" else "<")
-                (Clock.Time.to_secs t) summary
-        else
-            emit t "packet" ~json:[ "layers", Packet.Pdu.to_json packet ]
-                [ "dir", `String (if dir = Crafty_run.Out then "out" else "in") ;
-                  "bytes", `Int (Tools.bytelength bits) ;
-                  "summary", `String summary ] in
     (* A first signal stops the program, or its lingering, and a second one
      * crafty: *)
     let control = ref None and signalled = ref false in
+    let on_packet dir t bits =
+        let wanted f = (Option.get !control).Crafty_run.matches f bits in
+        if Option.map_default wanted true print_only then (
+            let packet = Packet.of_frame bits in
+            let summary = Packet.Pdu.Printer.oneline packet in
+            if format = Human then
+                Printf.printf "%s %.6f %s\n" (if dir = Crafty_run.Out then ">" else "<")
+                    (Clock.Time.to_secs t) summary
+            else
+                emit t "packet" ~json:[ "layers", Packet.Pdu.to_json packet ]
+                    [ "dir", `String (if dir = Crafty_run.Out then "out" else "in") ;
+                      "bytes", `Int (Tools.bytelength bits) ;
+                      "summary", `String summary ]) in
     let on_start c =
         control := Some c ;
         if !signalled then c.Crafty_run.stop () in
@@ -461,7 +463,7 @@ let () =
                         ~format ~args:(Array.of_list !prog_args)
                         ~resolver:Crafty_interp.(cached system_resolver)
                         ~getenv:Crafty_interp.getenv
-                        ~extra_limits ?packet_filter:print_only
+                        ~extra_limits
                         ~on_start ~info:(info "%s") ~on_report:report
                         ~on_print:(fun t s ->
                             if format = Human then print_endline s
@@ -470,9 +472,10 @@ let () =
                         ~on_warning
                         ?on_packet:(if !print_packets then Some on_packet else None)
                         ~on_stream:(fun t what n ->
-                            print_stats t (if what = `Closed then "closed" else "open") n)
-                        ~on_suspicious:(fun _ _ name c ->
-                            Hashtbl.modify_def 0 name ((+) c) suspicious)
+                            print_stats t (if what = `Closed then "closed" else "open") n ;
+                            List.iter (fun (name, c) ->
+                                Hashtbl.modify_def 0 name ((+) c) suspicious)
+                                (Crafty_run.suspicious n))
                         program)) in
     let o = match res with Ok o -> o | Error e -> failed e in
     let c = o.counters in
