@@ -50,6 +50,7 @@ LIB_SOURCES  = \
 	crafty_typing.ml \
 	crafty_tree.ml \
 	crafty_interp.ml \
+	crafty_manual.ml \
 	sockopt.ml \
 	hub.ml \
 	policer.ml \
@@ -113,8 +114,7 @@ C_SOURCES = \
 	clock_wrap.c \
 	privileges_wrap.c
 
-SOURCES = $(LIB_SOURCES) $(EXAMPLE_SOURCES) $(TEST_SOURCES) robinet.ml \
-          crafty_manual.ml crafty.ml
+SOURCES = $(LIB_SOURCES) $(EXAMPLE_SOURCES) $(TEST_SOURCES) robinet.ml crafty.ml
 
 CLIB_SHORT = robinetext
 CLIB = lib$(CLIB_SHORT).a
@@ -288,7 +288,7 @@ robinet: robinet.opt
 	   echo "sudo setcap cap_net_raw,cap_net_admin=ep $@" ;\
 	 fi
 
-crafty.opt: $(XARCHIVE) crafty_manual.cmx crafty.cmx
+crafty.opt: $(XARCHIVE) crafty.cmx
 	$(OCAMLOPT) -o $@ -I . -linkpkg -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $^
 
 # The sections of docs/crafty.md, for `crafty --help', `--reference' and
