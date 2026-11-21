@@ -233,6 +233,11 @@ let constant =
 let function_name =
     identifier >>= fun s -> if is_in functions s then return s else fail
 
+(* What may start an argument after a space, but a parenthesis: *)
+let arg_start =
+    (char_if "" (fun c -> is_digit c || String.contains "\"#[" c) >>: ignore) |||
+    (identifier >>= fun s -> if is_keyword s then fail else return ())
+
 (* A name right before a parenthesis, which only a function, a layer or a
  * constructor can be, but is neither, refused once [args] are read (so that
  * the rejection is found further than what other readings expect): *)
@@ -756,6 +761,11 @@ let make_expr ~cond ~self ~expr ~pattern ~patterns ~block ~stmt =
         (here ++ function_name ++ args expr >>:
             fun ((loc, f), args) -> { loc ; desc = Call (f, args) }) |||
         unknown_function (args expr) |||
+        (* A call without parentheses, refused past the start of its argument,
+         * further than where the statement could end: *)
+        (here ++ function_name +- char_if "space" (fun c -> c = ' ' || c = '\t') +- sp +-
+         arg_start >>: fun (loc, f) ->
+            reject_at loc "%s needs parentheses around its arguments: %s(...)" f f) |||
         (* Without arguments, a function name is a field in a condition: *)
         (here ++ (function_name +- nay (sp -- item '(')) >>:
             fun (loc, n) -> { loc ; desc = Var n }) |||
@@ -1398,6 +1408,10 @@ let parse_patterns text =
     (reads "/IP/UDP/Raw(\"a\")\n{\n}\n/IP/UDP/Raw(\"b\") {\n  x = 1\n}")
   "line 1, column 12: Expected end of statement (';' or new line)" (reads "print(\"a\") print(\"b\")")
   "line 1, column 7: Expected end of statement (';' or new line)" (reads "x = 1 2")
+  "line 1, column 1: print needs parentheses around its arguments: print(...)" (reads "print \"hello\"")
+  "line 1, column 1: print needs parentheses around its arguments: print(...)" (reads "print x")
+  "line 1, column 5: length needs parentheses around its arguments: length(...)" (reads "x = length #00")
+  "line 1, column 11: print needs parentheses around its arguments: print(...)" (reads "if true { print [1] }")
   "line 1, column 14: Expected end of statement (';' or new line) in block" (reads "if x { y = 1 2 }")
   "line 1, column 5: Expected expression in statement" (reads "x = ")
   "line 1, column 8: Expected expression in statement" (reads "x = 1 +")

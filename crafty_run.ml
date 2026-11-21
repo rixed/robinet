@@ -41,7 +41,7 @@ open Batteries
 module EthSpeed = SimTypes.EthSpeed
 
 type error =
-    (* Nothing was changed on the host: *)
+    (* The host is as it was, nothing or all of it undone: *)
     | Setup of string
     (* The program would send what its permissions deny: *)
     | Denied of Crafty_parser.error list
@@ -82,6 +82,13 @@ let needs_net_admin ifname =
 
 let cannot_configure ifname e =
     Printf.sprintf "Cannot configure %s: %s" ifname (Printexc.to_string e)
+
+let cannot_capture ifname e =
+    if String.exists e "not permitted" then
+        Printf.sprintf "Capturing on interface %s takes root or cap_net_raw (%s); \
+                        have you tried under sudo, or given crafty its capabilities \
+                        with setcap cap_net_raw,cap_net_admin=ep?" ifname e
+    else Printf.sprintf "Cannot capture on interface %s: %s" ifname e
 
 (** The stats of streams that tell what may go unnoticed, by what they tell: *)
 let suspicious_stats =
@@ -422,21 +429,23 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             with e ->
                 Host_config.undo t ;
                 Error (Configure (cannot_configure ifname e))) in
-    Ok (Fun.protect ~finally:(fun () -> Option.may Host_config.undo changes) (fun () ->
+    Fun.protect ~finally:(fun () -> Option.may Host_config.undo changes) (fun () ->
     (* The simulation: the program, a firewall, a policer and the interface.
      * What is sent is injected through a handle that captures nothing, so
      * that the other one, capturing either way, sees it leave, before
      * whatever it causes comes back: *)
     let sim = Simulation.make "crafty" in
     let open_iface ?blocking ~direction ~filter () =
-        Pcap.open_iface ~widget:(Widget.make ~parent:sim.root ifname)
-            ~promisc ~direction ~caplen:(Pcap.caplen_of_mtu mtu)
-            ?blocking ~filter ifname in
+        try
+            Ok (Pcap.open_iface ~widget:(Widget.make ~parent:sim.root ifname)
+                    ~promisc ~direction ~caplen:(Pcap.caplen_of_mtu mtu)
+                    ?blocking ~filter ifname)
+        with Failure e -> Error (Setup (cannot_capture ifname e)) in
     (* Blocking, so that the program sends no faster than the kernel takes: *)
-    let injector =
+    let* injector =
         open_iface ~blocking:true ~direction:Pcap.Out ~filter:"less 0" () in
     Fun.protect ~finally:(fun () -> Pcap.close_iface injector) (fun () ->
-    let pcap =
+    let* pcap =
         open_iface ~direction:Pcap.InOut
             ~filter:(Host_config.pcap_filter ?ip:(if promisc then None else own_ip) ports) () in
     Fun.protect ~finally:(fun () -> Pcap.close_iface pcap) (fun () ->
@@ -696,7 +705,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     stop_sniffing () ;
     pcap_dropped := Pcap.dropped pcap.handler ;
     tell_uncaptured () ;
-    { status = !status ; limit = !limit ; denied = !denied ;
-      stopped = Atomic.get stops > 0 ; over_ram = h.over_ram () ;
-      duration = Clock.Time.to_interval (instant ()) ;
-      counters = counters () }))))))
+    Ok { status = !status ; limit = !limit ; denied = !denied ;
+         stopped = Atomic.get stops > 0 ; over_ram = h.over_ram () ;
+         duration = Clock.Time.to_interval (instant ()) ;
+         counters = counters () })))))
