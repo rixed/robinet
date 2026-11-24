@@ -256,6 +256,32 @@ let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_i
             Crafty_typing.resolve_permissions ~program:program.limits.permissions
                                               ~cli:extra_limits.permissions })
 
+(** The interface through which the kernel routes the destinations [program]
+ * sends to that are known before it runs, as {!run} computes them, if there
+ * are any; or which go through which interface, if not all through the same.
+ * Link-local addresses, and those the kernel does not route away, are not
+ * counted. *)
+let route_ifname ?(args=[||]) ~resolver ~getenv (program : Crafty_interp.program) =
+    let body = Crafty_interp.Partial.block ~getenv ~args ~resolver program.body in
+    let routes =
+        Crafty_typing.destinations body |>
+        List.filter_map (fun dst ->
+            if Ip.Addr.is_v6 dst && Ip.Addr.is_link_local dst then None else
+            match Kernel_route.lookup dst with
+            | Ok { kind = Unicast | Broadcast | Multicast ; ifname ; _ } -> Some (ifname, dst)
+            | _ -> None) |>
+        (* The first destination through each interface: *)
+        List.fold_left (fun acc (i, d) ->
+            if List.mem_assoc i acc then acc else (i, d) :: acc) [] |>
+        List.rev in
+    match routes with
+    | [] -> Ok None
+    | [ ifname, _ ] -> Ok (Some ifname)
+    | routes ->
+        Error (Printf.sprintf "The kernel routes %s"
+            (String.concat ", " (List.map (fun (i, d) ->
+                Ip.Addr.to_dotted_string d ^" through "^ i) routes)))
+
 (** Run [program] on [iface], with its {!effective_limits} given [extra_limits], and
  * return how it went, once it is over and what it changed on the host undone;
  * or why it did not run.

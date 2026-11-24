@@ -152,7 +152,9 @@ let () =
                 Arg.current := Array.length Sys.argv - 1)) in
     (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
     specs := Arg.align [
-        "-i", Arg.Set_string ifname, "IFACE the interface to use (default: that of the default route)" ;
+        "-i", Arg.Set_string ifname,
+            "IFACE the interface to use (default: the one the kernel routes the \
+             program's destinations through, else that of the default route)" ;
         "--routing",
             Arg.Symbol ([ "kernel" ; "manual" ], fun s -> routing := Some (s = "kernel")),
             " ask the kernel for each packet's route (default, on Linux), or use the \
@@ -346,10 +348,20 @@ let () =
             die "--routing kernel works only on Linux."
         | Some r -> r
         | None -> Kernel_route.available () in
-    (* Without -i, the kernel may route through another interface: *)
+    let args = Array.of_list !prog_args
+    and resolver = Crafty_interp.(cached system_resolver) in
+    (* Without -i, the interface the kernel routes the program's destinations
+     * through, else that of the default route; the kernel may still route
+     * what is known only at run time through another one: *)
     let any_iface = !ifname = "" in
     if any_iface then (
-        match Host_config.default_ifname () with
+        let routed =
+            if not kernel_routing then None else
+            match Crafty_run.route_ifname ~args ~resolver ~getenv:Crafty_interp.getenv
+                                          program with
+            | Ok i -> i
+            | Error e -> die "%s: give the interface (-i)." e in
+        match if routed = None then Host_config.default_ifname () else routed with
         | Some i -> ifname := i
         | None -> die "No default route: give the interface (-i).") ;
     if !fw && limits.ports = None then die "--fw needs ports (--tcp, --udp, or PORTS)." ;
@@ -460,8 +472,7 @@ let () =
                 (fun () ->
                     Crafty_run.run iface ?own_ip:!own_ip ~fw:!fw ~kernel_routing ~any_iface
                         ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger ?time_wait:!time_wait
-                        ~format ~args:(Array.of_list !prog_args)
-                        ~resolver:Crafty_interp.(cached system_resolver)
+                        ~format ~args ~resolver
                         ~getenv:Crafty_interp.getenv
                         ~extra_limits
                         ~on_start ~info:(info "%s") ~on_report:report

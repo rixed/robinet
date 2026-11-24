@@ -3072,6 +3072,22 @@ let denied_literals ~local ~remote ~mac (b : block) =
         | _ -> ()) b ;
     in_order !errors
 
+(** The destination addresses written as literals in what [b] sends, in the
+ * order of the source. *)
+let destinations (b : block) =
+    let dsts = ref [] in
+    let layer l =
+        if not l.layer.L.quoted then
+            List.iter (fun (i, e) ->
+                match l.layer.L.name, l.layer.L.fields.(i).L.name, e.desc with
+                | (A.Layer_name.IP | IP6), "dst", Lit (A.Ip a) -> dsts := a :: !dsts
+                | _ -> ()) l.options in
+    iter_stmts (fun s ->
+        match s.stmt with
+        | Stack { layers ; _ } | Send { layers ; _ } -> List.iter layer layers
+        | _ -> ()) b ;
+    List.rev !dsts
+
 (* What a message carries, which is the payload of the packet: its bytes and
  * strings, and what holds them, rather than its numbers: *)
 let is_payload (l : L.layer) (f : L.field) =

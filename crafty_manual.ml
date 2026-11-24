@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 c997349532cfad866a3fc20088cefa3a) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 c21ce9c95b5af40af4b9813ef57ccac4) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -181,9 +181,9 @@ argument, and `--` ends the options.
 Options:
 
 -   `-e PROG`: the program itself, rather than a file.
--   `-i IFACE`: the interface to send from and capture on, rather than that of
-    the default route. Crafty needs root, or
-    `setcap cap_net_raw,cap_net_admin=ep`.
+-   `-i IFACE`: the interface to send from and capture on, rather than the one
+    the kernel routes the program's destinations through (else that of the
+    default route). Crafty needs root, or `setcap cap_net_raw,cap_net_admin=ep`.
 -   `--routing kernel|manual`: `kernel` (default) uses kernel routes. `manual`
     takes gateway from the interface and then does ARP etc.
 -   `--tcp LO-HI`, `--udp LO-HI` (repeatable): the ranges to pick source ports
