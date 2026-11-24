@@ -257,14 +257,13 @@ let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_i
                                               ~cli:extra_limits.permissions })
 
 (** The interface through which the kernel routes the destinations [program]
- * sends to that are known before it runs, as {!run} computes them, if there
- * are any; or which go through which interface, if not all through the same.
- * Link-local addresses, and those the kernel does not route away, are not
- * counted. *)
-let route_ifname ?(args=[||]) ~resolver ~getenv (program : Crafty_interp.program) =
-    let body = Crafty_interp.Partial.block ~getenv ~args ~resolver program.body in
+ * sends to that are literals, as {!Crafty_interp.Partial.block} makes them,
+ * if there are any; or which go through which interface, if not all through
+ * the same. Link-local addresses, and those the kernel does not route away,
+ * are not counted. *)
+let route_ifname (program : Crafty_interp.program) =
     let routes =
-        Crafty_typing.destinations body |>
+        Crafty_typing.destinations program.body |>
         List.filter_map (fun dst ->
             if Ip.Addr.is_v6 dst && Ip.Addr.is_link_local dst then None else
             match Kernel_route.lookup dst with
@@ -282,7 +281,8 @@ let route_ifname ?(args=[||]) ~resolver ~getenv (program : Crafty_interp.program
             (String.concat ", " (List.map (fun (i, d) ->
                 Ip.Addr.to_dotted_string d ^" through "^ i) routes)))
 
-(** Run [program] on [iface], with its {!effective_limits} given [extra_limits], and
+(** Run [program], as {!Crafty_interp.Partial.block} may have made it, on
+ * [iface], with its {!effective_limits} given [extra_limits], and
  * return how it went, once it is over and what it changed on the host undone;
  * or why it did not run.
  *
@@ -304,7 +304,7 @@ let route_ifname ?(args=[||]) ~resolver ~getenv (program : Crafty_interp.program
  *   went away (default: none).
  * - [format]: what [format()] writes.
  * - [args], [resolver], [getenv]: for [arg()], [resolve()] and [hostname()],
- *   and [getenv()]; asked before the run for what is known then.
+ *   and [getenv()].
  *
  * The callbacks are given the instant of the simulation. They run in its
  * thread, under its lock, and must neither take long nor stop it otherwise
@@ -348,12 +348,6 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         match Crafty_typing.exfiltrations program.body with
         | [] -> Ok ()
         | es -> Error (Denied es) in
-    (* Not before: what [getenv()] reads would no longer taint. Computed
-     * addresses are then literals, which the permissions check: *)
-    let program =
-        let body =
-            Crafty_interp.Partial.block ~getenv ~args:(args |? [||]) ~resolver program.body in
-        Crafty_interp.{ program with body } in
     let* kernel_routing =
         match kernel_routing with
         | Some true when not (Kernel_route.available ()) ->

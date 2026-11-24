@@ -319,18 +319,22 @@ let () =
             | Error e ->
                 Printf.eprintf "-p: %s\n" (IO.to_string Crafty_interp.print_error e) ;
                 exit 2) !print_only in
+    let args = Array.of_list !prog_args
+    and resolver = Crafty_interp.(cached system_resolver) in
+    (* With what is known before the run computed, resolving no name when only
+     * checking. Computed addresses are then literals, which the permissions
+     * check: *)
+    let program =
+        let body =
+            Crafty_interp.Partial.block ~getenv:Crafty_interp.getenv ~args
+                ?resolver:(if !check then None else Some resolver) program.body in
+        Crafty_interp.{ program with body } in
     if !check then (
         (* Unless allowed, nothing received is sent: *)
         if not (limits.permissions.exfiltration |? false) then (
             match Crafty_typing.exfiltrations program.body with
             | [] -> ()
             | es -> fail es) ;
-        (* Not before: what [getenv()] reads would no longer taint. *)
-        let program =
-            let body =
-                Crafty_interp.Partial.block ~getenv:Crafty_interp.getenv
-                    ~args:(Array.of_list !prog_args) program.body in
-            Crafty_interp.{ program with body } in
         (* Without the interface, rules about its addresses are not checked: *)
         let known rs =
             let rs = Option.default [] rs in
@@ -348,8 +352,6 @@ let () =
             die "--routing kernel works only on Linux."
         | Some r -> r
         | None -> Kernel_route.available () in
-    let args = Array.of_list !prog_args
-    and resolver = Crafty_interp.(cached system_resolver) in
     (* Without -i, the interface the kernel routes the program's destinations
      * through, else that of the default route; the kernel may still route
      * what is known only at run time through another one: *)
@@ -357,8 +359,7 @@ let () =
     if any_iface then (
         let routed =
             if not kernel_routing then None else
-            match Crafty_run.route_ifname ~args ~resolver ~getenv:Crafty_interp.getenv
-                                          program with
+            match Crafty_run.route_ifname program with
             | Ok i -> i
             | Error e -> die "%s: give the interface (-i)." e in
         match if routed = None then Host_config.default_ifname () else routed with
