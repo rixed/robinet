@@ -278,7 +278,7 @@ let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_i
  *   went away (default: none).
  * - [format]: what [format()] writes.
  * - [args], [resolver], [getenv]: for [arg()], [resolve()] and [hostname()],
- *   and [getenv()].
+ *   and [getenv()]; asked before the run for what is known then.
  *
  * The callbacks are given the instant of the simulation. They run in its
  * thread, under its lock, and must neither take long nor stop it otherwise
@@ -325,7 +325,8 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     (* Not before: what [getenv()] reads would no longer taint. Computed
      * addresses are then literals, which the permissions check: *)
     let program =
-        let body = Crafty_interp.Partial.block ~getenv ~args:(args |? [||]) program.body in
+        let body =
+            Crafty_interp.Partial.block ~getenv ~args:(args |? [||]) ~resolver program.body in
         Crafty_interp.{ program with body } in
     let* kernel_routing =
         match kernel_routing with

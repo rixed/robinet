@@ -285,7 +285,8 @@ let getenv name =
 
 (** How [resolve()] and [hostname()] find what they return: the addresses of
  * a name, IPv4 first, and the name of an address. Asked from the thread of
- * the simulation, which waits for the answer. *)
+ * the simulation, which waits for the answer, or before the run by
+ * {!Partial.block}. *)
 type resolver =
     { resolve : string -> Ip.Addr.t list ;
       hostname : Ip.Addr.t -> string option }
@@ -1686,14 +1687,14 @@ struct
     let unused _ = raise Not_folded
 
     (* What an expression is computed with, before the run: *)
-    let output ?getenv ?args () =
+    let output ?getenv ?args ?resolver () =
         let read = Option.default unused getenv
-        and prog_args = Option.default [||] args in
+        and prog_args = Option.default [||] args
+        and resolver = Option.default { resolve = unused ; hostname = unused } resolver in
         { print = unused ; print_err = unused ; now = unused ; instant = unused ;
             format = Human ; report = (fun _ _ _ _ -> raise Not_folded) ;
             check_words = (fun _ n -> if n > max_words then raise Not_folded) ;
-            prog_args ; resolver = { resolve = unused ; hostname = unused } ;
-            getenv = read }
+            prog_args ; resolver ; getenv = read }
 
     let env =
         { vars = Env.empty ; stack = [] ; tree = None ;
@@ -1705,11 +1706,12 @@ struct
         with Not_folded | No_tree | Runtime_error _ | Invalid_argument _ | Failure _
            | Division_by_zero -> None
 
-    (** [b] with what can be computed before running it computed; with [getenv]
-     * and [args], those of the run. Shares nothing with [b], so that it can be
-     * run alongside. *)
-    let block ?getenv ?args (b : T.block) =
-        let value = value (output ?getenv ?args ()) in
+    (** [b] with what can be computed before running it computed; with [getenv],
+     * [args] and [resolver], those of the run. What [resolver] tells is taken
+     * for the whole run, wherever the program asks it, even in code that does
+     * not run. Shares nothing with [b], so that it can be run alongside. *)
+    let block ?getenv ?args ?resolver (b : T.block) =
+        let value = value (output ?getenv ?args ?resolver ()) in
         let assigned = Hashtbl.create 7 in
         T.iter_stmts (fun s ->
             match s.stmt with
@@ -1720,6 +1722,7 @@ struct
         let computable = function
             | T.Getenv -> getenv <> None
             | T.Arg | T.Nargs -> args <> None
+            | T.Resolve | T.Hostname -> resolver <> None
             | T.Format -> false
             | b -> T.is_pure b in
         (* Whether [e] is made of values, computable builtins and the variables
@@ -1867,22 +1870,27 @@ struct
         b
 
     (** [s], as [block] makes it. *)
-    let stmt ?getenv ?args s =
-        match block ?getenv ?args [ s ] with
+    let stmt ?getenv ?args ?resolver s =
+        match block ?getenv ?args ?resolver [ s ] with
         | [ s ] -> s
         | _ -> assert false
 end
 
-(* [folded ?env ?args text] are the top level declarations of that program
- * once partially evaluated, with their values if computed, and the names of
- * the variables of the environment it still reads: *)
+(* [folded ?env ?args ?resolver text] are the top level declarations of that
+ * program once partially evaluated, with their values if computed, and the
+ * names of the variables of the environment it still reads. [resolver] knows
+ * only a, at 10.0.0.1: *)
 (*$inject
-  let folded ?env ?args text =
+  let resolver =
+      let a = Ip.Addr.of_string "10.0.0.1" in
+      Crafty_interp.{ resolve = (function "a" -> [ a ] | _ -> []) ;
+                      hostname = (fun ip -> if Ip.Addr.compare ip a = 0 then Some "a" else None) }
+  let folded ?env ?args ?resolver text =
       match Crafty_interp.compile text with
       | Error es -> String.concat "\n" (List.map (IO.to_string Crafty_interp.print_error) es)
       | Ok p ->
           let getenv = Option.map (fun env n -> List.assoc_opt n env) env in
-          let b = Crafty_interp.Partial.block ?getenv ?args p.body in
+          let b = Crafty_interp.Partial.block ?getenv ?args ?resolver p.body in
           let decls =
               List.filter_map (fun (s : Crafty_typing.stmt) ->
                   match s.stmt with
@@ -1921,6 +1929,9 @@ end
   "x=_ y=_ $A $?" (folded "x = getenv(\"A\")\ny = getenv(x)")
   "x=_ y=_ $A $B" (folded "x = getenv(\"A\")\ny = \"${1 + 1}${x}\" + getenv(\"B\")")
   "x=_" (folded "x = rand(3) + 1 * 2")
+  "x=_" (folded "x = resolve(\"a\")")
+  "x=[10.0.0.1] y=a" (folded ~resolver "x = resolve(\"a\")\ny = hostname(x[0])")
+  "x=_ y=b" (folded ~resolver "x = resolve(\"b\")\ny = hostname(10.0.0.2, default=\"b\")")
 *)
 
 (* [both text] is what that program prints, then what it prints once
