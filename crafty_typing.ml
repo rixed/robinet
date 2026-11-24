@@ -55,9 +55,16 @@ type builtin =
     | Any | All
     | Print | Print_err | Format | Assert | Stats | Summary | Report
 
-(* [tainted]: made of the environment or of what was received, which
- * {!exfiltrations} cannot tell from [desc] alone, as after folding: *)
-type expr = { loc : A.location ; typ : Type.t ; mutable desc : desc ; tainted : bool }
+(** What a value is made of, or depends on, that it may not send: *)
+type source =
+    (* That variable of the environment, if its name is known: *)
+    | Env of string option
+    (* What was received, from that address if known: *)
+    | Received of Ip.Addr.t option
+
+(* [taint]: the sources of what [desc] was computed from, which
+ * {!exfiltrations} cannot tell from it once folded: *)
+type expr = { loc : A.location ; typ : Type.t ; mutable desc : desc ; taint : source list }
 
 and desc =
     | Lit of A.literal
@@ -691,7 +698,8 @@ let rule_type = Type.Variant [ "Accept", Type.Cidr ; "Deny", Type.Cidr ]
 
 let permissions_type =
     record_type Type.[ "local_ips", Array rule_type ; "remote_ips", Array rule_type ;
-                       "mac_spoofing", Bool ; "exfiltration", Bool ; "promiscuous", Bool ]
+                       "mac_spoofing", Bool ; "exfiltration", Bool ; "promiscuous", Bool ;
+                       "public_env", Array String ]
 
 (* Bound to their values in the program as it runs: *)
 let budget_var = new_var "BUDGET" budget_type
@@ -723,7 +731,9 @@ and permissions =
       remote_ips : rule list option ;
       mac_spoofing : bool option ;
       exfiltration : bool option ;
-      promiscuous : bool option }
+      promiscuous : bool option ;
+      (* The variables of the environment that may be sent: *)
+      public_env : string list option }
 
 (* The addresses a rule is about, which for [Own_ip] and [Own_ips] the program
  * learns only once it runs: *)
@@ -742,7 +752,7 @@ let address_rules ~own =
 
 let no_permissions =
     { local_ips = None ; remote_ips = None ; mac_spoofing = None ;
-      exfiltration = None ; promiscuous = None }
+      exfiltration = None ; promiscuous = None ; public_env = None }
 
 let no_limits = { budget = [] ; ports = None ; permissions = no_permissions }
 
@@ -805,12 +815,19 @@ let port_ranges name _typ (e : A.expr) =
         merge_ranges
     | _ -> error e.loc "PORTS.%s is an array of ports and ranges [first, last]" name
 
-type permission = Rules of rule list | Flag of bool
+type permission = Rules of rule list | Flag of bool | Names of string list
 
 let permission_literal name typ (e : A.expr) =
     match typ, e.desc with
     | Type.Bool, A.Lit (A.Bool b) -> Flag b
     | Type.Bool, _ -> error e.loc "PERMISSIONS.%s must be true or false" name
+    | Type.Array Type.String, A.Array ns ->
+        Names (List.map (fun (n : A.expr) ->
+            match n.desc with
+            | A.String [ A.Text n ] -> n
+            | _ -> error n.loc "PERMISSIONS.%s is an array of literal strings" name) ns)
+    | Type.Array Type.String, _ ->
+        error e.loc "PERMISSIONS.%s is an array of literal strings" name
     | _, A.Array rs ->
         Rules (List.map (fun (r : A.expr) ->
             let addresses (e : A.expr) =
@@ -854,13 +871,17 @@ let limits_of errors decls =
                             | Some (Rules r) -> Some r | _ -> None
                         and flag k =
                             match List.assoc_opt k ps with
-                            | Some (Flag b) -> Some b | _ -> None in
+                            | Some (Flag b) -> Some b | _ -> None
+                        and names k =
+                            match List.assoc_opt k ps with
+                            | Some (Names n) -> Some n | _ -> None in
                         { limits with permissions = {
                             local_ips = rules "local_ips" ;
                             remote_ips = rules "remote_ips" ;
                             mac_spoofing = flag "mac_spoofing" ;
                             exfiltration = flag "exfiltration" ;
-                            promiscuous = flag "promiscuous" } }
+                            promiscuous = flag "promiscuous" ;
+                            public_env = names "public_env" } }
                     else (
                         let ranges = literal_fields n [ "tcp", Type.Void ; "udp", Type.Void ]
                                                     port_ranges e in
@@ -925,7 +946,7 @@ let combine ~program:a ~cli:b =
 (** The permissions a program runs with, all set: the [cli]'s rules before the
  * [program]'s, or before the defaults where it sets none: accepting any remote
  * address; local rules always end accepting its own addresses; the [cli]'s
- * flags over the [program]'s, false by default. *)
+ * flags and [public_env] over the [program]'s, false and none by default. *)
 let resolve_permissions ~program ~cli =
     let rules cli prog default = Some ((cli |? []) @ (prog |? default))
     and flag cli prog = Some (cli |? (prog |? false)) in
@@ -937,7 +958,8 @@ let resolve_permissions ~program ~cli =
                                    Firewall.accept_all_addresses) ;
       mac_spoofing = flag cli.mac_spoofing program.mac_spoofing ;
       exfiltration = flag cli.exfiltration program.exfiltration ;
-      promiscuous = flag cli.promiscuous program.promiscuous }
+      promiscuous = flag cli.promiscuous program.promiscuous ;
+      public_env = Some (cli.public_env |? (program.public_env |? [])) }
 
 (*$T resolve_permissions
   let cidr s = Addresses (Firewall.cidr_of_string s) in \
@@ -949,12 +971,14 @@ let resolve_permissions ~program ~cli =
                                exfiltration = Some false } = \
     { local_ips = Some [ Firewall.Deny, cidr "10.0.0.2" ; Firewall.Accept, Own_ips ] ; \
       remote_ips = Some [ Firewall.Deny, cidr "10.0.0.1" ; Firewall.Accept, cidr "10.0.0.0/8" ] ; \
-      mac_spoofing = Some true ; exfiltration = Some false ; promiscuous = Some false }
+      mac_spoofing = Some true ; exfiltration = Some false ; promiscuous = Some false ; \
+      public_env = Some [] }
   let cidr s = Addresses (Firewall.cidr_of_string s) in \
   resolve_permissions ~program:no_permissions ~cli:no_permissions = \
     { local_ips = Some [ Firewall.Accept, Own_ips ] ; \
       remote_ips = Some [ Firewall.Accept, cidr "0.0.0.0/0" ; Firewall.Accept, cidr "::/0" ] ; \
-      mac_spoofing = Some false ; exfiltration = Some false ; promiscuous = Some false }
+      mac_spoofing = Some false ; exfiltration = Some false ; promiscuous = Some false ; \
+      public_env = Some [] }
 *)
 (*$T address_rules
   address_rules ~own:[ Ip.Addr.of_string "10.0.0.1" ; Ip.Addr.of_string "::1" ] \
@@ -1544,8 +1568,8 @@ let numeric t = t = Type.Int || t = Type.Float
  * {!unknown_items}) taking the type of the other: *)
 let array_join f loc x y =
     let mk x y = Some { loc ; typ = (if f = Prepend then y else x).typ ;
-                        desc = Call (f, [ x ; y ]) ; tainted = false } in
-    let mk_typ typ = Some { loc ; typ ; desc = Call (f, [ x ; y ]) ; tainted = false } in
+                        desc = Call (f, [ x ; y ]) ; taint = [] } in
+    let mk_typ typ = Some { loc ; typ ; desc = Call (f, [ x ; y ]) ; taint = [] } in
     match f, x.typ, y.typ with
     | Concat, Type.Array Type.Void, Type.Array _ -> mk_typ y.typ
     | Concat, Type.Array _, Type.Array Type.Void -> mk_typ x.typ
@@ -1565,7 +1589,7 @@ let map_call f loc typ m k =
     match m.typ with
     | Type.Map (kt, _) ->
         (match coerce k kt with
-        | Some k -> { loc ; typ ; desc = Call (f, [ m ; k ]) ; tainted = false }
+        | Some k -> { loc ; typ ; desc = Call (f, [ m ; k ]) ; taint = [] }
         | None -> error k.loc "The keys of %s are not %s" (a_type m.typ) (a_type k.typ))
     | _ -> assert false
 
@@ -1672,7 +1696,7 @@ let narrow (t : Type.t) cs =
  * a block, [if] or [case] is that of a statement: void. *)
 let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
     let loc = e.loc in
-    let mk typ desc = { loc ; typ ; desc ; tainted = false } in
+    let mk typ desc = { loc ; typ ; desc ; taint = [] } in
     (* Where the branches of a block, an [if] or a [case] are typed: *)
     let inner = if tail then env else { env with may_wait = false } in
     let branch ?(env=inner) b = block_value ?expected ~used env.errors env b in
@@ -1890,7 +1914,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 | Type.Float -> A.Float 0.
                 | Type.Interval -> A.Interval Clock.Interval.zero
                 | _ -> A.Int 0 in
-            mk t (Call (Sum, [ a ; { loc ; typ = t ; desc = Lit zero ; tainted = false } ]))
+            mk t (Call (Sum, [ a ; { loc ; typ = t ; desc = Lit zero ; taint = [] } ]))
         | Word (size, _) as b, [ x ], t ->
             Option.may (fun i ->
                 if not (A.word_fits size i) then
@@ -2150,7 +2174,7 @@ and no_constructor env e =
     | _ -> ()
 
 and var env loc name =
-    let mk typ desc = { loc ; typ ; desc ; tainted = false } in
+    let mk typ desc = { loc ; typ ; desc ; taint = [] } in
     let as_var () =
         let v = lookup_var env loc name in
         if not (Hashtbl.mem env.reads v.id) then Hashtbl.add env.reads v.id loc ;
@@ -2217,7 +2241,7 @@ and layer_field env loc path absolute f =
                 error loc "%s cannot be read in a %s %s%s" fd.name
                     (L.string_of_mode mode) (L.to_string l)
                     (other_mode_hint l mode fd.read_in) ;
-            { loc ; typ = fd.typ ; desc = Packet_field { layer ; field = i } ; tainted = false }
+            { loc ; typ = fd.typ ; desc = Packet_field { layer ; field = i } ; taint = [] }
 
 (* The function, its arguments in the order of its parameters, and the type
  * of its result: *)
@@ -2297,12 +2321,12 @@ and call ?expected env loc f args =
                         p.pname fname p.descr (a_type e.typ))
             | exception Not_found ->
                 (match p.default with
-                | Some (Literal l) -> Some { loc ; typ = type_of_literal l ; desc = Lit l ; tainted = false }
+                | Some (Literal l) -> Some { loc ; typ = type_of_literal l ; desc = Lit l ; taint = [] }
                 | Some (Quote (text, quoted)) ->
                     let (a : A.arg) = List.assoc quoted named in
                     Some { loc ; typ = Type.String ;
                            desc = String [ Text (text ^ IO.to_string A.print_bare_expr a.value) ] ;
-                           tainted = false }
+                           taint = [] }
                 | Some Omitted -> None
                 | None -> error loc "%s needs an argument %s" fname p.pname)
         ) params in
@@ -2317,7 +2341,7 @@ and binop env loc op a b =
             let a = expr env a in
             a, expr ?expected:(if is_empty_array b then empty_next_to a.typ else None)
                     env b in
-    let mk typ desc = { loc ; typ ; desc ; tainted = false } in
+    let mk typ desc = { loc ; typ ; desc ; taint = [] } in
     let sym = A.string_of_binop op in
     let cannot () =
         no_constructor env a ; no_constructor env b ;
@@ -2560,9 +2584,9 @@ and pattern env (p : A.pattern) =
                             { loc = c.loc ; typ = f.typ ;
                               desc = Packet_field { layer = Array.length ctx.below ;
                                                     field = i } ;
-                              tainted = false } in
+                              taint = [] } in
                         { loc = c.loc ; typ = Type.Bool ; desc = Binop (A.Eq, field, c) ;
-                          tainted = false }
+                          taint = [] }
                     | t, _ ->
                         error c.loc "The condition on %s must be a bool, not %s"
                             (L.to_string l) (a_type t)
@@ -3101,133 +3125,281 @@ let is_payload (l : L.layer) (f : L.field) =
     | Type.Bool | Type.Byte | Type.Int | Type.Float -> false
     | _ -> true
 
-(** Whether an expression of [b] is made of what [b] received or read from
- * the environment: the payload fields of what [MATCH] matched, [getenv] and
- * the expressions [tainted] taint what they are copied, assigned or computed
- * into, whichever the order of the statements. *)
-let taints_of (b : block) =
-    (* The variables that hold received packets or their layers, and those
-     * that hold what their payloads made: *)
+(* [a] and those of [b] it lacks: *)
+let union a b = List.fold_left (fun acc x -> if List.mem x acc then acc else acc @ [ x ]) a b
+
+(* Those of the environment, which are all that a condition taints what it
+ * decides of with: *)
+let env_sources = List.filter (function Env _ -> true | Received _ -> false)
+
+(* The layers of a stack, bottom first, and the options they are given: *)
+type stack = (L.layer * (int * expr) list) list
+
+(* The stack made of the [depth] first layers of [stack] and [layers], the
+ * first [overlay] of which take the options of those of [stack] they are
+ * over unless they give them: *)
+let stack_of (stack : stack) ~depth ~overlay layers : stack =
+    let over = List.drop depth stack in
+    List.take depth stack @
+    List.mapi (fun k l ->
+        match List.drop k over with
+        | (_, opts) :: _ when k < overlay ->
+            l.layer, l.options @ List.filter (fun (i, _) -> not (List.mem_assoc i l.options)) opts
+        | _ -> l.layer, l.options) layers
+
+(* The position of the first IP layer of [stack] that is not quoted, and its
+ * destination if literal: *)
+let ip_dst (stack : stack) =
+    let rec loop i = function
+        | [] -> None
+        | (l, opts) :: rest ->
+            if (l.L.name = A.Layer_name.IP || l.L.name = IP6) && not l.L.quoted then
+                Some (i, List.find_map_opt (fun (f, e) ->
+                    match e.desc with
+                    | Lit (A.Ip a) when l.L.fields.(f).L.name = "dst" -> Some a
+                    | _ -> None) opts)
+            else loop (i + 1) rest in
+    loop 0 stack
+
+(* The address that the packets [p] matches in [stack] come from, if known:
+ * the destination of its IP layer, for a pattern over a stream above it,
+ * but for that of ICMP, which routers send errors to: *)
+let pattern_peer (stack : stack) (p : pattern) =
+    match ip_dst stack with
+    | Some (i, dst) when p.depth > i + 1 ->
+        (match List.drop (i + 1) stack with
+        | (l, _) :: _ when (l.L.name = A.Layer_name.ICMP || l.L.name = ICMP6) &&
+                           p.depth <= i + 2 -> None
+        | _ -> dst)
+    | _ -> None
+
+(* The sources of each expression of [b], and of each payload [b] sends,
+ * with where it is written and to which address, if known. A source taints
+ * what it is copied, assigned or computed into, whichever the order of the
+ * statements: the environment, and the payload fields of what [MATCH]
+ * matched, from the address of {!pattern_peer}. The environment also taints
+ * what is sent or assigned under a condition on it, and the iterations of
+ * the loops a [break] under such a condition leaves. *)
+let taint_analysis (b : block) =
+    (* The variables that hold received packets, with the addresses they
+     * come from, and the sources of those that hold what they made: *)
     let packets = Hashtbl.create 7 and tainted = Hashtbl.create 7 in
     let changed = ref true in
-    let mark tbl (v : var) =
-        if not (Hashtbl.mem tbl v.id) then (
-            Hashtbl.add tbl v.id () ;
+    let get tbl (v : var) = Hashtbl.find_default tbl v.id [] in
+    let mark tbl (v : var) xs =
+        let old = get tbl v in
+        let xs = union old xs in
+        if List.compare_lengths xs old <> 0 then (
+            Hashtbl.replace tbl v.id xs ;
             changed := true) in
-    (* Whether [e] holds received packets or their layers: *)
     let rec is_packet e =
         match e.desc with
-        | Var v -> Hashtbl.mem packets v.id
+        | Var v -> get packets v
         | Select { packet ; _ } | Index (packet, _) | Slice (packet, _, _) ->
             is_packet packet
-        | _ -> false in
-    (* Whether [e] is made of the environment or of what a received packet
-     * carried, which a packet read whole is: *)
+        | _ -> [] in
+    let received = List.map (fun from -> Received from) in
+    (* A packet read whole taints: *)
     let rec taints e =
+        union e.taint (
         match e.desc with
-        | _ when e.tainted -> true
-        | Var v -> Hashtbl.mem tainted v.id
-        | Call (Getenv, _) -> true
-        | Field (r, i) when is_packet r ->
+        | Var v -> get tainted v
+        | Call (Getenv, (n :: _ as args)) ->
+            let name = match n.desc with String [ Text n ] -> Some n | _ -> None in
+            union [ Env name ] (List.concat_map taints args)
+        | Field (r, i) when is_packet r <> [] ->
             (match r.typ with
             | Type.Record fs ->
                 let name = fst (List.nth fs i) in
-                List.exists (fun (l : L.layer) ->
+                if List.exists (fun (l : L.layer) ->
                     packet_record l = r.typ &&
                     Array.exists (fun (f : L.field) -> f.name = name && is_payload l f)
                                  l.fields) L.all
-            | _ -> false)
-        | _ when is_packet e -> false
+                then received (is_packet r) else []
+            | _ -> [])
+        | _ when is_packet e <> [] -> []
         | Block b -> block_taints b
-        | If { then_ ; else_ ; _ } -> block_taints then_ || block_taints else_
-        | Case { arms ; else_ ; _ } ->
-            List.exists (fun a -> block_taints a.branch) arms ||
-            Option.map_default block_taints false else_
-        | Expect { cases ; else_ ; _ } ->
-            List.exists (fun (c : case) -> block_taints c.body) cases ||
-            Option.map_default block_taints false else_
+        | If { cond ; then_ ; else_ } ->
+            env_sources (taints cond) @ block_taints then_ @ block_taints else_
+        | Case { subject ; arms ; else_ } ->
+            env_sources (taints subject) @
+            List.concat_map (fun a -> block_taints a.branch) arms @
+            Option.map_default block_taints [] else_
+        | Expect { timeout ; cases ; else_ } ->
+            Option.map_default (env_sources % taints) [] timeout @
+            List.concat_map (fun (c : case) ->
+                env_sources (List.concat_map taints (case_conds [ c ])) @
+                block_taints c.body) cases @
+            Option.map_default block_taints [] else_
         | Try { body ; handlers } ->
-            block_taints body || List.exists (fun h -> block_taints h.handler) handlers
-        | _ -> List.exists (fun e -> is_packet e || taints e) (sub_exprs e)
+            block_taints body @ List.concat_map (fun h -> block_taints h.handler) handlers
+        | _ ->
+            List.concat_map (fun e ->
+                match is_packet e with [] -> taints e | from -> received from) (sub_exprs e)) |>
+        union []
     and block_taints b =
         match List.last b with
         | { stmt = Expr e ; _ } -> taints e
-        | _ | exception _ -> false in
-    let flows (v : var) e =
-        if is_packet e then mark packets v ;
-        if taints e then mark tainted v in
-    (* What [e] binds, as a case, a comprehension, an expect or a try: *)
-    let bind_cases e =
+        | _ | exception _ -> [] in
+    let cond = Option.map_default (env_sources % taints) [] in
+    (* [pc]: the sources of the conditions the statements run under: *)
+    let flows pc (v : var) e =
+        mark packets v (is_packet e) ;
+        mark tainted v (union (taints e) pc) in
+    let sinks = Hashtbl.create 7 in
+    let sink stack pc layers =
+        let to_ = Option.bind (ip_dst stack) snd in
+        List.iter (fun l ->
+            List.iter (fun (i, e) ->
+                if is_payload l.layer l.layer.L.fields.(i) then
+                    match union (taints e) pc with
+                    | [] -> ()
+                    | ss -> Hashtbl.modify_def (to_, []) e.loc (fun (to_, ss') -> to_, union ss' ss) sinks)
+                l.options) layers in
+    (* Each returns the sources of the conditions of the [break]s within: *)
+    let rec block stack pc b =
+        List.fold_left (fun brk s -> union brk (stmt stack pc s)) [] b
+    and exprs stack pc es =
+        List.fold_left (fun brk e -> union brk (expr stack pc e)) [] es
+    and loop stack pc bodies =
+        let run pc = List.fold_left (fun brk b -> union brk (block stack pc b)) [] bodies in
+        let brk = run pc in
+        if List.exists (fun s -> not (List.mem s pc)) brk then ignore (run (union pc brk)) ;
+        []
+    and cases stack pc cs =
+        List.iter (fun (c : case) ->
+            mark packets c.match_ (List.map (pattern_peer stack) c.patterns)) cs ;
+        List.fold_left (fun brk (c : case) ->
+            union brk (exprs stack pc (case_conds [ c ]))) [] cs,
+        List.map (fun (c : case) ->
+            union pc (env_sources (List.concat_map taints (case_conds [ c ]))), c.body) cs
+    and stmt stack pc s =
+        let brk = exprs stack pc (stmt_exprs s) in
+        union brk (
+        match s.stmt with
+        | Stack { depth ; overlay ; layers ; body } ->
+            let stack = stack_of stack ~depth ~overlay layers in
+            sink stack pc layers ;
+            block stack pc body
+        | Send { depth ; overlay ; layers ; _ } ->
+            sink (stack_of stack ~depth ~overlay layers) pc layers ;
+            []
+        | Declare (v, e) -> flows pc v e ; []
+        | Assign { var ; value ; _ } -> flows pc var value ; []
+        | Repeat { var ; count ; items ; every ; for_ ; body } ->
+            Option.may (flows pc var) items ;
+            loop stack (union pc (List.concat_map cond [ count ; items ; every ; for_ ])) [ body ]
+        | Retry { max ; body ; _ } -> block stack (union pc (cond max)) body
+        | On { for_ ; linger ; timeout ; max ; cases = cs } ->
+            let pc = union pc (List.concat_map cond [ for_ ; linger ; timeout ; max ]) in
+            let brk, bodies = cases stack pc cs in
+            List.iter (fun (pc, b) -> ignore (loop stack pc [ b ])) bodies ;
+            brk
+        | Spawn { for_ ; body } -> loop stack (union pc (cond for_)) [ body ]
+        | Break _ -> pc
+        | Expr _ | Wait _ | Exit -> [])
+    and expr stack pc e =
+        let brk = exprs stack pc (sub_exprs e) in
+        let blocks pc bs = List.fold_left (fun brk b -> union brk (block stack pc b)) [] bs in
+        union brk (
         match e.desc with
-        | Case { subject ; arms ; _ } ->
-            List.iter (fun a -> Option.may (fun v -> flows v subject) a.held) arms
+        | Block b -> block stack pc b
+        | If { cond ; then_ ; else_ } ->
+            blocks (union pc (env_sources (taints cond))) [ then_ ; else_ ]
+        | Case { subject ; arms ; else_ } ->
+            List.iter (fun a -> Option.may (fun v -> flows pc v subject) a.held) arms ;
+            blocks (union pc (env_sources (taints subject)))
+                   (List.map (fun a -> a.branch) arms @ Option.map_default (fun b -> [ b ]) [] else_)
+        | Expect { timeout ; cases = cs ; else_ } ->
+            let pc = union pc (cond timeout) in
+            let brk, bodies = cases stack pc cs in
+            List.fold_left (fun brk (pc, b) -> union brk (block stack pc b)) brk bodies |>
+            union (Option.map_default (block stack pc) [] else_)
+        | Try { body ; handlers } ->
+            (* What caused an error may come from anywhere: *)
+            List.iter (fun (h : handler) -> mark packets h.match_ [ None ]) handlers ;
+            blocks pc (body :: List.map (fun (h : handler) -> h.handler) handlers)
         | Comprehension { clauses ; _ } ->
-            List.iter (function Bind (v, items) -> flows v items | Filter _ -> ()) clauses
-        | Expect { cases ; _ } ->
-            List.iter (fun (c : case) -> mark packets c.match_) cases
-        | Try { handlers ; _ } ->
-            List.iter (fun (h : handler) -> mark packets h.match_) handlers
-        | _ -> () in
+            List.iter (function Bind (v, items) -> flows pc v items | Filter _ -> ()) clauses ;
+            []
+        | _ -> []) in
     while !changed do
         changed := false ;
-        iter_exprs bind_cases b ;
-        iter_stmts (fun s ->
-            match s.stmt with
-            | Declare (v, e) -> flows v e
-            | Assign { var ; value ; _ } -> flows var value
-            | Repeat { var ; items = Some e ; _ } -> flows var e
-            | On { cases ; _ } ->
-                List.iter (fun (c : case) -> mark packets c.match_) cases
-            | _ -> ()) b
+        ignore (block [] [] b)
     done ;
-    taints
+    taints, Hashtbl.fold (fun loc (to_, ss) acc -> (loc, to_, ss) :: acc) sinks []
 
-(** Where [b] sets a payload with what {!taints_of} says is tainted, as
- * errors. *)
-let exfiltrations (b : block) =
-    let taints = taints_of b in
-    fold_stmts (fun errors s ->
-        match s.stmt with
-        | Stack { layers ; _ } | Send { layers ; _ } ->
-            List.fold_left (fun errors l ->
-                List.fold_left (fun errors (i, e) ->
-                    if is_payload l.layer l.layer.L.fields.(i) && taints e then
-                        (e.loc, "This payload is made of what was received or \
-                                 of the environment, which \
-                                 PERMISSIONS.exfiltration does not allow") :: errors
-                    else errors) errors l.options) errors layers
-        | _ -> errors) [] b |>
+(** The sources of an expression of [b] (see {!taint_analysis}). *)
+let taints_of b = fst (taint_analysis b)
+
+
+(** Where [b] sends a payload that depends on what it received, but from the
+ * address it sends to, or on the environment, but its variables in
+ * [public_env], as errors. *)
+let exfiltrations ?(public_env=[]) (b : block) =
+    List.filter_map (fun (loc, to_, ss) ->
+        let ss =
+            List.filter (function
+                | Env (Some n) -> not (List.mem n public_env)
+                | Env None -> true
+                | Received from ->
+                    (match from, to_ with
+                    | Some a, Some b -> Ip.Addr.compare a b <> 0
+                    | _ -> true)) ss in
+        if ss = [] then None else
+        let names = List.filter_map (function Env n -> n | Received _ -> None) ss in
+        let and_ = function
+            | [] -> ""
+            | [ x ] -> x
+            | xs -> String.concat ", " (List.rev (List.tl (List.rev xs))) ^" and "^ List.last xs in
+        let what =
+            (match names with
+             | [] -> []
+             | [ n ] -> [ "the environment variable "^ n ]
+             | ns -> [ "the environment variables "^ and_ ns ]) @
+            List.filter_map (function
+                | Env Some _ -> None
+                | Env None -> Some "the environment"
+                | Received (Some a) -> Some ("what was received from "^ Ip.Addr.to_dotted_string a)
+                | Received None -> Some "what was received") ss in
+        Some (loc, Printf.sprintf "This payload depends on %s, which \
+                                   PERMISSIONS.exfiltration does not allow%s"
+            (and_ what)
+            (if names = [] then "" else
+             Printf.sprintf "; add %s to PERMISSIONS.public_env if no secret" (and_ names))))
+        (snd (taint_analysis b)) |>
     in_order
 
-(* [exfiltrated text] is what [exfiltrations] says of that program: *)
+(* [exfiltrated ?public_env text] is where [exfiltrations] finds exfiltrations
+ * in that program: *)
 (*$inject
-  let exfiltrated text =
+  let exfiltrated ?public_env text =
       match Result.bind (Result.map_error (fun e -> [ e ]) (Crafty_parser.parse text)) check with
       | Error es -> String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es)
       | Ok b ->
-          exfiltrations b |>
+          exfiltrations ?public_env b |>
           List.map (fun (e : Crafty_parser.error) -> Printf.sprintf "%d:%d" e.where.line e.where.column) |>
           String.concat " "
 *)
 (*$= exfiltrated & ~printer:identity
   "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(\"x\")\nexpect Raw { Raw(\"${MATCH[UDP].src}\") } }")
-  "2:18" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { Raw(MATCH[Raw].data) } }")
-  "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nx = randbytes(1)\nexpect Raw { x := x + MATCH[Raw].data[1:] }\nRaw(x) }")
-  "2:18" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { Raw(\"${MATCH}\") } }")
-  "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { p = MATCH\nq = p[Raw]\nRaw(q.data) } }")
-  "2:45" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { case var=r MATCH[-1] Raw { Raw(r.data) } } }")
+  "2:18" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nexpect Raw { Raw(MATCH[Raw].data) } }")
+  "4:5" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nx = randbytes(1)\nexpect Raw { x := x + MATCH[Raw].data[1:] }\nRaw(x) }")
+  "2:18" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nexpect Raw { Raw(\"${MATCH}\") } }")
+  "4:5" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nexpect Raw { p = MATCH\nq = p[Raw]\nRaw(q.data) } }")
+  "2:45" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nexpect Raw { case var=r MATCH[-1] Raw { Raw(r.data) } } }")
   "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { case var=r MATCH[2] UDP { Raw(\"${r.src}\") } } }")
-  "3:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { d = encode(Raw(MATCH[Raw].data))\nRaw(d) } }")
-  "2:18" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { Raw(encode(Raw(MATCH[Raw].data))) } }")
-  "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nd = randbytes(1)\nexpect Raw { d := encode(Raw(MATCH[Raw].data)) }\nRaw(d[:1]) }")
-  "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { d = encode(Raw({ x = MATCH[Raw].data\n x }))\nRaw(d) } }")
-  "3:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { p = MATCH\nRaw(encode(Raw(p[Raw].data))) } }")
-  "3:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { d = encode(Raw(\"${MATCH}\"))\nRaw(d) } }")
-  "3:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { d = encode(../UDP(src=1, dst=2, checksum=int(MATCH[Raw].data[0]))/Raw(\"x\"))\nRaw(d) } }")
+  "3:5" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nexpect Raw { d = encode(Raw(MATCH[Raw].data))\nRaw(d) } }")
+  "2:18" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nexpect Raw { Raw(encode(Raw(MATCH[Raw].data))) } }")
+  "4:5" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nd = randbytes(1)\nexpect Raw { d := encode(Raw(MATCH[Raw].data)) }\nRaw(d[:1]) }")
+  "4:5" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nexpect Raw { d = encode(Raw({ x = MATCH[Raw].data\n x }))\nRaw(d) } }")
+  "3:5" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nexpect Raw { p = MATCH\nRaw(encode(Raw(p[Raw].data))) } }")
+  "3:5" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nexpect Raw { d = encode(Raw(\"${MATCH}\"))\nRaw(d) } }")
+  "3:5" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nexpect Raw { d = encode(../UDP(src=1, dst=2, checksum=int(MATCH[Raw].data[0]))/Raw(\"x\"))\nRaw(d) } }")
   "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { d = encode(../UDP(src=1, dst=MATCH[UDP].src)/Raw(\"x\"))\nRaw(d) } }")
-  "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nn = 0\non Raw { n += length(MATCH[Raw].data) }\nRaw(\"${n}\") }")
-  "2:23" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { Query(\"a\")\nexpect Answer { Query(MATCH[Answer].answers[0].name) } }")
-  "2:33" (exfiltrated "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { HttpRequest(\"/\")\nexpect HttpAnswer { HttpRequest(MATCH[HttpAnswer].headers[0].value) } }")
+  "4:5" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nn = 0\non Raw { n += length(MATCH[Raw].data) }\nRaw(\"${n}\") }")
+  "2:23" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=53)/DNS { Query(\"a\")\nexpect Answer { Query(MATCH[Answer].answers[0].name) } }")
+  "2:33" (exfiltrated "/IP(dst=ip_addr(arg(0)))/TCP(dst=80)/HTTP { HttpRequest(\"/\")\nexpect HttpAnswer { HttpRequest(MATCH[HttpAnswer].headers[0].value) } }")
   "" (exfiltrated "/IP(dst=1.2.3.4)/TCP(dst=80)/HTTP { HttpRequest(\"/\")\nexpect HttpAnswer { HttpRequest(\"/${MATCH[HttpAnswer].code}\") } }")
   "1:35" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(getenv(\"X\")) }")
   "1:35" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(getenv(\"X\", default=\"d\")) }")
@@ -3248,6 +3420,31 @@ let exfiltrations (b : block) =
   "" (exfiltrated "print(hostname(1.2.3.4, default=getenv(\"X\")))")
   "1:35" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(\"${resolve(getenv(\"X\"))}\") }")
   "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(\"x\")\nexpect Raw { print(hostname(MATCH[IP].src)) } }")
+  "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { Raw(MATCH[Raw].data) } }")
+  "2:46" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { /IP(dst=5.6.7.8)/UDP(dst=7)/Raw(MATCH[Raw].data) } }")
+  "3:33" (exfiltrated "x = randbytes(1)\n/IP(dst=1.2.3.4)/UDP(dst=7) { expect Raw { x := MATCH[Raw].data } }\n/IP(dst=5.6.7.8)/UDP(dst=7)/Raw(x)")
+  "" (exfiltrated "x = randbytes(1)\n/IP(dst=1.2.3.4)/UDP(dst=7) { expect Raw { x := MATCH[Raw].data } }\n/IP(dst=1.2.3.4)/UDP(dst=9)/Raw(x)")
+  "2:38" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(\"x\")\nexpect ../ICMP/DestUnreachable { Raw(\"${MATCH}\") } }")
+  "2:37" (exfiltrated "/IP(dst=1.2.3.4)/ICMP/Echo { Request(\"x\")\nexpect ../DestUnreachable { Request(\"${MATCH}\") } }")
+  "1:50" (exfiltrated "on /IP/UDP/Raw { /IP(dst=1.2.3.4)/UDP(dst=7)/Raw(MATCH[Raw].data) }")
+  "1:59 1:77" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { if getenv(\"X\") == \"a\" { Raw(\"a\") } else { Raw(\"b\") } }")
+  "" (exfiltrated ~public_env:[ "X" ] "/IP(dst=1.2.3.4)/UDP(dst=7) { if getenv(\"X\") == \"a\" { Raw(\"a\") } else { Raw(\"b\") } }")
+  "3:33" (exfiltrated "x = \"b\"\nif getenv(\"X\") == \"a\" { x := \"a\" }\n/IP(dst=1.2.3.4)/UDP(dst=7)/Raw(x)")
+  "1:35" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(if getenv(\"X\") == \"a\" { \"a\" } else { \"b\" }) }")
+  "1:70" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { repeat count=length(getenv(\"X\")) { Raw(\"x\") } }")
+  "2:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { repeat count=3 { if getenv(\"X\") == \"a\" { break }\nRaw(\"x\") } }")
+  "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { repeat count=3 { if rand(2) > 0 { break }\nRaw(\"x\") } }")
+  "" (exfiltrated "/IP(dst=ip_addr(arg(0)))/UDP(dst=7) {\nexpect Raw { if string(MATCH[Raw].data) == \"a\" { Raw(\"a\") } } }")
+  "2:46" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(\"x\")\nexpect Raw(data == bytes(getenv(\"X\"))) { Raw(\"y\") } }")
+  "1:35" (exfiltrated ~public_env:[ "X" ] "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(getenv(\"X\") + getenv(\"Y\")) }")
+*)
+(*$= exfiltrations & ~printer:identity
+  ("This payload depends on the environment variable X and what was received from 1.2.3.4, " ^ \
+   "which PERMISSIONS.exfiltration does not allow; add X to PERMISSIONS.public_env if no secret") \
+    (match Result.bind (Result.map_error (fun e -> [ e ]) (Crafty_parser.parse \
+          "x = randbytes(1)\n/IP(dst=1.2.3.4)/UDP(dst=7) { expect Raw { x := MATCH[Raw].data } }\n/IP(dst=5.6.7.8)/UDP(dst=7)/Raw(x + bytes(getenv(\"X\")))")) check with \
+       | Ok b -> String.concat "\n" (List.map (fun (e : Crafty_parser.error) -> e.message) (exfiltrations b)) \
+       | Error _ -> "")
 *)
 
 (* [denied text] is what [denied_literals] says of that program, with local

@@ -147,6 +147,12 @@ cat > "$DIR/echo_back.cfty" <<'EOF'
   expect timeout=1s Raw { print("echoed back") }
 }
 EOF
+cat > "$DIR/relay.cfty" <<'EOF'
+/IP(dst=10.77.0.2)/UDP(dst=7) {
+  Raw("ping")
+  expect timeout=1s Raw { /IP(dst=10.77.0.3)/UDP(dst=7)/Raw(MATCH[Raw].data) }
+}
+EOF
 # Addresses that only running tells, as assigned variables are not
 # computed before; then computed ones, and literal ones:
 cat > "$DIR/to.cfty" <<'EOF'
@@ -301,10 +307,13 @@ check "a spoofed IP address" 4 $? "stopped: local address 10.77.0.9 not permitte
 check "a spoofed IP address, permitted" 0 $?
 
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/echo_back.cfty" > "$DIR/out" 2>&1
-check "sending back what was received" 2 $? "PERMISSIONS.exfiltration does not allow"
+check "sending back what was received to its sender" 0 $? "echoed back"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --exfiltration true "$DIR/echo_back.cfty" > "$DIR/out" 2>&1
-check "sending back what was received, permitted" 0 $? "echoed back"
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/relay.cfty" > "$DIR/out" 2>&1
+check "sending what was received to another address" 2 $? "PERMISSIONS.exfiltration does not allow"
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --exfiltration true "$DIR/relay.cfty" > "$DIR/out" 2>&1
+check "sending what was received to another address, permitted" 0 $?
 
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/spoof_mac.cfty" > "$DIR/out" 2>&1
 check "a spoofed MAC" 4 $? "stopped: source MAC 02:00:00:00:00:99 not permitted"

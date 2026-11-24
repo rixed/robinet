@@ -93,7 +93,8 @@ let () =
     and max_ram = ref None
     and speed = ref None and full_duplex = ref None and mtu = ref None
     and local_ips = ref None and remote_ips = ref None
-    and mac_spoofing = ref None and exfiltration = ref None and promiscuous = ref None in
+    and mac_spoofing = ref None and exfiltration = ref None and promiscuous = ref None
+    and public_env = ref None in
     let interval r = Arg.String (fun s ->
         try r := Clock.Interval.of_string s
         with Invalid_argument _ -> die "Not a duration: %S" s) in
@@ -197,7 +198,9 @@ let () =
         "--mac-spoofing", some_bool mac_spoofing,
             "BOOL allow sending from another MAC than the interface's, whatever the program says" ;
         "--exfiltration", some_bool exfiltration,
-            "BOOL allow sending what was received, whatever the program says" ;
+            "BOOL allow sending what was received, or depends on the environment, whatever the program says" ;
+        "--public-env", Arg.String (fun n -> public_env := Some ((!public_env |? []) @ [ n ])),
+            "NAME allow sending this variable of the environment, rather than those the program says (repeatable)" ;
         "--promiscuous", some_bool promiscuous,
             "BOOL receive the frames for other addresses too, whatever the program says" ;
         "--linger", interval linger,
@@ -271,7 +274,7 @@ let () =
         let rules = Option.map (List.map (fun (v, c) -> v, Crafty_typing.Addresses c)) in
         Crafty_typing.{ local_ips = rules !local_ips ; remote_ips = rules !remote_ips ;
                         mac_spoofing = !mac_spoofing ; exfiltration = !exfiltration ;
-                        promiscuous = !promiscuous } in
+                        promiscuous = !promiscuous ; public_env = !public_env } in
     (* What the command line allows, with a default duration if neither it
      * nor the program sets one: *)
     let extra_limits =
@@ -332,7 +335,8 @@ let () =
     if !check then (
         (* Unless allowed, nothing received is sent: *)
         if not (limits.permissions.exfiltration |? false) then (
-            match Crafty_typing.exfiltrations program.body with
+            match Crafty_typing.exfiltrations ?public_env:limits.permissions.public_env
+                                              program.body with
             | [] -> ()
             | es -> fail es) ;
         (* Without the interface, rules about its addresses are not checked: *)

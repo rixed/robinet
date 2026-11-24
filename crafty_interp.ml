@@ -1540,6 +1540,9 @@ let self_values ~own (l : T.limits) =
         | "remote_ips" -> rules p.remote_ips
         | "mac_spoofing" -> flag p.mac_spoofing
         | "promiscuous" -> flag p.promiscuous
+        | "public_env" ->
+            Option.map_default (fun ns ->
+                Array (Array.of_list (List.map (fun n -> String n) ns))) Void p.public_env
         | _ -> flag p.exfiltration)
 
 let run_on_tree power tree ?format ?report ?args ?resolver ?getenv ~print ~print_err ?(on_exit=ignore)
@@ -1640,7 +1643,7 @@ struct
 
     (* The value of [v], of type [typ], written as an expression: *)
     let rec expr_of_value loc (typ : A.Type.t) v : T.expr option =
-        let mk desc = Some T.{ loc ; typ ; desc ; tainted = false } in
+        let mk desc = Some T.{ loc ; typ ; desc ; taint = [] } in
         let all f xs =
             let es = List.filter_map f xs in
             if List.compare_lengths es xs = 0 then Some es else None in
@@ -1709,9 +1712,9 @@ struct
     (** [b] with what can be computed before running it computed; with [getenv],
      * [args] and [resolver], those of the run. What [resolver] tells is taken
      * for the whole run, wherever the program asks it, even in code that does
-     * not run. What is computed from tainted expressions is tainted (see
-     * {!Crafty_typing.taints_of}). Shares nothing with [b], so that it can be
-     * run alongside. *)
+     * not run. What is computed keeps the sources of what it was computed
+     * from (see {!Crafty_typing.taints_of}). Shares nothing with [b], so that
+     * it can be run alongside. *)
     let block ?getenv ?args ?resolver (b : T.block) =
         let value = value (output ?getenv ?args ?resolver ()) in
         let taints = T.taints_of b in
@@ -1749,7 +1752,7 @@ struct
                 false in
         let opt f = Option.map f in
         let rec expr (e : T.expr) : T.expr =
-            let tainted = taints e in
+            let taint = taints e in
             let mk desc = { e with desc } in
             let e =
                 match e.desc with
@@ -1836,7 +1839,7 @@ struct
             let e =
                 if is_value e || not (closed [] e) then e else
                 Option.bind (value e) (expr_of_value e.loc e.typ) |? e in
-            if tainted && not e.tainted then { e with tainted } else e
+            { e with taint = T.union e.taint taint }
         and layer (l : T.layer) =
             { l with options = List.map (fun (i, e) -> i, expr e) l.options }
         and case (c : T.case) =

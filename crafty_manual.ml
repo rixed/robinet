@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 c21ce9c95b5af40af4b9813ef57ccac4) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 5765f85b21e82f10ebebeda4aad641f0) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -203,8 +203,8 @@ Options:
     `--max-packets-per-secs`, `--max-bytes-per-secs`, `--max-syns`,
     `--max-syns-per-secs`, `--max-ram`: self-imposed budget.
 -   `--local-ip accept|deny:CIDR`, `--remote-ip accept|deny:CIDR` (repeatable),
-    `--mac-spoofing BOOL`, `--exfiltration BOOL`, `--promiscuous BOOL`:
-    permissions (see [Budget, ports and
+    `--mac-spoofing BOOL`, `--exfiltration BOOL`, `--promiscuous BOOL`,
+    `--public-env NAME` (repeatable): permissions (see [Budget, ports and
     permissions](#budget-ports-and-permissions)).
 -   `--reference`: prints the reference manual.
 -   `--examples`: prints many examples of use.
@@ -331,7 +331,10 @@ A program may declare them, once each, at its top level, with literals only:
         accepting it.
     -   `mac_spoofing`: allows sending from another MAC than the interface's.
     -   `exfiltration`: allows sending a payload made of the payload of a
-        received packet or of `getenv`.
+        received packet, but back to the literal address of the stack it came
+        in, or made of `getenv`, or sent under a condition on it.
+    -   `public_env`: names of variables of the environment `exfiltration` need
+        not allow.
     -   `promiscuous`: receives the frames for other addresses too, unless
         `local_ips` denies them.
     -   A sent packet denied by the above rules stops the program. A received

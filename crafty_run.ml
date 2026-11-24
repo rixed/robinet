@@ -345,7 +345,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     (* Unless allowed, nothing received is sent: *)
     let* () =
         if flag permissions.exfiltration then Ok () else
-        match Crafty_typing.exfiltrations program.body with
+        match Crafty_typing.exfiltrations ?public_env:permissions.public_env program.body with
         | [] -> Ok ()
         | es -> Error (Denied es) in
     let* kernel_routing =
