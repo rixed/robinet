@@ -55,7 +55,9 @@ type builtin =
     | Any | All
     | Print | Print_err | Format | Assert | Stats | Summary | Report
 
-type expr = { loc : A.location ; typ : Type.t ; mutable desc : desc }
+(* [tainted]: made of the environment or of what was received, which
+ * {!exfiltrations} cannot tell from [desc] alone, as after folding: *)
+type expr = { loc : A.location ; typ : Type.t ; mutable desc : desc ; tainted : bool }
 
 and desc =
     | Lit of A.literal
@@ -1542,8 +1544,8 @@ let numeric t = t = Type.Int || t = Type.Float
  * {!unknown_items}) taking the type of the other: *)
 let array_join f loc x y =
     let mk x y = Some { loc ; typ = (if f = Prepend then y else x).typ ;
-                        desc = Call (f, [ x ; y ]) } in
-    let mk_typ typ = Some { loc ; typ ; desc = Call (f, [ x ; y ]) } in
+                        desc = Call (f, [ x ; y ]) ; tainted = false } in
+    let mk_typ typ = Some { loc ; typ ; desc = Call (f, [ x ; y ]) ; tainted = false } in
     match f, x.typ, y.typ with
     | Concat, Type.Array Type.Void, Type.Array _ -> mk_typ y.typ
     | Concat, Type.Array _, Type.Array Type.Void -> mk_typ x.typ
@@ -1563,7 +1565,7 @@ let map_call f loc typ m k =
     match m.typ with
     | Type.Map (kt, _) ->
         (match coerce k kt with
-        | Some k -> { loc ; typ ; desc = Call (f, [ m ; k ]) }
+        | Some k -> { loc ; typ ; desc = Call (f, [ m ; k ]) ; tainted = false }
         | None -> error k.loc "The keys of %s are not %s" (a_type m.typ) (a_type k.typ))
     | _ -> assert false
 
@@ -1670,7 +1672,7 @@ let narrow (t : Type.t) cs =
  * a block, [if] or [case] is that of a statement: void. *)
 let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
     let loc = e.loc in
-    let mk typ desc = { loc ; typ ; desc } in
+    let mk typ desc = { loc ; typ ; desc ; tainted = false } in
     (* Where the branches of a block, an [if] or a [case] are typed: *)
     let inner = if tail then env else { env with may_wait = false } in
     let branch ?(env=inner) b = block_value ?expected ~used env.errors env b in
@@ -1888,7 +1890,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 | Type.Float -> A.Float 0.
                 | Type.Interval -> A.Interval Clock.Interval.zero
                 | _ -> A.Int 0 in
-            mk t (Call (Sum, [ a ; { loc ; typ = t ; desc = Lit zero } ]))
+            mk t (Call (Sum, [ a ; { loc ; typ = t ; desc = Lit zero ; tainted = false } ]))
         | Word (size, _) as b, [ x ], t ->
             Option.may (fun i ->
                 if not (A.word_fits size i) then
@@ -2148,7 +2150,7 @@ and no_constructor env e =
     | _ -> ()
 
 and var env loc name =
-    let mk typ desc = { loc ; typ ; desc } in
+    let mk typ desc = { loc ; typ ; desc ; tainted = false } in
     let as_var () =
         let v = lookup_var env loc name in
         if not (Hashtbl.mem env.reads v.id) then Hashtbl.add env.reads v.id loc ;
@@ -2215,7 +2217,7 @@ and layer_field env loc path absolute f =
                 error loc "%s cannot be read in a %s %s%s" fd.name
                     (L.string_of_mode mode) (L.to_string l)
                     (other_mode_hint l mode fd.read_in) ;
-            { loc ; typ = fd.typ ; desc = Packet_field { layer ; field = i } }
+            { loc ; typ = fd.typ ; desc = Packet_field { layer ; field = i } ; tainted = false }
 
 (* The function, its arguments in the order of its parameters, and the type
  * of its result: *)
@@ -2295,11 +2297,12 @@ and call ?expected env loc f args =
                         p.pname fname p.descr (a_type e.typ))
             | exception Not_found ->
                 (match p.default with
-                | Some (Literal l) -> Some { loc ; typ = type_of_literal l ; desc = Lit l }
+                | Some (Literal l) -> Some { loc ; typ = type_of_literal l ; desc = Lit l ; tainted = false }
                 | Some (Quote (text, quoted)) ->
                     let (a : A.arg) = List.assoc quoted named in
                     Some { loc ; typ = Type.String ;
-                           desc = String [ Text (text ^ IO.to_string A.print_bare_expr a.value) ] }
+                           desc = String [ Text (text ^ IO.to_string A.print_bare_expr a.value) ] ;
+                           tainted = false }
                 | Some Omitted -> None
                 | None -> error loc "%s needs an argument %s" fname p.pname)
         ) params in
@@ -2314,7 +2317,7 @@ and binop env loc op a b =
             let a = expr env a in
             a, expr ?expected:(if is_empty_array b then empty_next_to a.typ else None)
                     env b in
-    let mk typ desc = { loc ; typ ; desc } in
+    let mk typ desc = { loc ; typ ; desc ; tainted = false } in
     let sym = A.string_of_binop op in
     let cannot () =
         no_constructor env a ; no_constructor env b ;
@@ -2556,8 +2559,10 @@ and pattern env (p : A.pattern) =
                         let field =
                             { loc = c.loc ; typ = f.typ ;
                               desc = Packet_field { layer = Array.length ctx.below ;
-                                                    field = i } } in
-                        { loc = c.loc ; typ = Type.Bool ; desc = Binop (A.Eq, field, c) }
+                                                    field = i } ;
+                              tainted = false } in
+                        { loc = c.loc ; typ = Type.Bool ; desc = Binop (A.Eq, field, c) ;
+                          tainted = false }
                     | t, _ ->
                         error c.loc "The condition on %s must be a bool, not %s"
                             (L.to_string l) (a_type t)
@@ -3096,11 +3101,11 @@ let is_payload (l : L.layer) (f : L.field) =
     | Type.Bool | Type.Byte | Type.Int | Type.Float -> false
     | _ -> true
 
-(** Where [b] sets a payload with what it received or read from the
- * environment, as errors: the payload fields of what [MATCH] matched and
- * [getenv] taint what they are copied, assigned or computed into, whichever
- * the order of the statements. *)
-let exfiltrations (b : block) =
+(** Whether an expression of [b] is made of what [b] received or read from
+ * the environment: the payload fields of what [MATCH] matched, [getenv] and
+ * the expressions [tainted] taint what they are copied, assigned or computed
+ * into, whichever the order of the statements. *)
+let taints_of (b : block) =
     (* The variables that hold received packets or their layers, and those
      * that hold what their payloads made: *)
     let packets = Hashtbl.create 7 and tainted = Hashtbl.create 7 in
@@ -3120,6 +3125,7 @@ let exfiltrations (b : block) =
      * carried, which a packet read whole is: *)
     let rec taints e =
         match e.desc with
+        | _ when e.tainted -> true
         | Var v -> Hashtbl.mem tainted v.id
         | Call (Getenv, _) -> true
         | Field (r, i) when is_packet r ->
@@ -3174,6 +3180,12 @@ let exfiltrations (b : block) =
                 List.iter (fun (c : case) -> mark packets c.match_) cases
             | _ -> ()) b
     done ;
+    taints
+
+(** Where [b] sets a payload with what {!taints_of} says is tainted, as
+ * errors. *)
+let exfiltrations (b : block) =
+    let taints = taints_of b in
     fold_stmts (fun errors s ->
         match s.stmt with
         | Stack { layers ; _ } | Send { layers ; _ } ->

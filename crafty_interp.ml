@@ -1640,7 +1640,7 @@ struct
 
     (* The value of [v], of type [typ], written as an expression: *)
     let rec expr_of_value loc (typ : A.Type.t) v : T.expr option =
-        let mk desc = Some T.{ loc ; typ ; desc } in
+        let mk desc = Some T.{ loc ; typ ; desc ; tainted = false } in
         let all f xs =
             let es = List.filter_map f xs in
             if List.compare_lengths es xs = 0 then Some es else None in
@@ -1709,9 +1709,12 @@ struct
     (** [b] with what can be computed before running it computed; with [getenv],
      * [args] and [resolver], those of the run. What [resolver] tells is taken
      * for the whole run, wherever the program asks it, even in code that does
-     * not run. Shares nothing with [b], so that it can be run alongside. *)
+     * not run. What is computed from tainted expressions is tainted (see
+     * {!Crafty_typing.taints_of}). Shares nothing with [b], so that it can be
+     * run alongside. *)
     let block ?getenv ?args ?resolver (b : T.block) =
         let value = value (output ?getenv ?args ?resolver ()) in
+        let taints = T.taints_of b in
         let assigned = Hashtbl.create 7 in
         T.iter_stmts (fun s ->
             match s.stmt with
@@ -1746,6 +1749,7 @@ struct
                 false in
         let opt f = Option.map f in
         let rec expr (e : T.expr) : T.expr =
+            let tainted = taints e in
             let mk desc = { e with desc } in
             let e =
                 match e.desc with
@@ -1829,8 +1833,10 @@ struct
                     mk (Try { body = block body ;
                               handlers = List.map (fun (h : T.handler) ->
                                   { h with handler = block h.handler }) handlers }) in
-            if is_value e || not (closed [] e) then e else
-            Option.bind (value e) (expr_of_value e.loc e.typ) |? e
+            let e =
+                if is_value e || not (closed [] e) then e else
+                Option.bind (value e) (expr_of_value e.loc e.typ) |? e in
+            if tainted && not e.tainted then { e with tainted } else e
         and layer (l : T.layer) =
             { l with options = List.map (fun (i, e) -> i, expr e) l.options }
         and case (c : T.case) =
@@ -1932,6 +1938,39 @@ end
   "x=_" (folded "x = resolve(\"a\")")
   "x=[10.0.0.1] y=a" (folded ~resolver "x = resolve(\"a\")\ny = hostname(x[0])")
   "x=_ y=b" (folded ~resolver "x = resolve(\"b\")\ny = hostname(10.0.0.2, default=\"b\")")
+*)
+
+(* [refolded text] is where {!Crafty_typing.exfiltrations} finds exfiltrations
+ * in that program, then once partially evaluated with every variable of the
+ * environment and argument set to "1", and every name at 10.0.0.1: *)
+(*$inject
+  let refolded text =
+      match Crafty_interp.compile text with
+      | Error es -> String.concat "\n" (List.map (IO.to_string Crafty_interp.print_error) es)
+      | Ok p ->
+          let where b =
+              Crafty_typing.exfiltrations b |>
+              List.map (fun (e : Crafty_parser.error) ->
+                  Printf.sprintf "%d:%d" e.where.line e.where.column) |>
+              String.concat " " in
+          let resolver =
+              Crafty_interp.{ resolve = (fun _ -> [ Ip.Addr.of_string "10.0.0.1" ]) ;
+                              hostname = (fun _ -> Some "a") } in
+          where p.body ^" | "^
+          where (Crafty_interp.Partial.block ~getenv:(fun _ -> Some "1") ~args:[| "1" |]
+                                             ~resolver p.body)
+*)
+(*$= refolded & ~printer:identity
+  "1:35 | 1:35" (refolded "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(getenv(\"X\")) }")
+  "4:5 | 4:5" (refolded "/IP(dst=1.2.3.4)/UDP(dst=7) {\nx = getenv(\"X\")\ny = \"<${x}>\"\nRaw(y) }")
+  "2:22 | 2:22" (refolded "/IP(dst=1.2.3.4)/UDP(dst=7) {\nrepeat count=2 { Raw(#00 * int(getenv(\"X\"))) } }")
+  "1:35 | 1:35" (refolded "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(arg(0, default=getenv(\"X\"))) }")
+  "1:35 | 1:35" (refolded "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(\"${resolve(getenv(\"X\"))}\") }")
+  "1:52 | 1:52" (refolded "/IP(dst=1.2.3.4)/UDP(dst=7) { if rand(2) > 1 { Raw(getenv(\"X\")) } else { Raw(\"x\") } }")
+  "3:5 | 3:5" (refolded "/IP(dst=1.2.3.4)/UDP(dst=7) { x = \"x\"\nif rand(2) > 1 { x := getenv(\"X\") }\nRaw(x) }")
+  "2:5 | 2:5" (refolded "/IP(dst=1.2.3.4)/UDP(dst=7) { x = getenv(\"X\")\nRaw(x + arg(0)) }")
+  "1:35 | 1:46" (refolded "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(if 1 > 0 { getenv(\"X\") } else { \"x\" }) }")
+  " | " (refolded "/IP(dst=resolve(getenv(\"X\"))[0])/UDP(dst=int(getenv(\"Y\"))) { Raw(arg(0)) }")
 *)
 
 (* [both text] is what that program prints, then what it prints once
