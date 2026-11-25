@@ -18,46 +18,43 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 (** Compiles crafty programs, and runs them on an Ethernet interface of a
-   robinet simulation. What a program may send is bounded by what its
-   interface is connected to, such as a {!Policer}, whose [on_limit] can stop
-   the program.
+   robinet simulation. What a program may send is bounded by what its interface
+   is connected to, such as a {!Policer}, whose [on_limit] can stop the
+   program.
 
    Everything happens in the callbacks of the simulation's scheduler, in
-   continuation passing style: a statement is given what to do once it is
-   done. A block is left in one way only, its cancellation, whether it ends,
-   breaks, fails or is restarted: what it set up is undone, and so are the
-   blocks within it. As events of the scheduler cannot be withdrawn, those
-   of a cancelled block find it dead and do nothing.
+   continuation passing style: a statement is given what to do once it is done.
+   A block is left in one way only, its cancellation, whether it ends, breaks,
+   fails or is restarted: what it set up is undone, and so are the blocks
+   within it. As events of the scheduler cannot be withdrawn, those of a
+   cancelled block find it dead and do nothing.
 
    [repeat] runs its iterations one after the other, each starting [every]
-   after the previous one started (or as soon as it ends, if later), until
-   it has run [count] of them or the next one would start once [for] (if
-   any) has elapsed since it started; it ends right after its last
-   iteration. Over
-   [items], as from a [for], it runs one iteration per item.
-   Errors are either named ones, which a program may catch (see
-   {!Crafty_ast.Error_name}), or faults of the program, which always reach
-   the program's block.
-   [retry E max=N] runs its block again up to N times (3 by default) while
-   it fails with one of the errors E, the error of the last attempt going to
-   the enclosing block.
-   [wait] goes on with the next statement after that duration.
-   [try] leaves its block on its first error, which goes to the first of
-   its handlers that names it (or to its [else]), if any, and no further. [if]
-   runs the block of the first condition that holds, if any, and [case] that
-   of its value's constructor. A block, an [if], a [case], an [expect] or a
-   [try] that is the value of a declaration, an assignment or a statement runs as
-   a block of its own, which ends with that value; within another
-   expression, the typer lets it only compute, and it is evaluated at once. An error
-   reaching the program's block ends the program.
+   after the previous one started (or as soon as it ends, if later), until it
+   has run [count] of them or the next one would start once [for] (if any) has
+   elapsed since it started; it ends right after its last iteration. Over
+   [items], as from a [for], it runs one iteration per item.  Errors are either
+   named ones, which a program may catch (see {!Crafty_ast.Error_name}), or
+   faults of the program, which always reach the program's block.  [retry E
+   max=N] runs its block again up to N times (3 by default) while it fails with
+   one of the errors E, the error of the last attempt going to the enclosing
+   block.  [wait] goes on with the next statement after that duration.  [try]
+   leaves its block on its first error, which goes to the first of its handlers
+   that names it (or to its [else]), if any, and no further. [if] runs the
+   block of the first condition that holds, if any, and [case] that of its
+   value's constructor. A block, an [if], a [case], an [expect] or a [try] that
+   is the value of a declaration, an assignment or a statement runs as a block
+   of its own, which ends with that value; within another expression, the typer
+   lets it only compute, and it is evaluated at once. An error reaching the
+   program's block ends the program.
 
-   [expect] waits for the first of its patterns to match, then runs the
-   block of that pattern once; after its timeout, if any, it runs its [else]
-   block, or else fails. Its value is that of the block it ran.
-   A packet sent, by any block, is then [LAST]. [on] lets its block go on, and runs the block of the pattern of every
-   match until its timeout, its [max] or a [break] out of it; a block ends
-   only once its statements are done and its [on]s are over. The packet
-   matched, [MATCH], is decoded to its top, and only if read.
+   [expect] waits for the first of its patterns to match, then runs the block
+   of that pattern once; after its timeout, if any, it runs its [else] block,
+   or else fails. Its value is that of the block it ran.  A packet sent, by any
+   block, is then [LAST]. [on] lets its block go on, and runs the block of the
+   pattern of every match until its timeout, its [max] or a [break] out of it;
+   a block ends only once its statements are done and its [on]s are over. The
+   packet matched, [MATCH], is decoded to its top, and only if read.
 
    [spawn] runs its block alongside the enclosing one, which goes on, and
    which it keeps busy as an [on] does: one with a [for] holds that block
@@ -66,11 +63,14 @@
 open Batteries
 open Crafty_value
 module EthSpeed = SimTypes.EthSpeed
-module A = Crafty_ast
-module T = Crafty_typing
+module Ast = Crafty_ast
+module Lay = Crafty_layers
+module Prs = Crafty_parser
+module Tre = Crafty_tree
+module Typ = Crafty_typing
 module Interval = Clock.Interval
 
-type error = Crafty_parser.error
+type error = Prs.error
 
 (** {2 Expressions} *)
 
@@ -83,26 +83,30 @@ module Env = Map.Int
 type env =
     { vars : value ref Lazy.t Env.t ;
       (* The current protocol stack, its top first: *)
-      stack : Crafty_tree.entry list ;
+      stack : Tre.entry list ;
       (* What a stack is on top of, without a [depth]; none before the run,
        * when building a stack or an encoding raises [No_tree]: *)
-      tree : Crafty_tree.node option ;
+      tree : Tre.node option ;
       (* In a condition, the packet being matched up to its layer, the top
        * first: *)
-      packet : Crafty_tree.packet ;
+      packet : Tre.packet ;
       (* The value of [LAST], as most sends are never read back: *)
       last : value Lazy.t ref }
 
+(* With what it declares of itself: *)
+type program =
+    { body : Typ.block ; limits : Typ.limits }
+
 exception No_tree
 
-let lookup (env : env) (v : T.var) =
+let lookup (env : env) (v : Typ.var) =
     try Lazy.force (Env.find v.id env.vars)
     with Not_found -> invalid_arg ("Crafty_interp: no cell for "^ v.name)
 
-let bind env (v : T.var) value =
+let bind env (v : Typ.var) value =
     { env with vars = Env.add v.id (Lazy.from_val (ref value)) env.vars }
 
-let bind_lazy env (v : T.var) f =
+let bind_lazy env (v : Typ.var) f =
     { env with vars = Env.add v.id (lazy (ref (f ()))) env.vars }
 
 (* The position of item [i] of an array of length [len], counting from the
@@ -129,7 +133,7 @@ let find loc typ m d k =
     | exception Not_found ->
         (match d with
         | Some v -> v
-        | None -> error_as A.Error_name.Unset loc "No key %s in this map" (to_string typ k))
+        | None -> error_as Ast.Error_name.Unset loc "No key %s in this map" (to_string typ k))
 
 (* A copy of [x] with [y] at that path of indices, each with its type: *)
 let rec set_item loc x path y =
@@ -158,7 +162,7 @@ let int_of loc = function
     | Int i | Byte i -> i
     | Float f ->
         if Float.is_finite f then int_of_float f
-        else error loc "Cannot convert %s to an int" (A.string_of_float f)
+        else error loc "Cannot convert %s to an int" (Ast.string_of_float f)
     | Interval i -> int_of_float (Interval.to_secs i)
     | Time t -> int_of_float (Clock.Wall.to_secs t)
     | Ip a ->
@@ -176,7 +180,7 @@ let float_of = function
     | _ -> assert false
 
 (* The [value] of type [from] as a [typ]: *)
-let rec convert loc (from : A.Type.t) (typ : A.Type.t) value =
+let rec convert loc (from : Ast.Type.t) (typ : Ast.Type.t) value =
     match from, typ, value with
     | Int, Float, Int i -> Float (float_of_int i)
     | Byte, Int, Byte b -> Int b
@@ -187,11 +191,11 @@ let rec convert loc (from : A.Type.t) (typ : A.Type.t) value =
     | Array Byte, String, Array a -> String (string_of_bytes a)
     | Array Byte, Ip, Array a ->
         if Array.length a <> 4 && Array.length a <> 16 then
-            error_as A.Error_name.Invalid loc "%d bytes are no IP address" (Array.length a) ;
+            error_as Ast.Error_name.Invalid loc "%d bytes are no IP address" (Array.length a) ;
         Ip (Ip.Addr.of_bytes (Bytes.of_string (string_of_bytes a)))
     | Array Byte, Mac, Array a ->
         if Array.length a <> 6 then
-            error_as A.Error_name.Invalid loc "%d bytes are no MAC address" (Array.length a) ;
+            error_as Ast.Error_name.Invalid loc "%d bytes are no MAC address" (Array.length a) ;
         Mac (Eth.Addr.o (Bitstring.bitstring_of_string (string_of_bytes a)))
     | Variant cs, Variant ds, Variant (n, v) ->
         Variant (n, convert_to loc (List.assoc n cs) (List.assoc n ds) v)
@@ -209,17 +213,17 @@ and convert_to loc from typ value =
 
 (* The value written in that string, if [ok] accepts it: *)
 let parsed loc what ok s =
-    match Option.map of_literal (Crafty_parser.parse_literal (String.trim s)) with
+    match Option.map of_literal (Prs.parse_literal (String.trim s)) with
     | Some v when ok v -> v
-    | _ -> error_as A.Error_name.Invalid loc "Cannot convert %S to %s" s what
+    | _ -> error_as Ast.Error_name.Invalid loc "Cannot convert %S to %s" s what
 
 (* That statistic over the values [vs], of which there is at least one: *)
-let stat loc (b : T.builtin) vs args =
+let stat loc (b : Typ.builtin) vs args =
     let best better = Array.fold_left (fun a v -> if better v a then v else a) vs.(0) vs in
     match b, args with
-    | T.Min, [] -> best (fun v a -> compare_values v a < 0)
-    | T.Max, [] -> best (fun v a -> compare_values v a > 0)
-    | (T.Mean | T.Stddev), [] ->
+    | Typ.Min, [] -> best (fun v a -> compare_values v a < 0)
+    | Max, [] -> best (fun v a -> compare_values v a > 0)
+    | (Mean | Stddev), [] ->
         let is_interval = match vs.(0) with Interval _ -> true | _ -> false in
         let xs = Array.map (function
             | Interval i -> Interval.to_secs i
@@ -228,15 +232,15 @@ let stat loc (b : T.builtin) vs args =
         let mean = Array.fold_left (+.) 0. xs /. n in
         (* Of the population: *)
         let x =
-            if b = T.Mean then mean else
+            if b = Typ.Mean then mean else
             sqrt (Array.fold_left (fun s x -> s +. (x -. mean) ** 2.) 0. xs /. n) in
         if is_interval then Interval (Interval.of_secs x) else Float x
     (* The nearest rank: the smallest value that [p] percent of them are not
      * above: *)
-    | T.Percentile, [ p ] ->
+    | Typ.Percentile, [ p ] ->
         let p = float_of p in
         if not (p >= 0. && p <= 100.) then
-            error loc "No percentile %s, which is not within 0 and 100" (A.string_of_float p) ;
+            error loc "No percentile %s, which is not within 0 and 100" (Ast.string_of_float p) ;
         let vs = Array.copy vs in
         Array.sort compare_values vs ;
         let rank = int_of_float (ceil (p /. 100. *. float_of_int (Array.length vs))) in
@@ -246,32 +250,32 @@ let stat loc (b : T.builtin) vs args =
 (** [v] of type [typ] as {!Crafty_typing.summary_type} tells, with its type:
  * of an array of numbers or intervals, how many there are and, unless none,
  * their extremes, mean, standard deviation and percentiles. *)
-let rec summarize (typ : A.Type.t) v =
-    let loc = { A.line = 0 ; column = 0 } in
+let rec summarize (typ : Ast.Type.t) v =
+    let loc = { Ast.line = 0 ; column = 0 } in
     let summarized =
         match typ, v with
-        | Array t, Array a when T.summary_type typ = T.summary_of_items t ->
-            (match T.summary_of_items t with
+        | Array t, Array a when Typ.summary_type typ = Typ.summary_of_items t ->
+            (match Typ.summary_of_items t with
             | Record fs ->
                 Record (Array.of_list (List.map (fun (n, _) ->
                     if n = "count" then Int (Array.length a)
                     else if Array.length a = 0 then Void
                     else match n with
-                    | "min" -> stat loc T.Min a []
-                    | "max" -> stat loc T.Max a []
-                    | "mean" -> stat loc T.Mean a []
-                    | "stddev" -> stat loc T.Stddev a []
-                    | p -> stat loc T.Percentile a [ Int (int_of_string (String.lchop p)) ])
+                    | "min" -> stat loc Typ.Min a []
+                    | "max" -> stat loc Typ.Max a []
+                    | "mean" -> stat loc Typ.Mean a []
+                    | "stddev" -> stat loc Typ.Stddev a []
+                    | p -> stat loc Typ.Percentile a [ Int (int_of_string (String.lchop p)) ])
                     fs))
             | _ -> assert false)
-        | Array t, Array a when t <> A.Type.Byte -> Array (Array.map (snd % summarize t) a)
+        | Array t, Array a when t <> Ast.Type.Byte -> Array (Array.map (snd % summarize t) a)
         | Map (_, t), Map (m, d) ->
             Map (Map.PMap.map (snd % summarize t) m, Option.map (snd % summarize t) d)
         | Record fs, Record vs ->
             Record (Array.of_list (List.mapi (fun i (_, t) -> snd (summarize t vs.(i))) fs))
         | Variant cs, Variant (n, x) -> Variant (n, snd (summarize (List.assoc n cs) x))
         | _ -> v in
-    T.summary_type typ, summarized
+    Typ.summary_type typ, summarized
 
 (* What a privileged crafty, which drops the user's environment, prefixes
  * their variables with: *)
@@ -338,131 +342,131 @@ type output =
       format : format ;
       (* Given what [report] reports: its name, the type and value, and the
        * instant: *)
-      report : string -> A.Type.t -> value -> Clock.Time.t -> unit ;
+      report : string -> Ast.Type.t -> value -> Clock.Time.t -> unit ;
       (* Told how many words an array, bytes or string about to be made takes,
        * which is one per item but for a string, it may stop the program and
        * raise: *)
-      check_words : A.location -> int -> unit ;
+      check_words : Ast.location -> int -> unit ;
       (* The arguments that follow the program on the command line: *)
       prog_args : string array ;
       resolver : resolver ;
       (* What [getenv()] reads: *)
       getenv : string -> string option }
 
-let rec call loc (b : T.builtin) args (output : output) =
+let rec call loc (b : Typ.builtin) args (output : output) =
     let { print ; print_err ; now ; check_words ; prog_args ; resolver ; getenv ; _ } = output in
     let number = function Bool _ | Int _ | Float _ -> true | _ -> false in
     let reparse what ok s = call loc b [ parsed loc what ok s ] output in
     match b, args with
-    | T.To_int, [ String s ] -> reparse "an int" number s
-    | T.To_float, [ String s ] -> reparse "a float" number s
-    | T.To_bool, [ String s ] -> reparse "a bool" number s
-    | T.To_byte, [ String s ] -> reparse "a byte" number s
-    | T.To_interval, [ String s ] ->
+    | Typ.To_int, [ String s ] -> reparse "an int" number s
+    | To_float, [ String s ] -> reparse "a float" number s
+    | To_bool, [ String s ] -> reparse "a bool" number s
+    | To_byte, [ String s ] -> reparse "a byte" number s
+    | To_interval, [ String s ] ->
         reparse "an interval" (fun v -> number v || match v with Interval _ -> true | _ -> false) s
-    | T.To_time, [ String s ] ->
+    | To_time, [ String s ] ->
         reparse "a time" (fun v -> number v || match v with Time _ -> true | _ -> false) s
-    | T.To_ip, [ String s ] ->
+    | To_ip, [ String s ] ->
         parsed loc "an IP address" (function Ip _ -> true | _ -> false) s
-    | T.To_mac, [ String s ] ->
+    | To_mac, [ String s ] ->
         parsed loc "a MAC address" (function Mac _ -> true | _ -> false) s
-    | T.To_cidr, [ String s ] ->
+    | To_cidr, [ String s ] ->
         parsed loc "a CIDR" (function Cidr _ -> true | _ -> false) s
-    | T.To_interval, [ Interval _ as i ] -> i
-    | T.To_time, [ Time _ as t ] -> t
-    | T.Rand, [ max ] -> rand loc max
-    | T.Randbytes, [ Int len ] ->
+    | To_interval, [ Interval _ as i ] -> i
+    | To_time, [ Time _ as t ] -> t
+    | Rand, [ max ] -> rand loc max
+    | Randbytes, [ Int len ] ->
         if len < 0 then error loc "randbytes needs a length, not %d" len ;
         check_words loc len ;
         Array (Array.init len (fun _ -> Byte (Random.int 256)))
-    | T.Exp, [ x ] -> Float (exp (float_of x))
-    | T.Ln, [ x ] -> Float (log (float_of x))
-    | T.Log, [ x ] -> Float (log10 (float_of x))
-    | T.Log2, [ Int x ] ->
+    | Exp, [ x ] -> Float (exp (float_of x))
+    | Ln, [ x ] -> Float (log (float_of x))
+    | Log, [ x ] -> Float (log10 (float_of x))
+    | Log2, [ Int x ] ->
         if x <= 0 then error loc "log2 needs a positive int, not %d" x ;
         let rec loop n x = if x <= 1 then n else loop (n + 1) (x lsr 1) in
         Int (loop 0 x)
-    | T.To_int, [ x ] -> Int (int_of loc x)
-    | T.To_float, [ x ] -> Float (float_of x)
-    | T.To_bool, [ x ] -> Bool (float_of x <> 0.)
-    | T.To_byte, [ x ] -> Byte (int_of loc x land 255)
-    | T.To_interval, [ x ] ->
+    | To_int, [ x ] -> Int (int_of loc x)
+    | To_float, [ x ] -> Float (float_of x)
+    | To_bool, [ x ] -> Bool (float_of x <> 0.)
+    | To_byte, [ x ] -> Byte (int_of loc x land 255)
+    | To_interval, [ x ] ->
         (match Interval.of_secs (float_of x) with
         | i -> Interval i
         | exception Invalid_argument _ ->
-            error loc "%s is not a number of seconds" (A.string_of_float (float_of x)))
-    | T.To_time, [ x ] ->
+            error loc "%s is not a number of seconds" (Ast.string_of_float (float_of x)))
+    | To_time, [ x ] ->
         let s = float_of x in
         (match Clock.Wall.of_secs s with
         | t -> Time t
         | exception Invalid_argument _ ->
-            error loc "%s is not a number of seconds" (A.string_of_float s))
-    | T.Now, [] -> Time (now ())
-    | T.To_bytes, [ Byte _ as b ] -> Array [| b |]
-    | T.To_bytes, [ b ] -> b
-    | T.Word (size, big), [ Int x ] ->
-        if not (A.word_fits size x) then
+            error loc "%s is not a number of seconds" (Ast.string_of_float s))
+    | Now, [] -> Time (now ())
+    | To_bytes, [ Byte _ as b ] -> Array [| b |]
+    | To_bytes, [ b ] -> b
+    | Word (size, big), [ Int x ] ->
+        if not (Ast.word_fits size x) then
             error loc "%d does not fit in %d bytes" x size ;
         Array (Array.init size (fun i ->
             Byte ((x asr (8 * if big then size - 1 - i else i)) land 0xff)))
-    | T.Checksum, [ (Byte _ | Array _) as b ] ->
+    | Checksum, [ (Byte _ | Array _) as b ] ->
         let a = match b with Array a -> a | b -> [| b |] in
         let s = Tools.sum (Bitstring.bitstring_of_string (string_of_bytes a)) in
         Array [| Byte (s lsr 8) ; Byte (s land 0xff) |]
-    | T.To_ip, [ Int i ] ->
+    | To_ip, [ Int i ] ->
         if i < 0 || i > 0xffff_ffff then error loc "%d is no IPv4 address" i ;
         Ip (Ip.Addr.o32 (Int32.of_int i))
-    | T.To_ip, [ b ] -> convert loc A.Type.bytes A.Type.Ip b
-    | T.To_mac, [ b ] -> convert loc A.Type.bytes A.Type.Mac b
-    | T.Getenv, String name :: default ->
+    | To_ip, [ b ] -> convert loc Ast.Type.bytes Ast.Type.Ip b
+    | To_mac, [ b ] -> convert loc Ast.Type.bytes Ast.Type.Mac b
+    | Getenv, String name :: default ->
         (match getenv name, default with
         | Some v, _ -> String v
         | None, [ d ] -> d
-        | None, _ -> error_as A.Error_name.Unset loc "Environment variable %s is not set" name)
-    | T.Arg, Int n :: default ->
+        | None, _ -> error_as Ast.Error_name.Unset loc "Environment variable %s is not set" name)
+    | Arg, Int n :: default ->
         (match default with
         | _ when n >= 0 && n < Array.length prog_args -> String prog_args.(n)
         | [ d ] -> d
-        | _ -> error_as A.Error_name.Unset loc "No argument %d: %d given" n (Array.length prog_args))
-    | T.Nargs, [] -> Int (Array.length prog_args)
-    | T.Resolve, [ String name ] ->
+        | _ -> error_as Ast.Error_name.Unset loc "No argument %d: %d given" n (Array.length prog_args))
+    | Nargs, [] -> Int (Array.length prog_args)
+    | Resolve, [ String name ] ->
         (match resolver.resolve name with
-        | [] -> error_as A.Error_name.Unresolved loc "%s has no IP address" name
+        | [] -> error_as Ast.Error_name.Unresolved loc "%s has no IP address" name
         | addrs -> Array (Array.of_list (List.map (fun a -> Ip a) addrs)))
-    | T.Hostname, Ip ip :: default ->
+    | Hostname, Ip ip :: default ->
         (match resolver.hostname ip, default with
         | Some n, _ -> String n
         | None, [ d ] -> d
-        | None, _ -> error_as A.Error_name.Unresolved loc "%s has no name" (Ip.Addr.to_dotted_string ip))
-    | T.Is_ip4, [ Ip ip ] -> Bool (Ip.Addr.length ip = 32)
-    | T.Is_ip6, [ Ip ip ] -> Bool (Ip.Addr.length ip = 128)
-    | T.Split, [ String s ; String by ] ->
+        | None, _ -> error_as Ast.Error_name.Unresolved loc "%s has no name" (Ip.Addr.to_dotted_string ip))
+    | Is_ip4, [ Ip ip ] -> Bool (Ip.Addr.length ip = 32)
+    | Is_ip6, [ Ip ip ] -> Bool (Ip.Addr.length ip = 128)
+    | Split, [ String s ; String by ] ->
         if by = "" then error loc "Cannot split by an empty string" ;
         Array (Array.of_list (List.map (fun p -> String p) (String.split_on_string ~by s)))
-    | T.Make_array, [ init ; Int len ] ->
+    | Make_array, [ init ; Int len ] ->
         if len < 0 then error loc "array needs a length, not %d" len ;
         check_words loc len ;
         Array (Array.make len init)
-    | T.Range, Int a :: b ->
+    | Range, Int a :: b ->
         let from, to_ = match b with [ Int b ] -> a, b | _ -> 0, a in
         let len = max 0 (to_ - from) in
         check_words loc len ;
         Array (Array.init len (fun i -> Int (from + i)))
-    | T.Length, [ Array a ] -> Int (Array.length a)
-    | T.Concat, [ Array a ; Array b ] ->
+    | Length, [ Array a ] -> Int (Array.length a)
+    | Concat, [ Array a ; Array b ] ->
         check_words loc (Array.length a + Array.length b) ;
         Array (Array.append a b)
-    | T.Append, [ Array a ; x ] ->
+    | Append, [ Array a ; x ] ->
         check_words loc (Array.length a + 1) ;
         Array (Array.append a [| x |])
-    | T.Prepend, [ x ; Array a ] ->
+    | Prepend, [ x ; Array a ] ->
         check_words loc (Array.length a + 1) ;
         Array (Array.append [| x |] a)
-    | T.Length, [ Map (m, _) ] -> Int (Map.PMap.cardinal m)
-    | T.Make_map, [ _ ; default ] -> empty_map (Some default)
-    | T.Has, [ Map (m, _) ; k ] -> Bool (Map.PMap.mem k m)
-    | T.Remove, [ Map (m, d) ; k ] -> Map (Map.PMap.remove k m, d)
-    | (T.Min | T.Max | T.Mean | T.Stddev | T.Percentile as b), vs :: args ->
+    | Length, [ Map (m, _) ] -> Int (Map.PMap.cardinal m)
+    | Make_map, [ _ ; default ] -> empty_map (Some default)
+    | Has, [ Map (m, _) ; k ] -> Bool (Map.PMap.mem k m)
+    | Remove, [ Map (m, d) ; k ] -> Map (Map.PMap.remove k m, d)
+    | (Min | Max | Mean | Stddev | Percentile as b), vs :: args ->
         let vs =
             match vs with
             | Array a -> a
@@ -470,11 +474,11 @@ let rec call loc (b : T.builtin) args (output : output) =
             | _ -> assert false in
         if Array.length vs = 0 then
             error loc "No %s of no values"
-                (match b with T.Min -> "minimum" | T.Max -> "maximum"
-                            | T.Mean -> "mean" | T.Stddev -> "standard deviation"
+                (match b with Typ.Min -> "minimum" | Typ.Max -> "maximum"
+                            | Mean -> "mean" | Typ.Stddev -> "standard deviation"
                             | _ -> "percentile") ;
         stat loc b vs args
-    | T.Sum, [ vs ; zero ] ->
+    | Sum, [ vs ; zero ] ->
         let add a b =
             match a, b with
             | Int a, (Int b | Byte b) -> Int (a + b)
@@ -485,7 +489,7 @@ let rec call loc (b : T.builtin) args (output : output) =
         | Array a -> Array.fold_left add zero a
         | Map (m, _) -> Map.PMap.fold (fun v s -> add s v) m zero
         | _ -> assert false)
-    | T.Histogram, [ vs ; bucket ] ->
+    | Histogram, [ vs ; bucket ] ->
         let secs = function Interval i -> Interval.to_secs i | v -> float_of v in
         let of_secs x =
             match bucket with Interval _ -> Interval (Interval.of_secs x) | _ -> Float x in
@@ -511,83 +515,83 @@ let rec call loc (b : T.builtin) args (output : output) =
             | Some (_, n, lo, hi) -> record n lo hi :: buckets
             | None -> buckets in
         Array (Array.of_list (List.rev buckets))
-    | (T.Any | T.All as b), [ vs ] ->
+    | (Any | All as b), [ vs ] ->
         let vs = match vs with Array a -> a | Map (m, _) -> Array.of_enum (Map.PMap.values m)
                              | _ -> assert false in
-        Bool ((if b = T.Any then Array.exists else Array.for_all)
+        Bool ((if b = Typ.Any then Array.exists else Array.for_all)
                   (function Bool b -> b | Int i -> i <> 0 | _ -> assert false) vs)
-    | T.Sorted, [ Array a ] ->
+    | Sorted, [ Array a ] ->
         let a = Array.copy a in
         Array.stable_sort compare_values a ;
         Array a
-    | T.Keys, [ Map (m, _) ] -> Array (Array.of_enum (Map.PMap.keys m))
-    | T.Values, [ Map (m, _) ] -> Array (Array.of_enum (Map.PMap.values m))
-    | T.Length, [ String s ] -> Int (String.length s)
-    | T.Print, [ String s ] -> print s ; Void
-    | T.Print_err, [ String s ] -> print_err s ; Void
-    | T.Assert, [ cond ; String msg ] ->
-        if cond = Bool false || cond = Int 0 then error_as A.Error_name.Assertion loc "%s" msg ;
+    | Keys, [ Map (m, _) ] -> Array (Array.of_enum (Map.PMap.keys m))
+    | Values, [ Map (m, _) ] -> Array (Array.of_enum (Map.PMap.values m))
+    | Length, [ String s ] -> Int (String.length s)
+    | Print, [ String s ] -> print s ; Void
+    | Print_err, [ String s ] -> print_err s ; Void
+    | Assert, [ cond ; String msg ] ->
+        if cond = Bool false || cond = Int 0 then error_as Ast.Error_name.Assertion loc "%s" msg ;
         Void
     | _ -> assert false
 
 let arith ~check_words loc op a b =
     match op, a, b with
-    | A.Add, Int a, Int b -> Int (a + b)
-    | A.Sub, Int a, Int b -> Int (a - b)
-    | A.Mul, Int a, Int b -> Int (a * b)
-    | (A.Div | A.Mod), Int _, Int 0 -> error loc "Division by zero"
-    | A.Div, Int a, Int b -> Int (a / b)
-    | A.Mod, Int a, Int b -> Int (a mod b)
-    | A.Add, Float a, Float b -> Float (a +. b)
-    | A.Sub, Float a, Float b -> Float (a -. b)
-    | A.Mul, Float a, Float b -> Float (a *. b)
-    | A.Div, Float a, Float b -> Float (a /. b)
-    | A.Mod, Float a, Float b -> Float (Stdlib.Float.rem a b)
-    | A.Add, Interval a, Interval b -> Interval (Interval.add a b)
-    | A.Sub, Interval a, Interval b -> Interval (Interval.sub a b)
-    | A.Mul, Interval a, Float b | A.Mul, Float b, Interval a ->
+    | Ast.Add, Int a, Int b -> Int (a + b)
+    | Sub, Int a, Int b -> Int (a - b)
+    | Mul, Int a, Int b -> Int (a * b)
+    | (Div | Mod), Int _, Int 0 -> error loc "Division by zero"
+    | Div, Int a, Int b -> Int (a / b)
+    | Mod, Int a, Int b -> Int (a mod b)
+    | Add, Float a, Float b -> Float (a +. b)
+    | Sub, Float a, Float b -> Float (a -. b)
+    | Mul, Float a, Float b -> Float (a *. b)
+    | Div, Float a, Float b -> Float (a /. b)
+    | Mod, Float a, Float b -> Float (Stdlib.Float.rem a b)
+    | Add, Interval a, Interval b -> Interval (Interval.add a b)
+    | Sub, Interval a, Interval b -> Interval (Interval.sub a b)
+    | Mul, Interval a, Float b | Mul, Float b, Interval a ->
         Interval (Interval.mul a b)
-    | A.Mul, Array a, Int n | A.Mul, Int n, Array a ->
+    | Mul, Array a, Int n | Mul, Int n, Array a ->
         if n < 0 then error loc "Cannot repeat %d times" n ;
         let len = Array.length a in
         check_words loc (if len = 0 || n <= max_int / len then len * n else max_int) ;
         Array (Array.init (len * n) (fun i -> a.(i mod len)))
-    | A.Mul, String s, Int n | A.Mul, Int n, String s ->
+    | Mul, String s, Int n | Mul, Int n, String s ->
         if n < 0 then error loc "Cannot repeat %d times" n ;
         let len = String.length s in
         let wsz = Sys.word_size / 8 in
         check_words loc (if len = 0 || n <= max_int / len then len * n / wsz else max_int) ;
         String (String.repeat s n)
-    | A.Div, Interval _, Float 0. -> error loc "Division by zero"
-    | A.Div, Interval a, Float b -> Interval (Interval.div a b)
-    | A.Div, Interval a, Interval b -> Float (Interval.to_secs a /. Interval.to_secs b)
-    | A.Sub, Time a, Time b ->
+    | Div, Interval _, Float 0. -> error loc "Division by zero"
+    | Div, Interval a, Float b -> Interval (Interval.div a b)
+    | Div, Interval a, Interval b -> Float (Interval.to_secs a /. Interval.to_secs b)
+    | Sub, Time a, Time b ->
         (* As many picoseconds as an int holds: *)
         (match Clock.Wall.diff a b with
         | d -> Interval d
         | exception Invalid_argument _ ->
             error loc "%s - %s is too long an interval"
                 (Clock.Wall.to_iso8601 a) (Clock.Wall.to_iso8601 b))
-    | A.Add, Time t, Interval i | A.Add, Interval i, Time t ->
+    | Add, Time t, Interval i | Add, Interval i, Time t ->
         Time (Clock.Wall.add t i)
-    | A.Sub, Time t, Interval i -> Time (Clock.Wall.sub t i)
-    | A.Add, Time t, Float s | A.Add, Float s, Time t ->
+    | Sub, Time t, Interval i -> Time (Clock.Wall.sub t i)
+    | Add, Time t, Float s | Add, Float s, Time t ->
         Time (Clock.Wall.add t (Interval.of_secs s))
-    | A.Sub, Time t, Float s ->
+    | Sub, Time t, Float s ->
         Time (Clock.Wall.sub t (Interval.of_secs s))
-    | A.BitAnd, Int a, Int b -> Int (a land b)
-    | A.BitOr, Int a, Int b -> Int (a lor b)
-    | A.BitXor, Int a, Int b -> Int (a lxor b)
-    | A.BitAnd, Byte a, Byte b -> Byte (a land b)
-    | A.BitOr, Byte a, Byte b -> Byte (a lor b)
-    | A.BitXor, Byte a, Byte b -> Byte (a lxor b)
-    | (A.Shl | A.Shr), _, Int n when n < 0 ->
+    | BitAnd, Int a, Int b -> Int (a land b)
+    | BitOr, Int a, Int b -> Int (a lor b)
+    | BitXor, Int a, Int b -> Int (a lxor b)
+    | BitAnd, Byte a, Byte b -> Byte (a land b)
+    | BitOr, Byte a, Byte b -> Byte (a lor b)
+    | BitXor, Byte a, Byte b -> Byte (a lxor b)
+    | (Shl | Shr), _, Int n when n < 0 ->
         error loc "Cannot shift by %d" n
     (* What a shift pushes out is lost; [>>] keeps the sign of an int: *)
-    | A.Shl, Int a, Int n -> Int (if n >= Sys.int_size then 0 else a lsl n)
-    | A.Shr, Int a, Int n -> Int (a asr min n (Sys.int_size - 1))
-    | A.Shl, Byte a, Int n -> Byte (if n >= 8 then 0 else (a lsl n) land 255)
-    | A.Shr, Byte a, Int n -> Byte (if n >= 8 then 0 else a lsr n)
+    | Ast.Shl, Int a, Int n -> Int (if n >= Sys.int_size then 0 else a lsl n)
+    | Shr, Int a, Int n -> Int (a asr min n (Sys.int_size - 1))
+    | Shl, Byte a, Int n -> Byte (if n >= 8 then 0 else (a lsl n) land 255)
+    | Shr, Byte a, Int n -> Byte (if n >= 8 then 0 else a lsr n)
     | _ -> invalid_arg "Crafty_interp.arith"
 
 (* The stack of [env] with these layers on top of its [depth] first ones,
@@ -596,18 +600,18 @@ let arith ~check_words loc op a b =
  * are those of this stack, not of its nodes; the first [overlay] layers also
  * take the key and the options (that they can set) of the layers of [env] they
  * are over, unless they give them. Raises [Failed]. *)
-let push_layers ~eval ~hold env depth overlay (layers : T.layer list) =
+let push_layers ~eval ~hold env depth overlay (layers : Typ.layer list) =
     let n = List.length env.stack - depth in
     let base = List.drop n env.stack
     and over = List.rev (List.take n env.stack) in
-    List.fold_lefti (fun stack j (l : T.layer) ->
+    List.fold_lefti (fun stack j (l : Typ.layer) ->
         let options =
             List.map (fun (i, e) -> i, eval e) l.options in
         let options =
             if j >= overlay then options else
-            let (o : Crafty_tree.entry) = List.nth over j in
+            let (o : Tre.entry) = List.nth over j in
             let given (i, _) =
-                List.exists (fun (j, _) -> Crafty_layers.overlap l.layer i j) options in
+                List.exists (fun (j, _) -> Lay.overlap l.layer i j) options in
             let settable (i, _) =
                 let f = l.layer.fields.(i) in
                 List.mem l.mode f.set_in && (o.mode = l.mode || f.part_of = None) in
@@ -619,19 +623,19 @@ let push_layers ~eval ~hold env depth overlay (layers : T.layer list) =
         let node =
             match stack with
             | [] ->
-                assert (l.layer == Crafty_layers.root) ;
+                assert (l.layer == Lay.root) ;
                 Option.get_exn env.tree No_tree
-            | (below : Crafty_tree.entry) :: _ ->
+            | (below : Tre.entry) :: _ ->
                 let node =
-                    Crafty_tree.child l.layer_loc below.node l.layer options in
+                    Tre.child l.layer_loc below.node l.layer options in
                 if not l.layer.terminal then (
-                    Crafty_tree.acquire node ;
+                    Tre.acquire node ;
                     hold node) ;
                 node in
-        if l.mode = Crafty_layers.Driven then (
+        if l.mode = Lay.Driven then (
             node.driven <- true ;
             node.ops.drive ()) ;
-        Crafty_tree.{ node ; mode = l.mode ; options } :: stack
+        Tre.{ node ; mode = l.mode ; options } :: stack
     ) base layers
 
 (* The items of an array, or the bindings of a map as records of a key then
@@ -642,63 +646,63 @@ let items_of = function
         Array.of_list (List.map (fun (k, v) -> Record [| k ; v |]) (Map.PMap.bindings m))
     | _ -> assert false
 
-let rec eval output (env : env) (e : T.expr) =
+let rec eval output (env : env) (e : Typ.expr) =
     let eval_in = eval output in
     let eval = eval_in env in
     match e.desc with
-    | T.Lit l -> of_literal l
-    | T.Memo m ->
+    | Typ.Lit l -> of_literal l
+    | Memo m ->
         (match m.cached with
         | Some v -> v
         | None ->
             let v = eval m.value in
             m.cached <- Some v ;
             v)
-    | T.String parts ->
+    | String parts ->
         let parts =
             List.map (function
-                | T.Text s -> s
-                | T.Interp e -> to_string e.typ (eval e)) parts in
+                | Typ.Text s -> s
+                | Interp e -> to_string e.typ (eval e)) parts in
         output.check_words e.loc
             (List.fold_left (fun n s -> n + String.length s) 0 parts / (Sys.word_size / 8)) ;
         String (String.concat "" parts)
-    | T.Var v when v.id = T.last_var.id ->
+    | Var v when v.id = Typ.last_var.id ->
         (match Lazy.force !(env.last) with
         | Void -> error e.loc "LAST is not set: no packet was sent yet"
         | x -> x)
-    | T.Var v ->
+    | Var v ->
         (match !(lookup env v) with
-        | Void when v.id = T.own_ip_var.id -> error e.loc "OWN_IP is not set: the program has no address"
+        | Void when v.id = Typ.own_ip_var.id -> error e.loc "OWN_IP is not set: the program has no address"
         | x -> x)
-    | T.Packet_field { layer ; field } ->
-        let (l : Crafty_layers.layer), (u : Crafty_layers.unpacked) =
+    | Packet_field { layer ; field } ->
+        let (l : Lay.layer), (u : Lay.unpacked) =
             List.nth env.packet (List.length env.packet - 1 - layer) in
         List.assoc l.fields.(field).name u.values
-    | T.Field (r, i) ->
+    | Field (r, i) ->
         (* Void only in the fields of BUDGET, PORTS and PERMISSIONS that are
          * not set, in those of a packet sent that only its capture tells,
          * and in the stats of a summary of no values. A layer that can
          * only be of one kind is read as its record: *)
         (match eval r, r.typ with
-        | (Record vs, (A.Type.Record fs as rt))
-        | (Variant (_, Record vs), A.Type.Variant [ _, (A.Type.Record fs as rt) ]) ->
+        | (Record vs, (Ast.Type.Record fs as rt))
+        | (Variant (_, Record vs), Variant [ _, (Record fs as rt) ]) ->
             (match vs.(i), List.nth fs i with
-            | Void, (n, _) when T.is_summary rt ->
+            | Void, (n, _) when Typ.is_summary rt ->
                 error e.loc "No %s in the summary of no values" n
-            | Void, (n, t) when t <> A.Type.Void ->
-                if rt = T.budget_type || rt = T.ports_type ||
-                   rt = T.permissions_type then
+            | Void, (n, t) when t <> Ast.Type.Void ->
+                if rt = Typ.budget_type || rt = Typ.ports_type ||
+                   rt = Typ.permissions_type then
                     error e.loc "%s is not set, by the program or the command line" n ;
-                let l = List.find (fun l -> T.packet_record l = rt) Crafty_layers.all in
-                error e.loc "%s.%s is not known: %s" (T.lname l.name) n T.only_captured
+                let l = List.find (fun l -> Typ.packet_record l = rt) Lay.all in
+                error e.loc "%s.%s is not known: %s" (Typ.lname l.name) n Typ.only_captured
             | v, _ -> v)
         | _ -> assert false)
-    | T.Index (a, i) ->
+    | Index (a, i) ->
         (match eval a, eval i with
         | Array a, Int i -> item e.loc a i
-        | Map (m, d), k -> find e.loc i.T.typ m d k
+        | Map (m, d), k -> find e.loc i.Typ.typ m d k
         | _ -> assert false)
-    | T.Slice (a, from, to_) ->
+    | Slice (a, from, to_) ->
         let a = eval a in
         let bound = Option.map (fun i -> match eval i with Int i -> i | _ -> assert false) in
         let from, to_ = bound from, bound to_ in
@@ -710,97 +714,97 @@ let rec eval output (env : env) (e : T.expr) =
             let o, l = slice (String.length s) from to_ in
             String (String.sub s o l)
         | _ -> assert false)
-    | T.Select { packet ; path ; absolute ; _ } ->
+    | Select { packet ; path ; absolute ; _ } ->
         (match eval packet with
         | Array a ->
             let names =
                 Array.to_list a |>
                 List.map (function Variant (n, _) -> n | _ -> assert false) in
-            (match T.path_positions names ~absolute path with
+            (match Typ.path_positions names ~absolute path with
             | i :: _ ->
                 (* A layer of any kind is the variant itself: *)
                 if List.last path = None then a.(i)
                 else (match a.(i) with Variant (_, v) -> v | _ -> assert false)
             | [] ->
-                error_as A.Error_name.Unset e.loc "No %s in this packet"
-                    (T.string_of_path ~absolute path))
+                error_as Ast.Error_name.Unset e.loc "No %s in this packet"
+                    (Typ.string_of_path ~absolute path))
         | _ -> assert false)
-    | T.Call (T.Stats, []) ->
-        let stats = Crafty_tree.stack_stats (List.hd env.stack).node in
+    | Call (Stats, []) ->
+        let stats = Tre.stack_stats (List.hd env.stack).node in
         (match e.typ with
-        | A.Type.Record fields ->
+        | Ast.Type.Record fields ->
             Record (Array.of_list (List.map (fun (n, _) -> List.assoc n stats) fields))
         | _ -> assert false)
-    | T.Call (T.Format, [ x ]) ->
+    | Call (Format, [ x ]) ->
         (match Crafty_value.format output.format x.typ (eval x) with
         | Some s -> String s
         | None ->
             error e.loc "Only a scalar, or a record, array or map of scalars, \
-                         makes CSV, not %s" (A.Type.to_string x.typ))
-    | T.Call (T.Summary, [ x ]) -> snd (summarize x.typ (eval x))
-    | T.Call (T.Report, [ x ; name ]) ->
+                         makes CSV, not %s" (Ast.Type.to_string x.typ))
+    | Call (Summary, [ x ]) -> snd (summarize x.typ (eval x))
+    | Call (Report, [ x ; name ]) ->
         (match eval name with
         | String n -> output.report n x.typ (eval x) (output.instant ())
         | _ -> assert false) ;
         Void
-    | T.Call ((T.Print | T.Print_err) as b, [ x ]) when x.typ <> A.Type.String ->
+    | Call ((Print | Print_err) as b, [ x ]) when x.typ <> Ast.Type.String ->
         call e.loc b [ String (to_string x.typ (eval x)) ] output
-    | T.Call (b, args) ->
+    | Call (b, args) ->
         call e.loc b (List.map eval args) output
-    | T.Encode { depth ; overlay ; layers } ->
+    | Encode { depth ; overlay ; layers } ->
         let held = ref [] in
         let written =
-            List.count_matching (fun (l : T.layer) -> l.mode = Crafty_layers.Manual) layers in
-        finally (fun () -> List.iter Crafty_tree.release !held) (fun () ->
+            List.count_matching (fun (l : Typ.layer) -> l.mode = Lay.Manual) layers in
+        finally (fun () -> List.iter Tre.release !held) (fun () ->
             try
                 push_layers env depth overlay layers ~eval
                             ~hold:(fun n -> held := n :: !held) |>
-                Crafty_tree.encode written |>
-                Crafty_layers.bytes_value
+                Tre.encode written |>
+                Lay.bytes_value
             with Failed (kind, msg) -> raise (Runtime_error (kind, e.loc, msg))) ()
-    | T.Unop (A.Not, a) ->
+    | Unop (Ast.Not, a) ->
         (match eval a with Bool b -> Bool (not b) | _ -> assert false)
-    | T.Unop (A.Neg, a) ->
+    | Unop (Neg, a) ->
         (match eval a with
         | Int i -> Int (~- i)
         | Float f -> Float (~-. f)
         | Interval i -> Interval (Interval.sub Interval.zero i)
         | _ -> assert false)
-    | T.Binop (op, a, b) ->
+    | Binop (op, a, b) ->
         (* No short cut: both operands are evaluated, errors and all *)
         let a = eval a and b = eval b in
         (match op with
-        | A.And | A.Or ->
+        | Ast.And | Ast.Or ->
             (match a, b with
-            | Bool a, Bool b -> Bool (if op = A.And then a && b else a || b)
+            | Bool a, Bool b -> Bool (if op = Ast.And then a && b else a || b)
             | _ -> assert false)
-        | A.Eq -> Bool (equal a b)
-        | A.Ne -> Bool (not (equal a b))
-        | A.Lt -> Bool (compare_values a b < 0)
-        | A.Le -> Bool (compare_values a b <= 0)
-        | A.Gt -> Bool (compare_values a b > 0)
-        | A.Ge -> Bool (compare_values a b >= 0)
-        | A.In ->
+        | Eq -> Bool (equal a b)
+        | Ne -> Bool (not (equal a b))
+        | Lt -> Bool (compare_values a b < 0)
+        | Le -> Bool (compare_values a b <= 0)
+        | Gt -> Bool (compare_values a b > 0)
+        | Ge -> Bool (compare_values a b >= 0)
+        | In ->
             (match a, b with
             | Ip ip, Cidr c -> Bool (Ip.Cidr.mem c ip)
             | _ -> assert false)
         | op -> arith ~check_words:output.check_words e.loc op a b)
-    | T.Record es -> Record (Array.of_list (List.map eval es))
-    | T.Array es -> Array (Array.of_list (List.map eval es))
-    | T.Map kvs ->
+    | Record es -> Record (Array.of_list (List.map eval es))
+    | Array es -> Array (Array.of_list (List.map eval es))
+    | Map kvs ->
         (match empty_map None with
         | Map (m, d) ->
             Map (List.fold_left (fun m (k, v) ->
                 let k = eval k in Map.PMap.add k (eval v) m) m kvs, d)
         | _ -> assert false)
-    | T.Comprehension { key ; value ; clauses } ->
+    | Comprehension { key ; value ; clauses } ->
         (* Each value, last first: *)
         let rec values env acc = function
             | [] -> (Option.map (eval_in env) key, eval_in env value) :: acc
-            | T.Bind (v, items) :: rest ->
+            | Typ.Bind (v, items) :: rest ->
                 Array.fold_left (fun acc x -> values (bind env v x) acc rest)
                     acc (items_of (eval_in env items))
-            | T.Filter c :: rest ->
+            | Filter c :: rest ->
                 (match eval_in env c with
                 | Bool true -> values env acc rest
                 | _ -> acc) in
@@ -811,28 +815,28 @@ let rec eval output (env : env) (e : T.expr) =
         | Some _, Map (m, d) ->
             Map (List.fold_right (fun (k, v) m -> Map.PMap.add (Option.get k) v m) vs m, d)
         | _ -> assert false)
-    | T.Convert a ->
+    | Convert a ->
         let v = eval a in
         (match v, e.typ with
-        | String s, A.Type.Array A.Type.Byte -> output.check_words e.loc (String.length s)
+        | String s, Ast.Type.Array Ast.Type.Byte -> output.check_words e.loc (String.length s)
         | _ -> ()) ;
         convert e.loc a.typ e.typ v
-    | T.Construct (c, a) -> Variant (c, Option.map_default eval Void a)
-    | T.Block b -> eval_block output env b
-    | T.If { cond ; then_ ; else_ } ->
+    | Construct (c, a) -> Variant (c, Option.map_default eval Void a)
+    | Block b -> eval_block output env b
+    | If { cond ; then_ ; else_ } ->
         eval_block output env (match eval cond with Bool true -> then_ | _ -> else_)
-    | T.Case { subject ; arms ; else_ } ->
+    | Case { subject ; arms ; else_ } ->
         let env, b = branch env (eval subject) arms else_ in
         eval_block output env b
     (* Which the typer lets be only the value of a declaration, an
      * assignment or a statement: *)
-    | T.Expect _ | T.Try _ -> assert false
+    | Typ.Expect _ | Typ.Try _ -> assert false
 
 (* The block of a [case] for that value, and the environment to run it in: *)
-and branch env v (arms : T.arm list) else_ =
+and branch env v (arms : Typ.arm list) else_ =
     match v with
     | Variant (n, x) ->
-        (match List.find_opt (fun (a : T.arm) -> a.ctor = n) arms, else_ with
+        (match List.find_opt (fun (a : Typ.arm) -> a.ctor = n) arms, else_ with
         | Some a, _ -> Option.map_default (fun h -> bind env h x) env a.held, a.branch
         | None, Some b -> env, b
         (* The typer has an [else] unless every constructor has an arm: *)
@@ -841,17 +845,17 @@ and branch env v (arms : T.arm list) else_ =
 
 (* That of a block within an expression, which the typer lets have only
  * declarations, assignments and expressions: *)
-and eval_block output env (b : T.block) =
-    List.fold_left (fun (env, _) (s : T.stmt) ->
+and eval_block output env (b : Typ.block) =
+    List.fold_left (fun (env, _) (s : Typ.stmt) ->
         match s.stmt with
-        | T.Declare (v, e) -> bind env v (eval output env e), Void
-        | T.Assign { var ; path ; value } ->
+        | Typ.Declare (v, e) -> bind env v (eval output env e), Void
+        | Assign { var ; path ; value } ->
             let is, env' = bind_path output env path in
             let x = eval output env' value in
             let cell = lookup env var in
             cell := set_item s.stmt_loc !cell is x ;
             env, Void
-        | T.Expr e -> env, eval output env e
+        | Expr e -> env, eval output env e
         | _ -> assert false) (env, Void) b |> snd
 
 (* The indices of an assignment's path, and the environment with each bound
@@ -859,7 +863,7 @@ and eval_block output env (b : T.block) =
 and bind_path output env path =
     List.fold_left (fun (is, env) (v, i) ->
         let i = eval output env i in
-        ((v : T.var).typ, i) :: is, bind env v i) ([], env) path |>
+        ((v : Typ.var).typ, i) :: is, bind env v i) ([], env) path |>
     fun (is, env) -> List.rev is, env
 
 (** {2 Blocks} *)
@@ -917,16 +921,16 @@ let guard b f =
     match f () with
     | x -> Some x
     | exception Runtime_error (kind, where, message) ->
-        b.fail Crafty_parser.{ where ; message ; kind ; packet = None } ;
+        b.fail Prs.{ where ; message ; kind ; packet = None } ;
         None
 
 type t =
     { power : Simulation.power ;
       output : output ;
-      tree : Crafty_tree.node ;
+      tree : Tre.node ;
       (* What was sent and is waited for on its way out, by order of
        * sending, and who waits for it: *)
-      awaited : (Crafty_tree.emitted * (Bitstring.bitstring -> unit)) list ref ;
+      awaited : (Tre.emitted * (Bitstring.bitstring -> unit)) list ref ;
       (* Run before each statement, which it may stop the program from running;
        * so must cost next to nothing: *)
       checkpoint : unit -> unit ;
@@ -939,7 +943,7 @@ let capture_timeout = Interval.sec 1.
 
 (* Tells the first that waits for [frame], captured on its way out: *)
 let emitted t frame =
-    match List.find_opt (fun (e, _) -> Crafty_tree.is_emitted e frame) !(t.awaited) with
+    match List.find_opt (fun (e, _) -> Tre.is_emitted e frame) !(t.awaited) with
     | Some (_, k) -> k frame
     | None -> ()
 
@@ -947,11 +951,11 @@ let push t b env depth overlay layers =
     push_layers env depth overlay layers
         ~eval:(eval t.output env)
         ~hold:(fun node ->
-            b.cleanups <- (fun () -> Crafty_tree.release node) :: b.cleanups)
+            b.cleanups <- (fun () -> Tre.release node) :: b.cleanups)
 
 (* The value of the [timeout] parameter of that statement, if any: *)
 let timeout_of eval what =
-    Option.map (fun (e : T.expr) ->
+    Option.map (fun (e : Typ.expr) ->
         match eval e with
         | Interval i ->
             if Interval.compare i Interval.zero < 0 then
@@ -961,21 +965,21 @@ let timeout_of eval what =
 
 (* A packet, the bottom first: *)
 let packet_value packet =
-    Array (Array.of_list (List.rev_map (fun ((l : Crafty_layers.layer), (u : Crafty_layers.unpacked)) ->
-        match T.packet_record l with
-        | A.Type.Record fields ->
-            Variant (T.lname l.name, Record (Array.of_list (List.map (fun (name, _) ->
+    Array (Array.of_list (List.rev_map (fun ((l : Lay.layer), (u : Lay.unpacked)) ->
+        match Typ.packet_record l with
+        | Ast.Type.Record fields ->
+            Variant (Typ.lname l.name, Record (Array.of_list (List.map (fun (name, _) ->
                 List.assoc name u.values) fields)))
         | _ -> assert false) packet))
 
 (* [MATCH], from the packet that matched, decoded to its top: *)
-let match_value packet = packet_value (Crafty_tree.complete packet)
+let match_value packet = packet_value (Tre.complete packet)
 
 (* Fails [b] at [loc] as a stack does that will never send, for that reason
  * and because of that packet, if one: *)
 let cannot_send b loc (message, packet) =
-    b.fail Crafty_parser.{ where = loc ; message ; kind = Some A.Error_name.CannotConnect ;
-                           packet = Option.map match_value packet }
+    b.fail Prs.{ where = loc ; message ; kind = Some Ast.Error_name.CannotConnect ;
+                 packet = Option.map match_value packet }
 
 (* Calls [k] with the packet that the interface emits as [e], once it is
  * captured on its way out, decoded along the layers of [stack] it was sent
@@ -986,26 +990,26 @@ let await t b loc e stack k =
     let rec w = e, (fun frame ->
         if b.live then (
             disarm () ;
-            k (Crafty_tree.captured ~along:(Crafty_tree.along stack) t.tree frame)))
+            k (Tre.captured ~along:(Tre.along stack) t.tree frame)))
     and disarm () =
         t.awaited := List.filter ((!=) w) !(t.awaited) ;
-        Crafty_tree.forget e in
+        Tre.forget e in
     t.awaited := !(t.awaited) @ [ w ] ;
     b.cleanups <- disarm :: b.cleanups ;
     let rec timer () =
         if List.memq w !(t.awaited) && b.live then (
-            match Crafty_tree.failure stack with
+            match Tre.failure stack with
             | Some f -> disarm () ; cannot_send b loc f
-            | None when Crafty_tree.holding stack ->
+            | None when Tre.holding stack ->
                 Simulation.delay t.power capture_timeout timer ()
             | None ->
                 disarm () ;
                 ignore (guard b (fun () ->
-                    error_as A.Error_name.Timeout loc "The packet sent was not seen leaving within %s"
+                    error_as Ast.Error_name.Timeout loc "The packet sent was not seen leaving within %s"
                         (Interval.to_short_string capture_timeout)))) in
     Simulation.delay t.power capture_timeout timer () ;
-    Crafty_tree.on_ready stack (fun () ->
-        if Crafty_tree.failure stack <> None then timer ())
+    Tre.on_ready stack (fun () ->
+        if Tre.failure stack <> None then timer ())
 
 
 (* Registers alternative [patterns] for block [b], their conditions
@@ -1015,11 +1019,11 @@ let await t b loc e stack k =
  * Returns what unregisters them: *)
 (* Each case is alternative patterns and what to do of a packet that matches
  * one; a packet goes to one case at most: *)
-let register t b env (cases : (T.pattern list * _) list) ~failed ~missed =
-    let alternative (p : T.pattern) =
+let register t b env (cases : (Typ.pattern list * _) list) ~failed ~missed =
+    let alternative (p : Typ.pattern) =
         let over = List.rev (List.take (List.length env.stack - p.depth) env.stack) in
         let layers =
-            List.mapi (fun j (pl : T.pattern_layer) ->
+            List.mapi (fun j (pl : Typ.pattern_layer) ->
                 let cond =
                     Option.map (fun c packet ->
                         match eval t.output { env with packet } c with
@@ -1027,33 +1031,33 @@ let register t b env (cases : (T.pattern list * _) list) ~failed ~missed =
                         | _ -> assert false) pl.cond in
                 let test =
                     if j >= p.overlay then cond else
-                    let (o : Crafty_tree.entry) = List.nth over j in
+                    let (o : Tre.entry) = List.nth over j in
                     Some (fun packet ->
-                        Crafty_tree.of_stream o.node (snd (List.hd packet)) &&
+                        Tre.of_stream o.node (snd (List.hd packet)) &&
                         Option.map_default (fun c -> c packet) true cond) in
-                Crafty_tree.{ player = pl.pl_layer ; pmode = pl.pl_mode ; test }
+                Tre.{ player = pl.pl_layer ; pmode = pl.pl_mode ; test }
             ) p.pat_layers in
         if p.depth = 0 then t.tree, [], layers else
         let i = List.length env.stack - p.depth in
-        let (e : Crafty_tree.entry) = List.nth env.stack i in
+        let (e : Tre.entry) = List.nth env.stack i in
         e.node,
-        List.map (fun (e : Crafty_tree.entry) -> e.mode) (List.drop (i + 1) env.stack),
-        Crafty_tree.{ player = e.node.layer ; pmode = e.mode ; test = None } :: layers in
+        List.map (fun (e : Tre.entry) -> e.mode) (List.drop (i + 1) env.stack),
+        Tre.{ player = e.node.layer ; pmode = e.mode ; test = None } :: layers in
     let cases = List.map (fun (ps, matched) -> List.map alternative ps, matched) cases in
-    Crafty_tree.register cases ~failed ~missed ~hold:(fun n ->
-        Crafty_tree.acquire n ;
-        b.cleanups <- (fun () -> Crafty_tree.release n) :: b.cleanups)
+    Tre.register cases ~failed ~missed ~hold:(fun n ->
+        Tre.acquire n ;
+        b.cleanups <- (fun () -> Tre.release n) :: b.cleanups)
 
 (* The error of a pattern that nothing matched within [timeout], telling the
- * layer it [missed] (see {!Crafty_tree.pattern}), if any: *)
+ * layer it [missed] (see {!Tre.pattern}), if any: *)
 let nothing_matched loc timeout missed =
     let hint =
         match !missed with
         | None -> ""
-        | Some (l : Crafty_layers.layer) ->
-            let n = Crafty_layers.N.to_string l.name in
+        | Some (l : Lay.layer) ->
+            let n = Lay.N.to_string l.name in
             Printf.sprintf " (%s! would have: that %s stream is not self-driven)" n n in
-    error_as A.Error_name.Timeout loc "Nothing matched within %s%s" (Interval.to_short_string timeout) hint
+    error_as Ast.Error_name.Timeout loc "Nothing matched within %s%s" (Interval.to_short_string timeout) hint
 
 (* Whether error [e] is one of [names], or else any a program may catch: *)
 let caught names (e : error) =
@@ -1064,7 +1068,7 @@ let caught names (e : error) =
 (* Runs that block within [parent], then [k], unless it fails or breaks
  * first; returns the block. Its environment is what [enter] makes of [env]
  * once the block exists, unless that fails: *)
-let rec run_block ?(enter=fun _ env -> Some env) t parent env (stmts : T.block)
+let rec run_block ?(enter=fun _ env -> Some env) t parent env (stmts : Typ.block)
                   ~fail ~break_ k =
     let rec b =
         { parent = Some parent ; live = true ; children = [] ; cleanups = [] ;
@@ -1083,7 +1087,7 @@ let rec run_block ?(enter=fun _ env -> Some env) t parent env (stmts : T.block)
         if b.live then
             match stmts with
             | [] -> finish Void
-            | [ { T.stmt = T.Expr e ; _ } ] ->
+            | [ { Typ.stmt = Typ.Expr e ; _ } ] ->
                 exec_value t b env e (fun v -> if b.live then finish v)
             | s :: rest ->
                 exec t b env s (fun env -> if b.live then loop env rest) in
@@ -1092,32 +1096,32 @@ let rec run_block ?(enter=fun _ env -> Some env) t parent env (stmts : T.block)
 
 (* Computes [e] in block [b], then [k] with its value; a block, an [if], a
  * [case], an [expect] or a [try] runs as a block within [b]: *)
-and exec_value t b env (e : T.expr) k =
+and exec_value t b env (e : Typ.expr) k =
     let run env body =
         ignore (run_block t b env body ~fail:b.fail ~break_:b.break_ k) in
     let value e = eval t.output env e in
     let eval e = guard b (fun () -> value e) in
     match e.desc with
-    | T.Block body -> run env body
-    | T.If { cond ; then_ ; else_ } ->
+    | Typ.Block body -> run env body
+    | If { cond ; then_ ; else_ } ->
         Option.may (fun c -> run env (match c with Bool true -> then_ | _ -> else_))
             (eval cond)
-    | T.Case { subject ; arms ; else_ } ->
+    | Case { subject ; arms ; else_ } ->
         Option.may (fun v -> let env, body = branch env v arms else_ in run env body)
             (eval subject)
-    | T.Expect { timeout ; cases ; else_ } ->
+    | Expect { timeout ; cases ; else_ } ->
         Option.may (fun timeout ->
             let armed = ref true and unregister = ref ignore and missed = ref None in
             let disarm () = armed := false ; !unregister () in
             let fire f = if !armed && b.live then (disarm () ; f ()) in
             unregister :=
                 register t b env
-                    (List.map (fun (c : T.case) ->
+                    (List.map (fun (c : Typ.case) ->
                         c.patterns, fun packet -> fire (fun () ->
                             run (bind_lazy env c.match_ (fun () -> match_value packet))
                                 c.body)) cases)
                     ~failed:(fun kind where message -> fire (fun () ->
-                        b.fail Crafty_parser.{ where ; message ; kind ; packet = None }))
+                        b.fail Prs.{ where ; message ; kind ; packet = None }))
                     ~missed:(fun l -> missed := Some l) ;
             b.cleanups <- disarm :: b.cleanups ;
             Option.may (fun timeout ->
@@ -1128,9 +1132,9 @@ and exec_value t b env (e : T.expr) k =
                         ignore (guard b (fun () ->
                             nothing_matched e.loc timeout missed)))) ()) timeout)
             (guard b (fun () -> timeout_of value "expect" timeout))
-    | T.Try { body ; handlers } ->
+    | Try { body ; handlers } ->
         ignore (run_block t b env body ~fail:(fun err ->
-            match List.find_opt (fun (h : T.handler) -> caught h.errors err) handlers with
+            match List.find_opt (fun (h : Typ.handler) -> caught h.errors err) handlers with
             | None -> b.fail err
             | Some h ->
                 if b.live then
@@ -1141,23 +1145,23 @@ and exec_value t b env (e : T.expr) k =
 
 (* Runs that statement in block [b], then [k] with the environment for the
  * next statements: *)
-and exec t b env (s : T.stmt) k =
+and exec t b env (s : Typ.stmt) k =
     Simulation.catch_up t.power.sim ;
     let eval e = eval t.output env e in
     let guard f = guard b f in
     match s.stmt with
-    | T.Declare (v, e) -> exec_value t b env e (fun x -> k (bind env v x))
-    | T.Assign { var ; path ; value } ->
+    | Typ.Declare (v, e) -> exec_value t b env e (fun x -> k (bind env v x))
+    | Assign { var ; path ; value } ->
         Option.may (fun (is, env') ->
             exec_value t b env' value (fun x ->
                 let cell = lookup env var in
                 Option.may (fun y -> cell := y ; k env)
                     (guard (fun () -> set_item s.stmt_loc !cell is x))))
             (guard (fun () -> bind_path t.output env path))
-    | T.Expr e -> exec_value t b env e (fun _ -> k env)
-    | T.Break { depth ; continue } -> b.break_ ~continue depth
-    | T.Exit -> t.exit ()
-    | T.Wait dur ->
+    | Expr e -> exec_value t b env e (fun _ -> k env)
+    | Break { depth ; continue } -> b.break_ ~continue depth
+    | Exit -> t.exit ()
+    | Wait dur ->
         guard (fun () ->
             match eval dur with
             | Interval i ->
@@ -1167,9 +1171,9 @@ and exec t b env (s : T.stmt) k =
             | _ -> assert false) |>
         Option.may (fun i ->
             Simulation.delay t.power i (fun () -> if b.live then k env) ())
-    | T.Repeat { var ; count ; items ; every ; for_ ; body } ->
+    | Repeat { var ; count ; items ; every ; for_ ; body } ->
         repeat t b env var count items every for_ body s.stmt_loc (fun () -> k env)
-    | T.Retry { max ; on ; body } ->
+    | Retry { max ; on ; body } ->
         guard (fun () ->
             match Option.map eval max with Some (Int n) -> n | _ -> 3) |>
         Option.may (fun max ->
@@ -1180,18 +1184,18 @@ and exec t b env (s : T.stmt) k =
                             attempt (retries + 1)
                         else b.fail e)) in
             attempt 0)
-    | T.Stack { depth ; overlay ; layers ; body } ->
+    | Stack { depth ; overlay ; layers ; body } ->
         (* The block holds the nodes of its stack: *)
         let enter b env =
             match push t b env depth overlay layers with
             | stack -> Some { env with stack }
             | exception Failed (kind, message) ->
-                b.fail Crafty_parser.{ where = s.stmt_loc ; message ; kind ; packet = None } ; None
+                b.fail Prs.{ where = s.stmt_loc ; message ; kind ; packet = None } ; None
             | exception Runtime_error (kind, where, message) ->
-                b.fail Crafty_parser.{ where ; message ; kind ; packet = None } ; None in
+                b.fail Prs.{ where ; message ; kind ; packet = None } ; None in
         ignore (run_block ~enter t b env body ~fail:b.fail ~break_:b.break_
                     (fun _ -> k env))
-    | T.Send { depth ; overlay ; layers ; capture } ->
+    | Send { depth ; overlay ; layers ; capture } ->
         (* A packet, leaving the current stack as it was, once it can go on
          * without waiting (as a blocking write does). Its frames reach the
          * interface through events of their own, due now, so the stack is
@@ -1203,16 +1207,16 @@ and exec t b env (s : T.stmt) k =
                 try f () with Failed (kind, msg) -> raise (Runtime_error (kind, s.stmt_loc, msg))) in
         guard (fun () -> push t b env depth overlay layers) |>
         Option.may (fun stack ->
-        match Crafty_tree.failure stack with
+        match Tre.failure stack with
         | Some f -> cannot_send b s.stmt_loc f
         | None ->
-        guard (fun () -> Crafty_tree.send ~mark:(capture <> None) stack) |>
+        guard (fun () -> Tre.send ~mark:(capture <> None) stack) |>
         Option.may (fun (packet, emitted) ->
             env.last := lazy (packet_value (Lazy.force packet)) ;
             (* The first capture makes its variable, which the next ones
              * update: *)
             let set env v x =
-                if Env.mem v.T.id env.vars then (lookup env v := x ; env)
+                if Env.mem v.Typ.id env.vars then (lookup env v := x ; env)
                 else bind env v x in
             match capture, emitted with
             | Some v, Some e ->
@@ -1226,16 +1230,16 @@ and exec t b env (s : T.stmt) k =
                         asked := true ;
                         if b.live then check ()) in
                 Simulation.delay t.power d ask () ;
-                Crafty_tree.on_ready stack ask
+                Tre.on_ready stack ask
             and check () =
-                match Crafty_tree.failure stack with
+                match Tre.failure stack with
                 | Some f -> cannot_send b s.stmt_loc f
                 | None ->
-                    let d = Crafty_tree.busy_for stack in
+                    let d = Tre.busy_for stack in
                     if Interval.compare d Interval.zero <= 0 then k env else wait d in
             wait (Interval.psec 1)))
-    | T.On { for_ ; linger ; timeout ; max ; cases } ->
-        let duration what = Option.map (fun (e : T.expr) ->
+    | On { for_ ; linger ; timeout ; max ; cases } ->
+        let duration what = Option.map (fun (e : Typ.expr) ->
             match eval e with
             | Interval i ->
                 if Interval.compare i Interval.zero < 0 then
@@ -1252,9 +1256,9 @@ and exec t b env (s : T.stmt) k =
             if Option.map_default (fun m -> m > 0) true max then
                 on t b env s.stmt_loc cases ~for_ ~linger ~timeout max ;
             k env)
-    | T.Spawn { for_ ; body } ->
+    | Spawn { for_ ; body } ->
         guard (fun () ->
-            Option.map (fun (e : T.expr) ->
+            Option.map (fun (e : Typ.expr) ->
                 match eval e with
                 | Interval i ->
                     if Interval.compare i Interval.zero < 0 then
@@ -1325,7 +1329,7 @@ and on t b env loc cases ~for_ ~linger ~timeout max =
         check_over () in
     b.busy <- b.busy + 1 ;
     if holds then b.holding <- b.holding + 1 ;
-    let matched (c : T.case) packet =
+    let matched (c : Typ.case) packet =
         if !armed && b.live then (
             incr matches ;
             last_match := now () ;
@@ -1352,11 +1356,11 @@ and on t b env loc cases ~for_ ~linger ~timeout max =
                 else running := i :: !running ;
             check_over ()) in
     unregister :=
-        register t b env (List.map (fun (c : T.case) -> c.patterns, matched c) cases)
+        register t b env (List.map (fun (c : Typ.case) -> c.patterns, matched c) cases)
             ~failed:(fun kind where message ->
                 if !armed && b.live then (
                     disarm () ;
-                    b.fail Crafty_parser.{ where ; message ; kind ; packet = None }))
+                    b.fail Prs.{ where ; message ; kind ; packet = None }))
             ~missed:(fun l -> missed := Some l) ;
     b.cleanups <- disarm :: b.cleanups ;
     let end_ () = disarm () ; check_over () in
@@ -1464,7 +1468,7 @@ type handle =
       (* Whether a frame, sent or received, matches a filter: *)
       matches : filter -> Bitstring.bitstring -> bool ;
       (* The streams still open: *)
-      open_streams : unit -> Crafty_tree.node list ;
+      open_streams : unit -> Tre.node list ;
       (* Resets them, telling their peers (TCP: a RST): *)
       reset_streams : unit -> unit ;
       (* Whether a layer of that name used that local port: *)
@@ -1474,12 +1478,12 @@ type handle =
       over_ram : unit -> bool }
 
 (** Alternative absolute patterns, matched against a frame on its own: *)
-and filter = T.pattern list
+and filter = Typ.pattern list
 
-let idle (tree : Crafty_tree.node) () =
-    Crafty_tree.size tree = 1 && Tools.BitHash.length tree.eth.Eth.State.postponed = 0
+let idle (tree : Tre.node) () =
+    Tre.size tree = 1 && Tools.BitHash.length tree.eth.Eth.State.postponed = 0
 
-let open_streams tree () = Crafty_tree.streams tree
+let open_streams tree () = Tre.streams tree
 
 (* What reports print unless told otherwise: the summary of what they report,
  * after their name: *)
@@ -1496,44 +1500,44 @@ let output_of power ?(format=Human) ?report ?(check_words=fun _ _ -> ())
       check_words ; prog_args = args ; resolver ; getenv }
 
 let matches output tree (ps : filter) frame =
-    List.exists (fun (p : T.pattern) ->
+    List.exists (fun (p : Typ.pattern) ->
     let layers =
-        List.map (fun (pl : T.pattern_layer) ->
-            Crafty_tree.{
+        List.map (fun (pl : Typ.pattern_layer) ->
+            Tre.{
                 player = pl.pl_layer ; pmode = pl.pl_mode ;
                 test = Option.map (fun c packet ->
                     match eval output { vars = Env.empty ; stack = [] ; tree = Some tree ; packet ; last = ref (Lazy.from_val Void) } c with
                     | Bool b -> b
                     | _ -> assert false) pl.cond }) p.pat_layers in
-    Crafty_tree.matches tree layers frame) ps
+    Tre.matches tree layers frame) ps
 
 (* Runs [program] on [power]'s simulation, starting at once, sending and
- * receiving through [tree] (from {!Crafty_tree.make_root}), writing with
+ * receiving through [tree] (from {!Tre.make_root}), writing with
  * [print] and [print_err], giving what it reports to [report] (else printing
  * its summary), and calling [on_exit] with its final status (possibly before
  * returning). *)
 (* The values of BUDGET, PORTS and PERMISSIONS, void where not set, for a
  * program of addresses [own]: *)
-let self_values ~own (l : T.limits) =
+let self_values ~own (l : Typ.limits) =
     let record typ get =
         match typ with
-        | A.Type.Record fs -> Record (Array.of_list (List.map (fun (n, _) -> get n) fs))
+        | Ast.Type.Record fs -> Record (Array.of_list (List.map (fun (n, _) -> get n) fs))
         | _ -> assert false in
     let ranges rs =
         Array (Array.of_list (List.map (fun (lo, hi) -> Array [| Int lo ; Int hi |]) rs)) in
-    record T.budget_type (fun n ->
+    record Typ.budget_type (fun n ->
         Option.map_default of_literal Void (List.assoc_opt n l.budget)),
-    record T.ports_type (fun n ->
+    record Typ.ports_type (fun n ->
         match l.ports with
         | None -> Void
         | Some p -> ranges (if n = "tcp" then p.tcp else p.udp)),
-    record T.permissions_type (fun n ->
+    record Typ.permissions_type (fun n ->
         let p = l.permissions in
         let rules =
             Option.map_default (fun rs ->
                 Array (Array.of_list (List.map (fun (v, c) ->
                     Variant ((if v = Firewall.Accept then "Accept" else "Deny"),
-                             Cidr c)) (T.address_rules ~own rs)))) Void
+                             Cidr c)) (Typ.address_rules ~own rs)))) Void
         and flag = Option.map_default (fun b -> Bool b) Void in
         match n with
         | "local_ips" -> rules p.local_ips
@@ -1546,8 +1550,8 @@ let self_values ~own (l : T.limits) =
         | _ -> flag p.exfiltration)
 
 let run_on_tree power tree ?format ?report ?args ?resolver ?getenv ~print ~print_err ?(on_exit=ignore)
-                ?(limits=T.no_limits) ?(on_start=ignore) ?(on_exception=fun _ -> true)
-                (program : T.block) =
+                ?(limits=Typ.no_limits) ?(on_start=ignore) ?(on_exception=fun _ -> true)
+                (program : Typ.block) =
     let status = ref Running in
     let exit s =
         if !status = Running then (
@@ -1562,7 +1566,7 @@ let run_on_tree power tree ?format ?report ?args ?resolver ?getenv ~print ~print
     let word = Sys.word_size / 8 in
     let max_ram =
         match List.assoc_opt "max_ram" limits.budget with
-        | Some (A.Int n) -> Some n
+        | Some (Ast.Int n) -> Some n
         | _ -> None in
     let over_ram = ref false in
     let check_ram () =
@@ -1586,16 +1590,16 @@ let run_on_tree power tree ?format ?report ?args ?resolver ?getenv ~print ~print
               exit = (fun () -> cancel root ; exit Done) } in
     let own =
         List.map (fun (a : Eth.State.my_address) -> Ip.Addr.of_bitstring a.addr)
-                 tree.Crafty_tree.eth.my_addresses |>
+                 tree.Tre.eth.my_addresses |>
         List.stable_sort (fun a b -> Bool.compare (Ip.Addr.is_v6 a) (Ip.Addr.is_v6 b)) in
     let budget, ports, permissions = self_values ~own limits in
     let own_ip = match own with [] -> Void | a :: _ -> Ip a in
     let vars =
         { vars = Env.empty ; stack = [] ; tree = Some tree ; packet = [] ; last = ref (Lazy.from_val Void) } |>
-        fun env -> bind (bind (bind (bind (bind env T.budget_var budget) T.ports_var ports)
-                                    T.permissions_var permissions)
-                              T.own_ip_var own_ip)
-                        T.own_ips_var (Array (Array.of_list (List.map (fun a -> Ip a) own))) in
+        fun env -> bind (bind (bind (bind (bind env Typ.budget_var budget) Typ.ports_var ports)
+                                    Typ.permissions_var permissions)
+                              Typ.own_ip_var own_ip)
+                        Typ.own_ips_var (Array (Array.of_list (List.map (fun a -> Ip a) own))) in
     let h =
         { stop ;
           status = (fun () -> !status) ;
@@ -1603,7 +1607,7 @@ let run_on_tree power tree ?format ?report ?args ?resolver ?getenv ~print ~print
           emitted = emitted t ;
           matches = matches t.output tree ;
           open_streams = open_streams tree ;
-          reset_streams = (fun () -> Crafty_tree.reset_streams tree) ;
+          reset_streams = (fun () -> Tre.reset_streams tree) ;
           uses_port = tree.uses_port ;
           over_ram = check_ram } in
     on_start h ;
@@ -1612,8 +1616,8 @@ let run_on_tree power tree ?format ?report ?args ?resolver ?getenv ~print ~print
     sim.on_exception <- (fun exn ->
         others exn ;
         if on_exception exn then
-            root.fail Crafty_parser.{ where = A.nowhere ; message = Printexc.to_string exn ;
-                                      kind = None ; packet = None }) ;
+            root.fail Prs.{ where = Ast.nowhere ; message = Printexc.to_string exn ;
+                            kind = None ; packet = None }) ;
     ignore (run_block t root vars program
                 ~fail:root.fail ~break_:root.break_
                 (fun _ -> t.exit ())) ;
@@ -1642,46 +1646,46 @@ struct
     let max_words = 256
 
     (* The value of [v], of type [typ], written as an expression: *)
-    let rec expr_of_value loc (typ : A.Type.t) v : T.expr option =
-        let mk desc = Some T.{ loc ; typ ; desc ; taint = [] } in
+    let rec expr_of_value loc (typ : Ast.Type.t) v : Typ.expr option =
+        let mk desc = Some Typ.{ loc ; typ ; desc ; taint = [] } in
         let all f xs =
             let es = List.filter_map f xs in
             if List.compare_lengths es xs = 0 then Some es else None in
         match v, typ with
         | Void, _ -> None
-        | Bool b, _ -> mk (Lit (A.Bool b))
-        | Byte b, _ -> mk (Lit (A.Byte b))
-        | Int i, _ -> mk (Lit (A.Int i))
-        | Float f, _ -> mk (Lit (A.Float f))
-        | Interval i, _ -> mk (Lit (A.Interval i))
-        | Time t, _ -> mk (Lit (A.Time t))
-        | Ip a, _ -> mk (Lit (A.Ip a))
-        | Mac m, _ -> mk (Lit (A.Mac m))
-        | Cidr c, _ -> mk (Lit (A.Cidr c))
+        | Bool b, _ -> mk (Lit (Ast.Bool b))
+        | Byte b, _ -> mk (Lit (Ast.Byte b))
+        | Int i, _ -> mk (Lit (Ast.Int i))
+        | Float f, _ -> mk (Lit (Ast.Float f))
+        | Interval i, _ -> mk (Lit (Ast.Interval i))
+        | Time t, _ -> mk (Lit (Ast.Time t))
+        | Ip a, _ -> mk (Lit (Ast.Ip a))
+        | Mac m, _ -> mk (Lit (Ast.Mac m))
+        | Cidr c, _ -> mk (Lit (Ast.Cidr c))
         | String s, _ -> mk (String [ Text s ])
-        | Array a, A.Type.Array t ->
+        | Array a, Ast.Type.Array t ->
             Option.bind (all (expr_of_value loc t) (Array.to_list a)) (fun es -> mk (Array es))
-        | Record a, A.Type.Record fs ->
+        | Record a, Record fs ->
             Option.bind (all (fun (x, (_, t)) -> expr_of_value loc t x)
                              (List.combine (Array.to_list a) fs))
                 (fun es -> mk (Record es))
-        | Map (m, None), A.Type.Map (kt, vt) ->
+        | Map (m, None), Map (kt, vt) ->
             Option.bind (all (fun (k, x) ->
                             match expr_of_value loc kt k, expr_of_value loc vt x with
                             | Some k, Some x -> Some (k, x)
                             | _ -> None) (Map.PMap.bindings m))
                 (fun kvs -> mk (Map kvs))
-        | Variant (c, Void), A.Type.Variant _ -> mk (Construct (c, None))
-        | Variant (c, x), A.Type.Variant cs ->
+        | Variant (c, Void), Variant _ -> mk (Construct (c, None))
+        | Variant (c, x), Variant cs ->
             Option.bind (Option.bind (List.assoc_opt c cs) (fun t -> expr_of_value loc t x))
                 (fun x -> mk (Construct (c, Some x)))
         | _ -> None
 
     (* Whether [e] is written as a value: *)
-    let rec is_value (e : T.expr) =
+    let rec is_value (e : Typ.expr) =
         match e.desc with
         | Lit _ -> true
-        | String parts -> List.for_all (function T.Text _ -> true | Interp _ -> false) parts
+        | String parts -> List.for_all (function Typ.Text _ -> true | Interp _ -> false) parts
         | Array es | Record es -> List.for_all is_value es
         | Map kvs -> List.for_all (fun (k, v) -> is_value k && is_value v) kvs
         | Construct (_, x) -> Option.map_default is_value true x
@@ -1715,25 +1719,25 @@ struct
      * not run. What is computed keeps the sources of what it was computed
      * from (see {!Crafty_typing.taints_of}). Shares nothing with [b], so that
      * it can be run alongside. *)
-    let block ?getenv ?args ?resolver (b : T.block) =
+    let block ?getenv ?args ?resolver (b : Typ.block) =
         let value = value (output ?getenv ?args ?resolver ()) in
-        let taints = T.taints_of b in
+        let taints = Typ.taints_of b in
         let assigned = Hashtbl.create 7 in
-        T.iter_stmts (fun s ->
+        Typ.iter_stmts (fun s ->
             match s.stmt with
             | Assign { var ; _ } -> Hashtbl.replace assigned var.id ()
             | _ -> ()) b ;
         (* The values of the constant variables, by id: *)
         let consts = Hashtbl.create 7 in
         let computable = function
-            | T.Getenv -> getenv <> None
-            | T.Arg | T.Nargs -> args <> None
-            | T.Resolve | T.Hostname -> resolver <> None
-            | T.Format -> false
-            | b -> T.is_pure b in
+            | Typ.Getenv -> getenv <> None
+            | Arg | Nargs -> args <> None
+            | Resolve | Hostname -> resolver <> None
+            | Format -> false
+            | b -> Typ.is_pure b in
         (* Whether [e] is made of values, computable builtins and the variables
          * [bound] within it: *)
-        let rec closed bound (e : T.expr) =
+        let rec closed bound (e : Typ.expr) =
             match e.desc with
             | Lit _ -> true
             | Var v -> List.mem v.id bound
@@ -1741,17 +1745,17 @@ struct
             | Comprehension { key ; value ; clauses } ->
                 let bound, ok =
                     List.fold_left (fun (bound, ok) -> function
-                        | T.Bind (v, items) -> v.id :: bound, ok && closed bound items
-                        | T.Filter c -> bound, ok && closed bound c) (bound, true) clauses in
+                        | Typ.Bind (v, items) -> v.id :: bound, ok && closed bound items
+                        | Filter c -> bound, ok && closed bound c) (bound, true) clauses in
                 ok && closed bound value && Option.map_default (closed bound) true key
             | String _ | Field _ | Index _ | Slice _ | Call _ | Unop _ | Binop _
             | Record _ | Array _ | Map _ | Convert _ | Construct _ ->
-                List.for_all (closed bound) (T.sub_exprs e)
+                List.for_all (closed bound) (Typ.sub_exprs e)
             | Packet_field _ | Select _ | Encode _ | Block _ | If _ | Case _
             | Expect _ | Try _ | Memo _ ->
                 false in
         let opt f = Option.map f in
-        let rec expr (e : T.expr) : T.expr =
+        let rec expr (e : Typ.expr) : Typ.expr =
             let taint = taints e in
             let mk desc = { e with desc } in
             let e =
@@ -1769,12 +1773,12 @@ struct
                     mk (String (List.fold_right (fun p parts ->
                         let p =
                             match p with
-                            | T.Text _ -> p
-                            | T.Interp e ->
+                            | Typ.Text _ -> p
+                            | Interp e ->
                                 let e = expr e in
-                                Option.map_default (fun s -> T.Text s) (T.Interp e) (text e) in
+                                Option.map_default (fun s -> Typ.Text s) (Typ.Interp e) (text e) in
                         match p, parts with
-                        | T.Text a, T.Text b :: parts -> T.Text (a ^ b) :: parts
+                        | Typ.Text a, Typ.Text b :: parts -> Typ.Text (a ^ b) :: parts
                         | p, parts -> p :: parts) parts []))
                 | Field (r, i) -> mk (Field (expr r, i))
                 | Index (a, i) -> mk (Index (expr a, expr i))
@@ -1791,33 +1795,33 @@ struct
                     mk (Comprehension {
                         key = opt expr key ; value = expr value ;
                         clauses = List.map (function
-                            | T.Bind (v, items) -> T.Bind (v, expr items)
-                            | T.Filter c -> T.Filter (expr c)) clauses })
+                            | Typ.Bind (v, items) -> Typ.Bind (v, expr items)
+                            | Filter c -> Typ.Filter (expr c)) clauses })
                 | Convert a -> mk (Convert (expr a))
                 | Construct (c, a) -> mk (Construct (c, opt expr a))
                 | Block b ->
                     (* Declarations of values do nothing else than be read: *)
                     let b = block b in
                     (match List.rev b with
-                    | T.{ stmt = Expr x ; _ } :: decls
+                    | Typ.{ stmt = Expr x ; _ } :: decls
                       when is_value x &&
                            List.for_all (function
-                               | T.{ stmt = Declare (_, d) ; _ } -> is_value d
+                               | Typ.{ stmt = Declare (_, d) ; _ } -> is_value d
                                | _ -> false) decls -> x
                     | _ -> mk (Block b))
                 | If { cond ; then_ ; else_ } ->
                     let cond = expr cond in
                     (match cond.desc with
-                    | Lit (A.Bool c) -> expr (mk (Block (if c then then_ else else_)))
+                    | Lit (Ast.Bool c) -> expr (mk (Block (if c then then_ else else_)))
                     | _ -> mk (If { cond ; then_ = block then_ ; else_ = block else_ }))
                 | Case { subject ; arms ; else_ } ->
                     let subject = expr subject in
                     let taken =
                         match subject.desc with
                         | Construct (c, x) when is_value subject ->
-                            (match List.find_opt (fun (a : T.arm) -> a.ctor = c) arms, x with
+                            (match List.find_opt (fun (a : Typ.arm) -> a.ctor = c) arms, x with
                             | Some { held = Some v ; branch ; _ }, Some x ->
-                                let decl = T.{ stmt_loc = subject.loc ; stmt = Declare (v, x) } in
+                                let decl = Typ.{ stmt_loc = subject.loc ; stmt = Declare (v, x) } in
                                 Some (decl :: branch)
                             | Some { held = None ; branch ; _ }, _ -> Some branch
                             | None, _ -> else_
@@ -1827,27 +1831,27 @@ struct
                     | Some b -> expr (mk (Block b))
                     | None ->
                         mk (Case { subject ;
-                                   arms = List.map (fun (a : T.arm) -> { a with branch = block a.branch }) arms ;
+                                   arms = List.map (fun (a : Typ.arm) -> { a with branch = block a.branch }) arms ;
                                    else_ = opt block else_ }))
                 | Expect { timeout ; cases ; else_ } ->
                     mk (Expect { timeout = opt expr timeout ; cases = List.map case cases ;
                                  else_ = opt block else_ })
                 | Try { body ; handlers } ->
                     mk (Try { body = block body ;
-                              handlers = List.map (fun (h : T.handler) ->
+                              handlers = List.map (fun (h : Typ.handler) ->
                                   { h with handler = block h.handler }) handlers }) in
             let e =
                 if is_value e || not (closed [] e) then e else
                 Option.bind (value e) (expr_of_value e.loc e.typ) |? e in
-            { e with taint = T.union e.taint taint }
-        and layer (l : T.layer) =
+            { e with taint = Typ.union e.taint taint }
+        and layer (l : Typ.layer) =
             { l with options = List.map (fun (i, e) -> i, expr e) l.options }
-        and case (c : T.case) =
-            { c with patterns = List.map (fun (p : T.pattern) ->
-                        { p with pat_layers = List.map (fun (pl : T.pattern_layer) ->
+        and case (c : Typ.case) =
+            { c with patterns = List.map (fun (p : Typ.pattern) ->
+                        { p with pat_layers = List.map (fun (pl : Typ.pattern_layer) ->
                             { pl with cond = opt expr pl.cond }) p.pat_layers }) c.patterns ;
                      body = block c.body }
-        and stmt (s : T.stmt) =
+        and stmt (s : Typ.stmt) =
             let mk stmt = { s with stmt } in
             match s.stmt with
             | Stack st -> mk (Stack { st with layers = List.map layer st.layers ; body = block st.body })
@@ -1875,7 +1879,7 @@ struct
             | Spawn sp -> mk (Spawn { for_ = opt expr sp.for_ ; body = block sp.body })
         and block b = List.map stmt b in
         let b = block b in
-        T.cache_constants b ;
+        Typ.cache_constants b ;
         b
 
     (** [s], as [block] makes it. *)
@@ -1883,6 +1887,9 @@ struct
         match block ?getenv ?args ?resolver [ s ] with
         | [ s ] -> s
         | _ -> assert false
+
+    let program ?getenv ?args ?resolver (p : program) =
+        { p with body = block ?getenv ?args ?resolver p.body }
 end
 
 (* [folded ?env ?args ?resolver text] are the top level declarations of that
@@ -1892,25 +1899,25 @@ end
 (*$inject
   let resolver =
       let a = Ip.Addr.of_string "10.0.0.1" in
-      Crafty_interp.{ resolve = (function "a" -> [ a ] | _ -> []) ;
-                      hostname = (fun ip -> if Ip.Addr.compare ip a = 0 then Some "a" else None) }
+      { resolve = (function "a" -> [ a ] | _ -> []) ;
+        hostname = (fun ip -> if Ip.Addr.compare ip a = 0 then Some "a" else None) }
   let folded ?env ?args ?resolver text =
-      match Crafty_interp.compile text with
-      | Error es -> String.concat "\n" (List.map (IO.to_string Crafty_interp.print_error) es)
+      match compile text with
+      | Error es -> String.concat "\n" (List.map (IO.to_string Prs.print_error) es)
       | Ok p ->
           let getenv = Option.map (fun env n -> List.assoc_opt n env) env in
-          let b = Crafty_interp.Partial.block ?getenv ?args ?resolver p.body in
+          let b = Partial.block ?getenv ?args ?resolver p.body in
           let decls =
-              List.filter_map (fun (s : Crafty_typing.stmt) ->
+              List.filter_map (fun (s : Typ.stmt) ->
                   match s.stmt with
                   | Declare (v, e) ->
                       Some (v.name ^"="^
-                            match Crafty_interp.Partial.(is_value e, value (output ()) e) with
+                            match Partial.(is_value e, value (output ()) e) with
                             | true, Some x -> Crafty_value.to_string e.typ x
                             | _ -> "_")
                   | _ -> None) b
           and reads =
-              Crafty_typing.fold_exprs (fun acc (e : Crafty_typing.expr) ->
+              Typ.fold_exprs (fun acc (e : Typ.expr) ->
                   match e.desc with
                   | Call (Getenv, { desc = String [ Text n ] ; _ } :: _) -> ("$"^ n) :: acc
                   | Call (Getenv, _) -> "$?" :: acc
@@ -1943,25 +1950,25 @@ end
   "x=_ y=b" (folded ~resolver "x = resolve(\"b\")\ny = hostname(10.0.0.2, default=\"b\")")
 *)
 
-(* [refolded text] is where {!Crafty_typing.exfiltrations} finds exfiltrations
+(* [refolded text] is where {!Typ.exfiltrations} finds exfiltrations
  * in that program, then once partially evaluated with every variable of the
  * environment and argument set to "1", and every name at 10.0.0.1: *)
 (*$inject
   let refolded text =
-      match Crafty_interp.compile text with
-      | Error es -> String.concat "\n" (List.map (IO.to_string Crafty_interp.print_error) es)
+      match compile text with
+      | Error es -> String.concat "\n" (List.map (IO.to_string Prs.print_error) es)
       | Ok p ->
           let where b =
-              Crafty_typing.exfiltrations b |>
-              List.map (fun (e : Crafty_parser.error) ->
+              Typ.exfiltrations b |>
+              List.map (fun (e : Prs.error) ->
                   Printf.sprintf "%d:%d" e.where.line e.where.column) |>
               String.concat " " in
           let resolver =
-              Crafty_interp.{ resolve = (fun _ -> [ Ip.Addr.of_string "10.0.0.1" ]) ;
-                              hostname = (fun _ -> Some "a") } in
+              { resolve = (fun _ -> [ Ip.Addr.of_string "10.0.0.1" ]) ;
+                hostname = (fun _ -> Some "a") } in
           where p.body ^" | "^
-          where (Crafty_interp.Partial.block ~getenv:(fun _ -> Some "1") ~args:[| "1" |]
-                                             ~resolver p.body)
+          where (Partial.block ~getenv:(fun _ -> Some "1") ~args:[| "1" |]
+                               ~resolver p.body)
 *)
 (*$= refolded & ~printer:identity
   "1:35 | 1:35" (refolded "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(getenv(\"X\")) }")
@@ -1981,9 +1988,9 @@ end
 (*$inject
   let both text =
       let getenv = function "HOME" -> Some "/root" | _ -> None in
-      match Result.bind (Result.map_error (fun e -> [ e ]) (Crafty_parser.parse text))
-                        Crafty_typing.check with
-      | Error es -> String.concat "\n" (List.map (IO.to_string Crafty_interp.print_error) es)
+      match Result.bind (Result.map_error (fun e -> [ e ]) (Prs.parse text))
+                        Typ.check with
+      | Error es -> String.concat "\n" (List.map (IO.to_string Prs.print_error) es)
       | Ok body ->
       let run body =
           let sim = Simulation.make ~realtime:false "crafty" in
@@ -1991,40 +1998,35 @@ end
               Eth.State.make ~parent:sim.SimTypes.root ~name:"crafty"
                   ~mac:(Eth.Addr.of_string "02:00:00:00:00:01") () in
           let out = ref [] in
-          ignore (Crafty_interp.run_on_tree sim.root.power (Crafty_tree.make_root eth)
+          ignore (run_on_tree sim.root.power (Tre.make_root eth)
                       ~getenv ~print:(fun s -> out := s :: !out) ~print_err:ignore body) ;
           Simulation.run sim false ;
           String.concat "," (List.rev !out) in
-      run body ^" | "^ run (Crafty_interp.Partial.block ~getenv body)
+      run body ^" | "^ run (Partial.block ~getenv body)
 *)
 (*$= both & ~printer:identity
   "6,7,8,ok,/root,x[] | 6,7,8,ok,/root,x[]" \
     (both "a = [1, 2] + [3]\nrepeat count=3 { print(sum(a) + I) }\nr = if length(a) > 2 { Some(\"ok\") } else { None }\ncase r Some { print(I) } | None { print(\"none\") }\nprint(getenv(\"HOME\"))\nprint(\"x${[i for i in a if i > 3] * 2}\")")
 *)
 
-(* With what it declares of itself: *)
-type program = { body : Crafty_typing.block ; limits : Crafty_typing.limits }
-
-let print_error = Crafty_parser.print_error
-
 (** The program, or all the errors found in it, in the order of the source;
  * and in [warnings], what is likely not what was meant. *)
 let compile ?warnings text : (program, error list) result =
-    match Crafty_parser.parse text with
+    match Prs.parse text with
     | Error e -> Error [ e ]
     | Ok p ->
-        Result.bind (Crafty_typing.check ?warnings p) (fun body ->
-            Result.map (fun limits -> { body ; limits }) (Crafty_typing.limits p))
+        Result.bind (Typ.check ?warnings p) (fun body ->
+            Result.map (fun limits -> { body ; limits }) (Typ.limits p))
 
 (** The filter of that text, alternative absolute patterns, or what is wrong
  * with it. *)
 let compile_filter text : (filter, error) result =
-    Result.bind (Crafty_parser.parse_patterns text) Crafty_typing.check_patterns
+    Result.bind (Prs.parse_patterns text) Typ.check_patterns
 
 let print_status oc = function
     | Running -> String.print oc "running"
     | Done -> String.print oc "done"
-    | Failed e -> Printf.fprintf oc "failed: %a" print_error e
+    | Failed e -> Printf.fprintf oc "failed: %a" Prs.print_error e
     | Stopped -> String.print oc "stopped"
 
 (** Runs [program] on a new Ethernet interface under [parent], of address
@@ -2036,7 +2038,7 @@ let print_status oc = function
  * taking the frames for other addresses too if [promisc],
  * picking the local ports it is not given from the ports of [limits], not
  * one that went away less than [time_wait] ago (as
- * {!Crafty_tree.make_root} does), [limits] (default: the program's) being
+ * {!Tre.make_root} does), [limits] (default: the program's) being
  * what [BUDGET] and [PORTS] are, printing with [print] and [print_err],
  * telling [on_warning] of what is likely not what was meant (once each),
  * [format()] writing in [format] (default {!Crafty_value.Human}),
@@ -2055,14 +2057,14 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         (program : program) =
     let limits = limits |? program.limits in
     let ports =
-        Option.map (fun (p : T.ports) -> [ "TCP", p.tcp ; "UDP", p.udp ])
+        Option.map (fun (p : Typ.ports) -> [ "TCP", p.tcp ; "UDP", p.udp ])
                    limits.ports in
     let gateways =
         List.concat_map (fun gw ->
             let sel v6 = Eth.State.gw_selector ~v6 (), Some gw in
             match gw with
             | Eth.Gateway.Ip a -> [ sel (Ip.Addr.is_v6 a) ]
-            | Eth.Gateway.Mac _ -> [ sel false ; sel true ]) gateways in
+            | Mac _ -> [ sel false ; sel true ]) gateways in
     let eth =
         Eth.State.make ~parent ~name ~mac ~gateways ?answer_requests
             ?promisc:(if promisc then Some ignore else None)
@@ -2075,18 +2077,18 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     eth.iface.rx_wire <- rx_wire ;
     let power = eth.iface.widget.power in
     let told = Hashtbl.create 3 in
-    let on_foreign_port where (l : Crafty_layers.layer) p ranges =
-        let name = Crafty_layers.N.to_string l.name in
+    let on_foreign_port where (l : Lay.layer) p ranges =
+        let name = Lay.N.to_string l.name in
         if not (Hashtbl.mem told (name, p)) then (
             Hashtbl.add told (name, p) () ;
-            on_warning { Crafty_parser.where ; kind = None ; packet = None ; message =
+            on_warning { Prs.where ; kind = None ; packet = None ; message =
                 Printf.sprintf "%s source port %d is outside the ports allowed (%s): \
                                 replies to it are not captured" name p
                     (String.concat ", " (List.map (fun (lo, hi) ->
                         if lo = hi then string_of_int lo
                         else Printf.sprintf "%d-%d" lo hi) ranges)) }) in
     let tree =
-        Crafty_tree.make_root ?ports ?router ?time_wait eth
+        Tre.make_root ?ports ?router ?time_wait eth
             ~on_removed:on_closed ~on_foreign_port in
     let started = ref None and stopped = ref false in
     Simulation.asap power (fun () ->
@@ -2111,7 +2113,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       emitted = (fun frame -> Option.may (fun (h : handle) -> h.emitted frame) !started) ;
       matches = matches (output_of power ?format ?report ?args ?resolver ~print ~print_err ()) tree ;
       open_streams = open_streams tree ;
-      reset_streams = (fun () -> Crafty_tree.reset_streams tree) ;
+      reset_streams = (fun () -> Tre.reset_streams tree) ;
       uses_port = tree.uses_port ;
       over_ram = (fun () ->
         Option.map_default (fun (h : handle) -> h.over_ram ()) false !started) }
@@ -2182,22 +2184,22 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       incoming (Ip.Pdu.pack (udp_packet sport dport data))
 
   let runs ?stop_at ?(trees=false) ?(frames=false) ?(sent=false) ?(inject=[]) ?(promisc=false) ?format ?args ?getenv text =
-      match Crafty_parser.parse text with
-      | Error e -> IO.to_string Crafty_parser.print_error e
+      match Prs.parse text with
+      | Error e -> IO.to_string Prs.print_error e
       | Ok p ->
-          match Crafty_typing.check p with
+          match Typ.check p with
           | Error es ->
-              String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es)
+              String.concat "\n" (List.map (IO.to_string Prs.print_error) es)
           | Ok p ->
               let sim = Simulation.make ~realtime:false "crafty" in
               sim.epoch <- Clock.Wall.of_secs 0. ;
               let eth = crafty_eth ?promisc:(if promisc then Some ignore else None) sim in
-              let tree = Crafty_tree.make_root eth in
+              let tree = Tre.make_root eth in
               let out = ref [] in
               let line pfx s =
                   out := Printf.sprintf "%s%s: %s%s" pfx
                       (Clock.Time.to_string (Simulation.now sim)) s
-                      (if trees then " "^ Crafty_tree.to_string tree else "") :: !out in
+                      (if trees then " "^ Tre.to_string tree else "") :: !out in
               let emitted = ref ignore in
               if frames || sent then
                   Tools.(Eth.Iface.dev eth.Eth.State.iface -->
@@ -2212,7 +2214,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
                       ~on_exit:(function
                           | Done -> line "" "done"
                           | Failed e ->
-                              line "" ("failed: "^ IO.to_string Crafty_parser.print_error e)
+                              line "" ("failed: "^ IO.to_string Prs.print_error e)
                           | Stopped -> line "" "stopped"
                           | Running -> ()) p in
               emitted := h.emitted ;
@@ -2240,17 +2242,17 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (*$R runs
   ignore runs ;
   let program =
-      Crafty_parser.parse "repeat count=2 { if I > 5 { x = #00 * 3 } else { x = #00 * 4 } }" |>
-      Result.get_ok |> Crafty_typing.check |> Result.get_ok in
+      Prs.parse "repeat count=2 { if I > 5 { x = #00 * 3 } else { x = #00 * 4 } }" |>
+      Result.get_ok |> Typ.check |> Result.get_ok in
   let cached () =
-      T.fold_exprs (fun found (e : T.expr) ->
+      Typ.fold_exprs (fun found (e : Typ.expr) ->
           match e.desc with
-          | T.Memo m -> Option.is_some m.cached :: found
+          | Typ.Memo m -> Option.is_some m.cached :: found
           | _ -> found) [] program |>
       List.sort Bool.compare in
   assert_equal [ false ; false ] (cached ()) ;
   let sim = Simulation.make ~realtime:false "crafty" in
-  let tree = Crafty_tree.make_root (crafty_eth sim) in
+  let tree = Tre.make_root (crafty_eth sim) in
   ignore (run_on_tree sim.root.power tree ~print:ignore ~print_err:ignore program) ;
   Simulation.run sim false ;
   assert_equal [ false ; true ] (cached ())
@@ -2950,12 +2952,12 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
  * [setup], which is given a function for the host to print lines. With
  * [v6], the programs and the host also have 2001:db8::N/64. *)
 (*$inject
-  let compile text =
-      match Crafty_parser.parse text with
-      | Error e -> failwith (IO.to_string Crafty_parser.print_error e)
+  let checked text =
+      match Prs.parse text with
+      | Error e -> failwith (IO.to_string Prs.print_error e)
       | Ok p ->
-          match Crafty_typing.check p with
-          | Error es -> failwith (String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es))
+          match Typ.check p with
+          | Error es -> failwith (String.concat "\n" (List.map (IO.to_string Prs.print_error) es))
           | Ok p -> p
 
   let address n = Ip.Addr.of_string (Printf.sprintf "10.0.0.%d" n)
@@ -2977,14 +2979,14 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       let line s =
           out := Printf.sprintf "%s %.3fs: %s" name (Clock.Time.to_secs (Simulation.now sim)) s :: !out in
       let tree =
-          Crafty_tree.make_root eth ~on_removed:(fun n ->
-              if closed then line ("closed "^ Crafty_tree.stats_line n)) in
+          Tre.make_root eth ~on_removed:(fun n ->
+              if closed then line ("closed "^ Tre.stats_line n)) in
       run_on_tree sim.SimTypes.root.power tree ~print:line ~print_err:(fun s -> line ("err "^ s))
           ~on_exit:(function
-              | Done -> line ("done "^ Crafty_tree.to_string tree)
-              | Failed e -> line ("failed: "^ IO.to_string Crafty_parser.print_error e ^" "^ Crafty_tree.to_string tree)
+              | Done -> line ("done "^ Tre.to_string tree)
+              | Failed e -> line ("failed: "^ IO.to_string Prs.print_error e ^" "^ Tre.to_string tree)
               | Stopped -> line "stopped"
-              | Running -> ()) (compile text)
+              | Running -> ()) (checked text)
 
   let frame_line sim out dir bits =
       let d = describe bits in
@@ -3519,8 +3521,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (*$inject
   let policed ?max_packets ?max_packet_rate ?max_syns ?max_syn_rate ?stop_at ?raise_at ?(stop=false)
               ?(addresses=[ "10.0.0.1/24" ]) ?on_exception text =
-      match Crafty_interp.compile text with
-      | Error es -> String.concat "\n" (List.map (IO.to_string print_error) es)
+      match compile text with
+      | Error es -> String.concat "\n" (List.map (IO.to_string Prs.print_error) es)
       | Ok p ->
           let sim = Simulation.make ~realtime:false "crafty-api" in
           let out = ref [] and frames = ref 0 in
@@ -3531,7 +3533,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
                   ~addresses:(List.map Ip.Cidr.of_string addresses)
                   ~gateways:[ Eth.Gateway.Mac (Eth.Addr.of_string "02:00:00:00:00:fe") ]
                   ~print:line ~print_err:line
-                  ~on_warning:(fun e -> line ("warning "^ IO.to_string print_error e))
+                  ~on_warning:(fun e -> line ("warning "^ IO.to_string Prs.print_error e))
                   ~on_exit:(fun s -> line (IO.to_string print_status s)) ?on_exception p in
           let policer =
               Policer.make ~parent:sim.root ?max_packets ?max_packet_rate ?max_syns ?max_syn_rate
@@ -3688,7 +3690,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   let ip = Ip.Addr.of_string and mac = Eth.Addr.of_string in
   let arp ?(from="02:00:00:00:00:fe") pdu =
       Eth.Pdu.(pack (make Eth.Proto.arp (mac from) (mac "02:00:00:00:00:01") (Arp.Pdu.pack pdu))) in
-  let p = Result.get_ok (Crafty_interp.compile
+  let p = Result.get_ok (compile
               "PORTS = {udp: [[5000, 5000]]}\n\
                wait dur=1s\n/IP(dst=1.2.3.4)/UDP(dst=7)/Raw(\"x\")") in
   let dev, h =
@@ -3743,9 +3745,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       | _ -> answer ~gateway:"10.0.0.254" () in
   let unrouted = ref [] and frames = ref [] in
   let router =
-      Crafty_layers.make_router ~ifname:"a" ~lookup
+      Lay.make_router ~ifname:"a" ~lookup
           ~on_unrouted:(fun dst e -> unrouted := (Ip.Addr.to_string dst, e) :: !unrouted) in
-  let p = Result.get_ok (Crafty_interp.compile
+  let p = Result.get_ok (compile
       "PORTS = {udp: [[5000, 5000]]}\n\
        wait dur=1s\n\
        /IP(dst=10.0.0.2)/UDP(dst=7)/Raw(\"on-subnet\")\n\
@@ -3805,17 +3807,17 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       let sim = Simulation.make ~realtime:false "crafty-unrouted" in
       let unrouted = ref [] and frames = ref 0 in
       let router =
-          Crafty_layers.make_router ~ifname:"a" ~lookup:(lookup sim)
+          Lay.make_router ~ifname:"a" ~lookup:(lookup sim)
               ~on_unrouted:(fun dst e -> unrouted := (Ip.Addr.to_string dst, e) :: !unrouted) in
       let dev, h =
           run ~parent:sim.SimTypes.root ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
               ~addresses:[ Ip.Cidr.of_string "10.0.0.1/24" ]
               ~gateways:[] ~answer_requests:false ~router
-              (Result.get_ok (Crafty_interp.compile text)) in
+              (Result.get_ok (compile text)) in
       Tools.(dev --> sink (fun _ -> incr frames)) ;
       Simulation.run sim false ;
       (match h.status () with
-      | Failed e -> IO.to_string print_error e
+      | Failed e -> IO.to_string Prs.print_error e
       | _ -> "done"), List.rev !unrouted, !frames
   let via ?(gateway="10.0.0.254") () =
       Ok Kernel_route.{ kind = Unicast ; ifname = "a" ;
@@ -3862,7 +3864,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   let answers = ref [ Error "a" ; Error "a" ; via () ; Error "a" ; Error "b" ] in
   let told = ref [] in
   let route =
-      Crafty_layers.make_router ~ifname:"a"
+      Lay.make_router ~ifname:"a"
           ~lookup:(fun _ -> let a = List.hd !answers in answers := List.tl !answers ; a)
           ~on_unrouted:(fun _ e -> told := e :: !told) in
   List.iter (fun _ -> ignore (route (Ip.Addr.of_string "10.9.9.9"))) !answers ;
@@ -3889,10 +3891,10 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (*$inject
   let filters text frame =
       match compile_filter text with
-      | Error e -> IO.to_string print_error e
+      | Error e -> IO.to_string Prs.print_error e
       | Ok f ->
           let sim = Simulation.make ~realtime:false "crafty" in
-          let tree = Crafty_tree.make_root (crafty_eth sim) in
+          let tree = Tre.make_root (crafty_eth sim) in
           let output = output_of sim.root.power ~print:ignore ~print_err:ignore () in
           string_of_bool (matches output tree f frame)
 *)
@@ -3945,8 +3947,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
           (Host.Random { min_size = 65536 ; max_size = 65536 ; interval = 0.01 })
           ~alive:(fun () -> true) ~counted:ignore flow) ;
   let hd =
-      run_on_tree power (Crafty_tree.make_root ea) ~print:ignore ~print_err:ignore
-          (compile "/IP(dst=10.0.0.2)/TCP(src=4000, dst=9) {\n  Raw(\"go\")\n  on for=10s Raw {} }") in
+      run_on_tree power (Tre.make_root ea) ~print:ignore ~print_err:ignore
+          (checked "/IP(dst=10.0.0.2)/TCP(src=4000, dst=9) {\n  Raw(\"go\")\n  on for=10s Raw {} }") in
   Simulation.delay power (Clock.Interval.sec 0.5) (fun () ->
       hd.stop () ;
       hd.reset_streams ()) () ;

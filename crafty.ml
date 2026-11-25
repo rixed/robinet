@@ -34,6 +34,14 @@
 *)
 open Batteries
 module EthSpeed = SimTypes.EthSpeed
+module Ast = Crafty_ast
+module Itp = Crafty_interp
+module Man = Crafty_manual
+module Prs = Crafty_parser
+module Run = Crafty_run
+module Tre = Crafty_tree
+module Typ = Crafty_typing
+module Val = Crafty_value
 
 let synopsis = "crafty [options] (PROG.cfty | - | -e PROG) [ARG...]"
 let usage = synopsis ^"\n\nOptions:"
@@ -43,7 +51,7 @@ let die fmt =
 
 (* How crafty prints what it tells of packets, streams and its run, and
  * what [format()] writes: *)
-type format = Crafty_value.format = Human | Csv | Json
+type format = Val.format = Human | Csv | Json
 
 let formats = [ "human", Human ; "csv", Csv ; "json", Json ]
 
@@ -54,15 +62,15 @@ let record format ?(json=[]) kind fields =
     | Human -> invalid_arg "Crafty.record"
     | Csv ->
         let field = function
-            | `String s -> Crafty_value.csv_field s
+            | `String s -> Val.csv_field s
             | `Null -> ""
-            | j -> Crafty_value.json_to_string j in
+            | j -> Val.json_to_string j in
         String.concat "," (kind :: List.map (field % snd) fields)
     | Json ->
-        Crafty_value.json_to_string (`Assoc (("type", `String kind) :: fields @ json))
+        Val.json_to_string (`Assoc (("type", `String kind) :: fields @ json))
 
 let () =
-    match Crafty_run.secure_env () with
+    match Run.secure_env () with
     | Ok () -> ()
     | Error e -> die "%s" e
 
@@ -136,7 +144,7 @@ let () =
     let manual text = Arg.Unit (fun () -> print_string text ; exit 0) in
     (* The introduction describes the options: *)
     let help () =
-        print_string ("Usage: "^ synopsis ^"\n\n"^ Crafty_manual.introduction) ;
+        print_string ("Usage: "^ synopsis ^"\n\n"^ Man.introduction) ;
         exit 0 in
     let set_prog name text =
         if !prog <> None then die "Only one program, please" ;
@@ -225,9 +233,9 @@ let () =
             " print the program back, normalised (without its comments), and exit" ;
         "--cleanup", Arg.Set cleanup,
             " undo what a killed crafty left on the host, and exit" ;
-        "--reference", manual Crafty_manual.reference,
+        "--reference", manual Man.reference,
             " print the reference of the crafty language, and exit" ;
-        "--examples", manual Crafty_manual.examples,
+        "--examples", manual Man.examples,
             " print examples of crafty programs, and exit" ;
         "--cliref", Arg.Unit (fun () ->
                 print_string (Arg.usage_string !specs usage) ; exit 0),
@@ -239,7 +247,7 @@ let () =
     (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
     Arg.parse !specs (program_or_arg ~stop:true) usage ;
     if !cleanup then (
-        (match Crafty_run.cleanup () with
+        (match Run.cleanup () with
         | [] -> print_endline "Nothing to clean up."
         | names -> List.iter (Printf.printf "Cleaned up after %s.\n") names) ;
         exit 0) ;
@@ -249,37 +257,37 @@ let () =
     let fail es =
         List.iter (fun e ->
             Printf.eprintf "%s: %s\n" prog_name
-                (IO.to_string Crafty_interp.print_error e)) es ;
+                (IO.to_string Prs.print_error e)) es ;
         exit 2 in
     (* A typo in the program changes nothing on the host: *)
     let compile () =
         let warnings = ref [] in
-        let res = Crafty_interp.compile ~warnings text in
+        let res = Itp.compile ~warnings text in
         if !no_warning then warnings := [] ;
         List.iter (fun e ->
             Printf.eprintf "%s: %a: Warning: %s\n%!" prog_name
-                Crafty_ast.print_location e.Crafty_parser.where e.message) !warnings ;
+                Ast.print_location e.Prs.where e.message) !warnings ;
         match res with
         | Error es -> fail es
         | Ok _ when !warn_error && !warnings <> [] -> exit 2
         | Ok p -> p in
     if !normalize then (
         if !check then ignore (compile ()) ;
-        (match Crafty_parser.parse text with
-        | Ok p -> print_string (Crafty_ast.string_of_program ~all:false p)
+        (match Prs.parse text with
+        | Ok p -> print_string (Ast.string_of_program ~all:false p)
         | Error e -> fail [ e ]) ;
         exit 0) ;
     let program = compile () in
     let cli_permissions =
-        let rules = Option.map (List.map (fun (v, c) -> v, Crafty_typing.Addresses c)) in
-        Crafty_typing.{ local_ips = rules !local_ips ; remote_ips = rules !remote_ips ;
-                        mac_spoofing = !mac_spoofing ; exfiltration = !exfiltration ;
-                        promiscuous = !promiscuous ; public_env = !public_env } in
+        let rules = Option.map (List.map (fun (v, c) -> v, Typ.Addresses c)) in
+        Typ.{ local_ips = rules !local_ips ; remote_ips = rules !remote_ips ;
+              mac_spoofing = !mac_spoofing ; exfiltration = !exfiltration ;
+              promiscuous = !promiscuous ; public_env = !public_env } in
     (* What the command line allows, with a default duration if neither it
      * nor the program sets one: *)
     let extra_limits =
         let budget =
-            List.filter_map identity Crafty_ast.[
+            List.filter_map identity Ast.[
                 Option.map (fun d -> "max_duration", Interval d) !max_duration ;
                 Option.map (fun n -> "max_packets", Int n) !max_packets ;
                 Option.map (fun n -> "max_bytes", Int n) !max_volume ;
@@ -291,12 +299,12 @@ let () =
         let budget =
             if List.mem_assoc "max_duration" budget ||
                List.mem_assoc "max_duration" program.limits.budget then budget
-            else ("max_duration", Crafty_ast.Interval default_max_duration) :: budget in
+            else ("max_duration", Ast.Interval default_max_duration) :: budget in
         let ranges proto =
             List.filter_map (fun (r : Host_config.port_range) ->
                 if r.proto = proto then Some (r.lo, r.hi) else None) !ports |>
-            Crafty_typing.merge_ranges in
-        Crafty_typing.{
+            Typ.merge_ranges in
+        Typ.{
             budget ;
             ports = if !ports = [] then None
                     else Some { tcp = ranges Host_config.Tcp ;
@@ -304,7 +312,7 @@ let () =
             permissions = cli_permissions } in
     (* What both allow, which the run computes as well: *)
     let limits =
-        match Crafty_run.effective_limits ~extra_limits program with
+        match Run.effective_limits ~extra_limits program with
         | Ok l -> l
         | Error e -> die "%s: %s its PORTS and --tcp/--udp." prog_name e in
     let format = !format in
@@ -317,34 +325,32 @@ let () =
     Host_config.print_command := info "%s" ;
     let print_only =
         Option.map (fun s ->
-            match Crafty_interp.compile_filter s with
+            match Itp.compile_filter s with
             | Ok f -> f
             | Error e ->
-                Printf.eprintf "-p: %s\n" (IO.to_string Crafty_interp.print_error e) ;
+                Printf.eprintf "-p: %s\n" (IO.to_string Prs.print_error e) ;
                 exit 2) !print_only in
     let args = Array.of_list !prog_args
-    and resolver = Crafty_interp.(cached system_resolver) in
+    and resolver = Itp.(cached system_resolver) in
     (* With what is known before the run computed, resolving no name when only
      * checking. Computed addresses are then literals, which the permissions
      * check: *)
     let program =
-        let body =
-            Crafty_interp.Partial.block ~getenv:Crafty_interp.getenv ~args
-                ?resolver:(if !check then None else Some resolver) program.body in
-        Crafty_interp.{ program with body } in
+        Itp.Partial.program ~getenv:Itp.getenv ~args
+            ?resolver:(if !check then None else Some resolver) program in
     if !check then (
         (* Unless allowed, nothing received is sent: *)
         if not (limits.permissions.exfiltration |? false) then (
-            match Crafty_typing.exfiltrations ?public_env:limits.permissions.public_env
-                                              program.body with
+            match Typ.exfiltrations ?public_env:limits.permissions.public_env
+                                    program.body with
             | [] -> ()
             | es -> fail es) ;
         (* Without the interface, rules about its addresses are not checked: *)
         let known rs =
             let rs = Option.default [] rs in
-            if List.exists (fun (_, a) -> a = Crafty_typing.Own_ip || a = Own_ips) rs then None
-            else Some (Crafty_typing.address_rules ~own:[] rs) in
-        (match Crafty_typing.denied_literals ~local:(known limits.permissions.local_ips)
+            if List.exists (fun (_, a) -> a = Typ.Own_ip || a = Own_ips) rs then None
+            else Some (Typ.address_rules ~own:[] rs) in
+        (match Typ.denied_literals ~local:(known limits.permissions.local_ips)
                    ~remote:(known limits.permissions.remote_ips) ~mac:None program.body with
         | [] -> ()
         | es -> fail es) ;
@@ -363,7 +369,7 @@ let () =
     if any_iface then (
         let routed =
             if not kernel_routing then None else
-            match Crafty_run.route_ifname program with
+            match Run.route_ifname program with
             | Ok i -> i
             | Error e -> die "%s: give the interface (-i)." e in
         match if routed = None then Host_config.default_ifname () else routed with
@@ -374,12 +380,12 @@ let () =
         die "--fw and --ip do not go together: an address of the program's \
              own shares no port with the kernel." ;
     let failed = function
-        | Crafty_run.Setup e -> die "%s" e
+        | Run.Setup e -> die "%s" e
         | Denied es -> fail es
         | Configure e -> prerr_endline e ; exit 1 in
     let iface =
-        match Crafty_run.Iface.setup ~rx_offloads_off:(!fw || !own_ip <> None)
-                                     ~ifname:!ifname () with
+        match Run.Iface.setup ~rx_offloads_off:(!fw || !own_ip <> None)
+                              ~ifname:!ifname () with
         | Ok i -> i
         | Error e -> failed e in
     (* Dated to the microsecond, as the text and captures are: *)
@@ -389,22 +395,22 @@ let () =
     (* A report as the summary of its value, in CSV as a line per key of a
      * map, with the fields of a record of scalars after the key: *)
     let report name typ v t =
-        let typ, v = Crafty_interp.summarize typ v in
-        let json = Crafty_value.to_json in
+        let typ, v = Itp.summarize typ v in
+        let json = Val.to_json in
         let scalar = function
-            | Crafty_ast.Type.(Record _ | Map _ | Variant _ | Void | Pattern) -> false
-            | Crafty_ast.Type.Array t -> t = Crafty_ast.Type.Byte
+            | Ast.Type.(Record _ | Map _ | Variant _ | Void | Pattern) -> false
+            | Ast.Type.Array t -> t = Ast.Type.Byte
             | _ -> true in
         let fields typ v =
             match typ, v with
-            | Crafty_ast.Type.Record fs, Crafty_value.Record vs
+            | Ast.Type.Record fs, Val.Record vs
               when List.for_all (scalar % snd) fs ->
                 List.mapi (fun i (n, t) -> n, json t vs.(i)) fs
             | t, v when scalar t -> [ "value", json t v ]
-            | t, v -> [ "value", `String (Crafty_value.json_to_string (json t v)) ] in
+            | t, v -> [ "value", `String (Val.json_to_string (json t v)) ] in
         match format, typ, v with
         | Human, _, _ ->
-            print_endline (name ^": "^ Crafty_value.to_string typ v)
+            print_endline (name ^": "^ Val.to_string typ v)
         | Json, _, _ -> emit t "report" [ "name", `String name ; "value", json typ v ]
         | Csv, Map (k, ty), Map (m, _) when scalar k ->
             Map.PMap.iter (fun key v ->
@@ -414,26 +420,26 @@ let () =
         if !stats then
             if format = Human then
                 Printf.printf "%s %s\n" (String.capitalize_ascii what)
-                    (Crafty_tree.stats_line n)
+                    (Tre.stats_line n)
             else
                 emit t what (
-                    ("stream", `String (Crafty_tree.stream_name n)) ::
-                    List.map (fun (name, typ, v) -> name, Crafty_value.to_json typ v)
-                        (Crafty_tree.typed_stats n)) in
+                    ("stream", `String (Tre.stream_name n)) ::
+                    List.map (fun (name, typ, v) -> name, Val.to_json typ v)
+                        (Tre.typed_stats n)) in
     (* The suspicious stats of all streams, summed, for a warning at exit: *)
     let suspicious = Hashtbl.create 8 in
     let warning t ?(json=[]) text =
         if format = Human then Printf.eprintf "%s: Warning: %s\n%!" prog_name text
         else emit t "warning" (("text", `String text) :: json) in
     let on_warning t = function
-        | Crafty_run.Not_injected msg -> info "Cannot inject: %s." msg
+        | Run.Not_injected msg -> info "Cannot inject: %s." msg
         (* Told in the summary: *)
         | Not_captured _ -> ()
         | _ when !no_warning -> ()
         | Program e ->
             if format = Human then
                 Printf.eprintf "%s: %a: Warning: %s\n%!" prog_name
-                    Crafty_ast.print_location e.where e.message
+                    Ast.print_location e.where e.message
             else
                 warning t e.message ~json:[ "line", `Int e.where.line ;
                                             "column", `Int e.where.column ]
@@ -453,32 +459,32 @@ let () =
      * crafty: *)
     let control = ref None and signalled = ref false in
     let on_packet dir t bits =
-        let wanted f = (Option.get !control).Crafty_run.matches f bits in
+        let wanted f = (Option.get !control).Run.matches f bits in
         if Option.map_default wanted true print_only then (
             let packet = Packet.of_frame bits in
             let summary = Packet.Pdu.Printer.oneline packet in
             if format = Human then
-                Printf.printf "%s %.6f %s\n" (if dir = Crafty_run.Out then ">" else "<")
+                Printf.printf "%s %.6f %s\n" (if dir = Run.Out then ">" else "<")
                     (Clock.Time.to_secs t) summary
             else
                 emit t "packet" ~json:[ "layers", Packet.Pdu.to_json packet ]
-                    [ "dir", `String (if dir = Crafty_run.Out then "out" else "in") ;
+                    [ "dir", `String (if dir = Run.Out then "out" else "in") ;
                       "bytes", `Int (Tools.bytelength bits) ;
                       "summary", `String summary ]) in
     let on_start c =
         control := Some c ;
-        if !signalled then c.Crafty_run.stop () in
+        if !signalled then c.Run.stop () in
     let res =
-        Fun.protect ~finally:(fun () -> Crafty_run.Iface.release iface) (fun () ->
+        Fun.protect ~finally:(fun () -> Run.Iface.release iface) (fun () ->
             Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ]
                 ~on_signal:(fun () ->
                     signalled := true ;
-                    Option.may (fun c -> c.Crafty_run.stop ()) !control)
+                    Option.may (fun c -> c.Run.stop ()) !control)
                 (fun () ->
-                    Crafty_run.run iface ?own_ip:!own_ip ~fw:!fw ~kernel_routing ~any_iface
+                    Run.run iface ?own_ip:!own_ip ~fw:!fw ~kernel_routing ~any_iface
                         ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger ?time_wait:!time_wait
                         ~format ~args ~resolver
-                        ~getenv:Crafty_interp.getenv
+                        ~getenv:Itp.getenv
                         ~extra_limits
                         ~on_start ~info:(info "%s") ~on_report:report
                         ~on_print:(fun t s ->
@@ -491,7 +497,7 @@ let () =
                             print_stats t (if what = `Closed then "closed" else "open") n ;
                             List.iter (fun (name, c) ->
                                 Hashtbl.modify_def 0 name ((+) c) suspicious)
-                                (Crafty_run.suspicious n))
+                                (Run.suspicious n))
                         program)) in
     let o = match res with Ok o -> o | Error e -> failed e in
     let c = o.counters in
@@ -513,8 +519,8 @@ let () =
                 | Uninspectable -> "uninspectable frame", "" in
             Printf.sprintf "stopped: %s not permitted, in %s%s" what
                 (Packet.Pdu.Printer.oneline (Packet.of_frame bits)) hint, 4
-        | Crafty_interp.Done, _ -> "OK", 0
-        | Failed e, _ -> "failed: "^ IO.to_string Crafty_interp.print_error e, 1
+        | Itp.Done, _ -> "OK", 0
+        | Failed e, _ -> "failed: "^ IO.to_string Prs.print_error e, 1
         | Stopped, Some l -> "stopped: "^ Policer.string_of_limit l, 3
         | Stopped, None when o.stopped -> "interrupted", 130
         | Stopped, None when o.over_ram -> "stopped: max-ram", 3
@@ -528,7 +534,7 @@ let () =
                     | 0 -> None
                     | c -> Some (name, c)) names with
             | [] -> None
-            | counts -> Some (what, counts)) Crafty_run.suspicious_stats in
+            | counts -> Some (what, counts)) Run.suspicious_stats in
     if not !no_warning && c.denied_in > 0 then (
         let text =
             Printf.sprintf "Received %d packets the permissions deny, dropped" c.denied_in in

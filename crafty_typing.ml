@@ -35,9 +35,10 @@
    declaration, an assignment or a statement, or as a branch of such a one:
    elsewhere in an expression, it is computed at once. *)
 open Batteries
-module A = Crafty_ast
-module L = Crafty_layers
-module Type = A.Type
+module Ast = Crafty_ast
+module Lay = Crafty_layers
+module Prs = Crafty_parser
+module Type = Ast.Type
 
 (** {2 Typed programs} *)
 
@@ -64,10 +65,10 @@ type source =
 
 (* [taint]: the sources of what [desc] was computed from, which
  * {!exfiltrations} cannot tell from it once folded: *)
-type expr = { loc : A.location ; typ : Type.t ; mutable desc : desc ; taint : source list }
+type expr = { loc : Ast.location ; typ : Type.t ; mutable desc : desc ; taint : source list }
 
 and desc =
-    | Lit of A.literal
+    | Lit of Ast.literal
     | String of part list
     | Var of var
     (* In a condition, a field (its index in the registry) of a layer of the
@@ -79,15 +80,15 @@ and desc =
     | Slice of expr * expr option * expr option
     (* The innermost layer of a packet that a path selects ([MATCH[/IP]]),
      * of kind [layer] if its top is named: *)
-    | Select of { packet : expr ; layer : L.layer option ;
+    | Select of { packet : expr ; layer : Lay.layer option ;
                   path : string option list ; absolute : bool }
     (* With all the arguments, in the order of the function's parameters: *)
     | Call of builtin * expr list
     (* The bytes of those layers but a self-driven root, as a [Send] of them
      * would make them: *)
     | Encode of { depth : int ; overlay : int ; layers : layer list }
-    | Unop of A.unop * expr
-    | Binop of A.binop * expr * expr
+    | Unop of Ast.unop * expr
+    | Binop of Ast.binop * expr * expr
     (* In the order of the record type's fields: *)
     | Record of expr list
     | Array of expr list
@@ -124,20 +125,20 @@ and clause = Bind of var * expr | Filter of expr
 and arm = { ctor : string ; held : var option ; branch : block }
 
 and layer =
-    { layer_loc : A.location ;
-      layer : L.layer ;
-      mode : L.mode ;
+    { layer_loc : Ast.location ;
+      layer : Lay.layer ;
+      mode : Lay.mode ;
       (* By index of the field in the registry: *)
       options : (int * expr) list }
 
 and pattern_layer =
-    { pl_loc : A.location ;
-      pl_layer : L.layer ;
-      pl_mode : L.mode ;
+    { pl_loc : Ast.location ;
+      pl_layer : Lay.layer ;
+      pl_mode : Lay.mode ;
       cond : expr option }
 
 and pattern =
-    { pat_loc : A.location ;
+    { pat_loc : Ast.location ;
       (* How many layers of the current stack, from its bottom, are below the
        * pattern; with none, the pattern starts from the root: *)
       depth : int ;
@@ -146,7 +147,7 @@ and pattern =
       overlay : int ;
       pat_layers : pattern_layer list }
 
-and stmt = { stmt_loc : A.location ; stmt : stmt_desc }
+and stmt = { stmt_loc : Ast.location ; stmt : stmt_desc }
 
 and stmt_desc =
     (* On top of the [depth] first layers of the current stack, from its
@@ -170,7 +171,7 @@ and stmt_desc =
     | Repeat of { var : var ; count : expr option ; items : expr option ;
                   every : expr option ; for_ : expr option ; body : block }
     (* Retried on the errors [on]: *)
-    | Retry of { max : expr option ; on : A.Error_name.t list ; body : block }
+    | Retry of { max : expr option ; on : Ast.Error_name.t list ; body : block }
     (* How many enclosing [repeat], [on] and [spawn] to leave, going on
      * with the next iteration (or match) of the last with [continue]: *)
     | Break of { depth : int ; continue : bool }
@@ -190,7 +191,7 @@ and case = { patterns : pattern list ; match_ : var ; body : block }
 (* Of [errors], or of any a program may catch if empty; [error_] is the
  * variable [ERROR] of the block, its message, and [match_] its [MATCH], the
  * packet that caused it, if any: *)
-and handler = { errors : A.Error_name.t list ; error_ : var ; match_ : var ;
+and handler = { errors : Ast.Error_name.t list ; error_ : var ; match_ : var ;
                 handler : block }
 
 and block = stmt list
@@ -199,7 +200,7 @@ and block = stmt list
 
 let same_name a b = String.lowercase_ascii a = String.lowercase_ascii b
 
-let lname = A.Layer_name.to_string
+let lname = Ast.Layer_name.to_string
 
 (** {2 Layer paths} *)
 
@@ -214,7 +215,7 @@ let string_of_path ~absolute path =
 let path_positions names ~absolute path =
     let names = Array.of_list names and path = Array.of_list path in
     let n = Array.length names and k = Array.length path in
-    let root = lname L.root.name in
+    let root = lname Lay.root.name in
     let rec fits s j =
         j >= k ||
         ((match path.(j) with None -> true | Some p -> names.(s + j) = p) &&
@@ -232,7 +233,7 @@ let unique_path names i =
     let below = List.take (i + 1) names in
     let from_root =
         match below with
-        | r :: (_ :: _ as rest) when r = lname L.root.name -> rest
+        | r :: (_ :: _ as rest) when r = lname Lay.root.name -> rest
         | _ -> below in
     let rec loop k =
         let path = List.drop (i + 1 - k) below |> List.map Option.some in
@@ -274,8 +275,8 @@ let rec summary_type (typ : Type.t) =
 
 (* The record of a layer of a received packet, with every field that can be
  * read, in whatever mode: *)
-let packet_record (l : L.layer) =
-    record_type (Array.to_list l.fields |> List.filter_map (fun (f : L.field) ->
+let packet_record (l : Lay.layer) =
+    record_type (Array.to_list l.fields |> List.filter_map (fun (f : Lay.field) ->
         if f.read_in = [] then None else Some (f.name, f.typ)))
 
 (* Variants are compared constructor by constructor, whatever the order they
@@ -287,29 +288,29 @@ let variant_type ctors =
  * name is one variant, which the layers that share it all read the same
  * record as: *)
 let packet_type =
-    Type.Array (variant_type (List.filter_map (fun (l : L.layer) ->
+    Type.Array (variant_type (List.filter_map (fun (l : Lay.layer) ->
         if l.received_as <> None then None else
-        Some (lname l.name, packet_record l)) L.all |> List.unique))
+        Some (lname l.name, packet_record l)) Lay.all |> List.unique))
 
 (*$T packet_record
-  List.for_all (fun (a : Crafty_layers.layer) -> List.for_all (fun (b : Crafty_layers.layer) -> \
-      a.name <> b.name || packet_record a = packet_record b) Crafty_layers.all) Crafty_layers.all
+  List.for_all (fun (a : Lay.layer) -> List.for_all (fun (b : Lay.layer) -> \
+      a.name <> b.name || packet_record a = packet_record b) Lay.all) Lay.all
 *)
 
 let type_of_literal = function
-    | A.Bool _ -> Type.Bool
-    | A.Int _ -> Type.Int
-    | A.Float _ -> Type.Float
-    | A.Byte _ -> Type.Byte
-    | A.Interval _ -> Type.Interval
-    | A.Time _ -> Type.Time
-    | A.Ip _ -> Type.Ip
-    | A.Mac _ -> Type.Mac
-    | A.Cidr _ -> Type.Cidr
+    | Ast.Bool _ -> Type.Bool
+    | Int _ -> Type.Int
+    | Float _ -> Type.Float
+    | Byte _ -> Type.Byte
+    | Interval _ -> Type.Interval
+    | Time _ -> Type.Time
+    | Ip _ -> Type.Ip
+    | Mac _ -> Type.Mac
+    | Cidr _ -> Type.Cidr
 
 (** {2 Errors} *)
 
-exception Error of A.location * string
+exception Error of Ast.location * string
 
 (* For what refers to a variable whose declaration was in error, already
  * told: *)
@@ -354,28 +355,28 @@ let rec converts a b =
     let converts_to a b = a = b || converts a b in
     match a, b with
     | Type.Int, Type.Float
-    | Type.Byte, Type.Int
-    | (Type.String | Type.Ip | Type.Mac), Type.Array Type.Byte
-    | Type.Array Type.Byte, (Type.String | Type.Ip | Type.Mac) -> true
-    | Type.Variant cs, Type.Variant ds ->
+    | Byte, Int
+    | (String | Ip | Mac), Array Byte
+    | Array Byte, (String | Ip | Mac) -> true
+    | Variant cs, Variant ds ->
         a <> b &&
         List.for_all (fun (n, t) ->
             match List.assoc_opt n ds with
             | Some t' -> converts_to t t'
             | None -> false) cs
-    | Type.Record fs, Type.Record gs ->
+    | Record fs, Record gs ->
         List.length fs = List.length gs &&
         List.for_all2 (fun (n, t) (n', t') -> n = n' && converts_to t t') fs gs &&
         a <> b
-    | Type.Array a, Type.Array b -> converts a b
-    | Type.Map (k, a), Type.Map (k', b) -> k = k' && converts a b
+    | Array a, Array b -> converts a b
+    | Map (k, a), Map (k', b) -> k = k' && converts a b
     | _ -> false
 
 (* Whether a value of that type holds a variant: *)
 let rec has_variant = function
     | Type.Variant _ -> true
-    | Type.Record fs -> List.exists (has_variant % snd) fs
-    | Type.Array t | Type.Map (_, t) -> has_variant t
+    | Record fs -> List.exists (has_variant % snd) fs
+    | Array t | Map (_, t) -> has_variant t
     | _ -> false
 
 (* The type that values of types [a] and [b] both convert to, if any; [a]
@@ -394,12 +395,12 @@ let rec join_types a b =
                     Option.map (fun t -> (n, t) :: List.remove_assoc n acc)
                         (join_types t' t))) (Some cs) ds |>
         Option.map variant_type
-    | Type.Record fs, Type.Record gs when List.map fst fs = List.map fst gs ->
+    | Record fs, Record gs when List.map fst fs = List.map fst gs ->
         List.map2 (fun (n, t) (_, t') ->
             Option.map (fun t -> n, t) (join_types t t')) fs gs |>
         all_some |> Option.map (fun fs -> Type.Record fs)
-    | Type.Array a, Type.Array b -> Option.map (fun t -> Type.Array t) (join_types a b)
-    | Type.Map (k, a), Type.Map (k', b) when k = k' ->
+    | Array a, Array b -> Option.map (fun t -> Type.Array t) (join_types a b)
+    | Map (k, a), Map (k', b) when k = k' ->
         Option.map (fun t -> Type.Map (k, t)) (join_types a b)
     | _ -> None
 
@@ -523,13 +524,13 @@ let common_type expected es =
 let as_bool what e =
     match e.typ with
     | Type.Bool -> e
-    | Type.Int -> convert e Type.Bool
+    | Int -> convert e Type.Bool
     | t -> error e.loc "%s must be a bool, not %s" what (a_type t)
 
 (** {2 Environment} *)
 
 (* The errors found so far, last first: *)
-type errors = (A.location * string) list ref
+type errors = (Ast.location * string) list ref
 
 let tell errors = function
     | Error (loc, msg) -> errors := (loc, msg) :: !errors
@@ -537,14 +538,14 @@ let tell errors = function
 
 (* Where a layer's options or conditions are typed: *)
 type layer_ctx =
-    { cur : L.layer ;
-      cur_mode : L.mode ;
+    { cur : Lay.layer ;
+      cur_mode : Lay.mode ;
       in_cond : bool ;
       (* The layers of the packet below it, from the bottom: *)
-      below : (L.layer * L.mode) array ;
+      below : (Lay.layer * Lay.mode) array ;
       (* The bare names of the condition read as variables though fields of
        * [cur] (where, name, field): *)
-      shadowing : (A.location * string * int) list ref ;
+      shadowing : (Ast.location * string * int) list ref ;
       (* The fields of [cur] that the condition reads with a prefix: *)
       prefixed : int list ref }
 
@@ -552,11 +553,11 @@ type env =
     { (* Innermost first: *)
       vars : var list ;
       (* Declared in the current block, and where: *)
-      declared_here : (string * A.location) list ;
+      declared_here : (string * Ast.location) list ;
       (* Whose declaration was in error: *)
       poisoned : string list ;
       (* The current protocol stack, top first: *)
-      stack : (L.layer * L.mode) list ;
+      stack : (Lay.layer * Lay.mode) list ;
       (* Its layers as written, for messages: *)
       stack_text : string list ;
       (* The [repeat], [for], [on] and [spawn] that enclose, the
@@ -572,33 +573,33 @@ type env =
       errors : errors ;
       warnings : errors ;
       (* Where the variables of the declarations are declared, by id: *)
-      declared_at : (int, A.location) Hashtbl.t ;
+      declared_at : (int, Ast.location) Hashtbl.t ;
       (* And the value they are declared with: *)
-      declared_as : (int, A.expr) Hashtbl.t ;
+      declared_as : (int, Ast.expr) Hashtbl.t ;
       (* Where variables are first read, by id: *)
-      reads : (int, A.location) Hashtbl.t ;
+      reads : (int, Ast.location) Hashtbl.t ;
       (* The variables declared, with where and whether they hide another: *)
-      declared : (var * A.location * bool) list ref ;
+      declared : (var * Ast.location * bool) list ref ;
       (* The type of the variables declared there, when wider than that of
        * their value, as their assignments tell: *)
-      widened : (A.location, Type.t) Hashtbl.t ;
+      widened : (Ast.location, Type.t) Hashtbl.t ;
       (* Whether a variable was widened while typing: *)
       widening : bool ref ;
       (* The declarations whose unknown items this pass has filled, the
        * first assignment that fills them telling their type: *)
-      filled : (A.location, unit) Hashtbl.t ;
+      filled : (Ast.location, unit) Hashtbl.t ;
       (* The constructor of what the variables of a case hold, by id: *)
       held_by : (int, string) Hashtbl.t ;
       (* The layers, from the bottom, that each pattern of a [MATCH] fixed,
        * by id: *)
-      matched : (int, L.layer list list) Hashtbl.t ;
+      matched : (int, Lay.layer list list) Hashtbl.t ;
       (* The type of what each report reports, and where first: *)
-      reports : (string, Type.t * A.location) Hashtbl.t ;
+      reports : (string, Type.t * Ast.location) Hashtbl.t ;
       (* Whether an empty array literal is of {!unknown_items} when nothing
        * tells its type, as in the value of a declaration typed first: *)
       provisional : bool ;
       (* The variables declared of such a type, by location: *)
-      unknown : (A.location, string * Type.t) Hashtbl.t }
+      unknown : (Ast.location, string * Type.t) Hashtbl.t }
 
 let bound env name =
     List.exists (fun (v : var) -> v.name = name) env.vars ||
@@ -666,10 +667,10 @@ let empty_next_to (other : Type.t) =
     match other with
     | _ when has_unknown other -> None
     | Type.Void -> None
-    | Type.Array _ -> Some other
+    | Array _ -> Some other
     | t -> Some (Type.Array t)
 
-let is_empty_array (e : A.expr) = match e.desc with A.Array [] -> true | _ -> false
+let is_empty_array (e : Ast.expr) = match e.desc with Ast.Array [] -> true | _ -> false
 
 let new_var =
     let next = ref 0 in
@@ -717,7 +718,7 @@ let last_var = new_var "LAST" packet_type
 
 type limits =
     { (* The fields of [BUDGET] that are set, floats as floats: *)
-      budget : (string * A.literal) list ;
+      budget : (string * Ast.literal) list ;
       (* The ranges of local ports, sorted and disjoint, if restricted; then
        * the ports of a protocol without ranges are none: *)
       ports : ports option ;
@@ -772,90 +773,90 @@ let merge_ranges rs =
 
 (* The fields of the literal record [e], declaring [var], each of one of the
  * [known] types, by [f name typ value]: *)
-let literal_fields var known f (e : A.expr) =
+let literal_fields var known f (e : Ast.expr) =
     match e.desc with
-    | A.Record fs ->
+    | Ast.Record fs ->
         List.fold_left (fun acc (n, v) ->
             match List.find_opt (fun (k, _) -> same_name k n) known with
             | Some (k, _) when List.mem_assoc k acc ->
                 error e.loc "Field %s given twice" n
-            | Some (k, t) -> (k, f k t (v : A.expr)) :: acc
+            | Some (k, t) -> (k, f k t (v : Ast.expr)) :: acc
             | None ->
                 error e.loc "No field %s in %s%s" n var
-                    (A.did_you_mean (List.map fst known) n)) [] fs
+                    (Ast.did_you_mean (List.map fst known) n)) [] fs
     | _ -> error e.loc "%s is declared with a literal record" var
 
-let budget_literal name typ (e : A.expr) =
+let budget_literal name typ (e : Ast.expr) =
     let bad () =
         error e.loc "BUDGET.%s must be a literal %s, 0 or more" name (tname typ) in
     match typ, e.desc with
-    | Type.Interval, A.Lit (A.Interval i) ->
+    | Type.Interval, Ast.Lit (Ast.Interval i) ->
         if Clock.Interval.(compare i zero) < 0 then bad () ;
-        A.Interval i
-    | Type.Int, A.Lit (A.Int n) -> if n < 0 then bad () ; A.Int n
-    | Type.Float, A.Lit (A.Int n) -> if n < 0 then bad () ; A.Float (float_of_int n)
-    | Type.Float, A.Lit (A.Float x) -> if x < 0. then bad () ; A.Float x
+        Ast.Interval i
+    | Int, Lit (Int n) -> if n < 0 then bad () ; Ast.Int n
+    | Float, Lit (Int n) -> if n < 0 then bad () ; Ast.Float (float_of_int n)
+    | Float, Lit (Float x) -> if x < 0. then bad () ; Ast.Float x
     | _ -> bad ()
 
-let port_ranges name _typ (e : A.expr) =
-    let port (e : A.expr) =
+let port_ranges name _typ (e : Ast.expr) =
+    let port (e : Ast.expr) =
         match e.desc with
-        | A.Lit (A.Int p) when p > 0 && p < 0x10000 -> p
+        | Ast.Lit (Ast.Int p) when p > 0 && p < 0x10000 -> p
         | _ -> error e.loc "A port is a literal int, from 1 to 65535" in
     match e.desc with
-    | A.Array rs ->
-        List.map (fun (r : A.expr) ->
+    | Ast.Array rs ->
+        List.map (fun (r : Ast.expr) ->
             match r.desc with
-            | A.Array [ lo ; hi ] ->
+            | Ast.Array [ lo ; hi ] ->
                 let lo = port lo and hi = port hi in
                 if lo > hi then error r.loc "Empty range of ports: [%d, %d]" lo hi ;
                 lo, hi
-            | A.Lit _ -> let p = port r in p, p
+            | Lit _ -> let p = port r in p, p
             | _ -> error r.loc "A range of ports is [first, last], or a port") rs |>
         merge_ranges
     | _ -> error e.loc "PORTS.%s is an array of ports and ranges [first, last]" name
 
 type permission = Rules of rule list | Flag of bool | Names of string list
 
-let permission_literal name typ (e : A.expr) =
+let permission_literal name typ (e : Ast.expr) =
     match typ, e.desc with
-    | Type.Bool, A.Lit (A.Bool b) -> Flag b
-    | Type.Bool, _ -> error e.loc "PERMISSIONS.%s must be true or false" name
-    | Type.Array Type.String, A.Array ns ->
-        Names (List.map (fun (n : A.expr) ->
+    | Type.Bool, Ast.Lit (Ast.Bool b) -> Flag b
+    | Bool, _ -> error e.loc "PERMISSIONS.%s must be true or false" name
+    | Array String, Array ns ->
+        Names (List.map (fun (n : Ast.expr) ->
             match n.desc with
-            | A.String [ A.Text n ] -> n
+            | Ast.String [ Ast.Text n ] -> n
             | _ -> error n.loc "PERMISSIONS.%s is an array of literal strings" name) ns)
-    | Type.Array Type.String, _ ->
+    | Array String, _ ->
         error e.loc "PERMISSIONS.%s is an array of literal strings" name
-    | _, A.Array rs ->
-        Rules (List.map (fun (r : A.expr) ->
-            let addresses (e : A.expr) =
+    | _, Array rs ->
+        Rules (List.map (fun (r : Ast.expr) ->
+            let addresses (e : Ast.expr) =
                 match e.desc with
-                | A.Lit (A.Cidr c) -> Addresses c
-                | A.Lit (A.Ip ip) -> Addresses (Ip.Cidr.single ip)
-                | A.Var "OWN_IP" -> Own_ip
-                | A.Var "OWN_IPS" -> Own_ips
+                | Ast.Lit (Ast.Cidr c) -> Addresses c
+                | Lit (Ip ip) -> Addresses (Ip.Cidr.single ip)
+                | Var "OWN_IP" -> Own_ip
+                | Var "OWN_IPS" -> Own_ips
                 | _ -> error e.loc "A rule is about a literal CIDR or IP address, OWN_IP or OWN_IPS" in
             match r.desc with
-            | A.Construct ("Accept", Some c) -> Firewall.Accept, addresses c
-            | A.Construct ("Deny", Some c) -> Firewall.Deny, addresses c
+            | Ast.Construct ("Accept", Some c) -> Firewall.Accept, addresses c
+            | Construct ("Deny", Some c) -> Firewall.Deny, addresses c
             | _ -> error r.loc "A rule is Accept(CIDR) or Deny(CIDR)") rs)
     | _ -> error e.loc "PERMISSIONS.%s is an array of rules" name
 
 (* The declarations of [BUDGET], [PORTS] and [PERMISSIONS] at the top level
  * of [program], and the rest of it: *)
-let self_declarations (program : A.program) =
-    List.partition (fun (s : A.stmt) ->
+let self_declarations (program : Ast.program) =
+    List.partition (fun (s : Ast.stmt) ->
         match s.stmt with
-        | A.Declare (n, _) -> List.mem n A.self_declared
+        | Ast.Declare (n, _) -> List.mem n Ast.self_declared
         | _ -> false) program
 
 (* What those declarations say, telling [errors] what is wrong with them: *)
 let limits_of errors decls =
-    List.fold_left (fun (declared, limits) (s : A.stmt) ->
+    List.fold_left (fun (declared, limits) (s : Ast.stmt) ->
         match s.stmt with
-        | A.Declare (n, e) ->
+        | Ast.Declare (n, e) ->
             (try
                 if List.mem n declared then
                     error s.stmt_loc "%s is already declared" n ;
@@ -896,10 +897,10 @@ let limits_of errors decls =
 
 let least a b =
     match a, b with
-    | A.Int a, A.Int b -> A.Int (min a b)
-    | A.Float a, A.Float b -> A.Float (Float.min a b)
-    | A.Interval a, A.Interval b ->
-        A.Interval (if Clock.Interval.compare a b <= 0 then a else b)
+    | Ast.Int a, Ast.Int b -> Ast.Int (min a b)
+    | Float a, Float b -> Ast.Float (Float.min a b)
+    | Interval a, Interval b ->
+        Ast.Interval (if Clock.Interval.compare a b <= 0 then a else b)
     | _ -> invalid_arg "Crafty_typing.least"
 
 (** What both the [program] and the [cli] allow, or why nothing is. The
@@ -928,13 +929,13 @@ let combine ~program:a ~cli:b =
     | None, None -> Ok { budget ; ports = None ; permissions }
 
 (*$T combine
-  combine ~program:{ no_limits with budget = [ "max_syns", A.Int 3 ; "max_bytes", A.Int 10 ] } \
+  combine ~program:{ no_limits with budget = [ "max_syns", Ast.Int 3 ; "max_bytes", Ast.Int 10 ] } \
           ~cli:{ no_limits with \
-                 budget = [ "max_syns", A.Int 2 ; "max_duration", A.Interval (Clock.Interval.sec 1.) ] ; \
+                 budget = [ "max_syns", Ast.Int 2 ; "max_duration", Ast.Interval (Clock.Interval.sec 1.) ] ; \
                  ports = Some { tcp = [ 1, 10 ; 20, 30 ] ; udp = [] } } = \
     Ok { no_limits with \
-         budget = [ "max_duration", A.Interval (Clock.Interval.sec 1.) ; \
-                    "max_bytes", A.Int 10 ; "max_syns", A.Int 2 ] ; \
+         budget = [ "max_duration", Ast.Interval (Clock.Interval.sec 1.) ; \
+                    "max_bytes", Ast.Int 10 ; "max_syns", Ast.Int 2 ] ; \
          ports = Some { tcp = [ 1, 10 ; 20, 30 ] ; udp = [] } }
   combine ~program:{ no_limits with ports = Some { tcp = [ 5, 25 ] ; udp = [ 1, 2 ] } } \
           ~cli:{ no_limits with ports = Some { tcp = [ 1, 10 ; 20, 30 ] ; udp = [] } } = \
@@ -993,12 +994,12 @@ let resolve_permissions ~program ~cli =
 *)
 
 let error_name loc s =
-    match A.Error_name.of_string s with
+    match Ast.Error_name.of_string s with
     | Some n -> n
     | None ->
         error loc "Unknown error %s%s (errors are %s)"
-            s (A.did_you_mean A.Error_name.names s)
-            (String.concat ", " A.Error_name.names)
+            s (Ast.did_you_mean Ast.Error_name.names s)
+            (String.concat ", " Ast.Error_name.names)
 
 let lookup_var env loc name =
     match List.find_opt (fun (v : var) -> v.name = name) env.vars with
@@ -1019,20 +1020,20 @@ let lookup_var env loc name =
             match env.layer_ctx with
             | Some { cur ; in_cond = true ; below ; _ } ->
                 let having ls =
-                    List.filter (fun l -> L.find_field l name <> None) ls |>
-                    List.unique ~eq:(fun a b -> L.to_string a = L.to_string b) in
-                let names ls = List.map L.to_string ls in
-                Array.to_list cur.fields |> List.map (fun (fd : L.field) -> fd.name),
+                    List.filter (fun l -> Lay.find_field l name <> None) ls |>
+                    List.unique ~eq:(fun a b -> Lay.to_string a = Lay.to_string b) in
+                let names ls = List.map Lay.to_string ls in
+                Array.to_list cur.fields |> List.map (fun (fd : Lay.field) -> fd.name),
                 (match List.rev (having (List.map fst (Array.to_list below))),
-                       names (having (L.uppers cur)) with
+                       names (having (Lay.uppers cur)) with
                 | l :: _, _ ->
-                    let f = l.fields.(Option.get (L.find_field l name)) in
-                    let l = L.to_string l in
+                    let f = l.fields.(Option.get (Lay.find_field l name)) in
+                    let l = Lay.to_string l in
                     Printf.sprintf ": the field of %s below is %s.%s" l l f.name
                 | [], [] -> ""
                 | [], ls ->
                     Printf.sprintf ": %s, on top of %s, %s one"
-                        (String.concat " and " ls) (L.to_string cur)
+                        (String.concat " and " ls) (Lay.to_string cur)
                         (if List.length ls = 1 then "has" else "have"))
             | _ -> [], "" in
         let what =
@@ -1040,11 +1041,11 @@ let lookup_var env loc name =
             | Some { in_cond = true ; _ } -> "field or variable"
             | _ -> "variable" in
         let predefined =
-            if elsewhere = "" && A.is_constructor name then
+            if elsewhere = "" && Ast.is_constructor name then
                 "\n  The packets predefined are MATCH, the one that matched, and \
                  LAST, the last one sent."
             else "" in
-        match A.did_you_mean (fields @ List.map (fun (v : var) -> v.name) env.vars) name with
+        match Ast.did_you_mean (fields @ List.map (fun (v : var) -> v.name) env.vars) name with
         | "" -> error loc "Unknown %s %s%s%s" what name elsewhere predefined
         | hint -> error loc "Unknown %s %s%s" what name hint
 
@@ -1054,10 +1055,10 @@ let lookup_var env loc name =
  * [/IP/UDP], [/Eth]. *)
 let string_of_layers stack =
     match List.rev stack with
-    | [ (l, _) ] -> "/"^ L.to_string l
+    | [ (l, _) ] -> "/"^ Lay.to_string l
     | stack ->
-        List.filter_map (fun ((l : L.layer), _) ->
-            if l == L.root then None else Some ("/"^ L.to_string l)) stack |>
+        List.filter_map (fun ((l : Lay.layer), _) ->
+            if l == Lay.root then None else Some ("/"^ Lay.to_string l)) stack |>
         String.concat ""
 
 (* A stack as written (top first), without the implicit root: *)
@@ -1069,44 +1070,44 @@ let string_of_stack_text texts =
  * put below it if need be: *)
 let push ?(hint=lazy "") loc base name =
     let below = match base with [] -> None | (b, _) :: _ -> Some b in
-    match L.find ?below name, below with
+    match Lay.find ?below name, below with
     | Some l, _ -> base, l
     | None, None ->
-        (match L.find ~below:L.root name with
-        | Some l -> [ L.root, L.Driven ], l
+        (match Lay.find ~below:Lay.root name with
+        | Some l -> [ Lay.root, Lay.Driven ], l
         | None ->
             error loc "%s cannot be at the bottom of a stack%s" (lname name)
                 (Lazy.force hint))
-    | None, Some (b : L.layer) ->
+    | None, Some (b : Lay.layer) ->
         if b.terminal then
             error loc "%s is a terminal layer, therefore %s is a complete message. \
                        No further layer can be stacked on top of it%s"
-                (L.to_string b) (string_of_layers base) (Lazy.force hint)
+                (Lay.to_string b) (string_of_layers base) (Lazy.force hint)
         else
             let hint =
                 match Lazy.force hint with
                 | "" ->
-                    "\n  On top of "^ L.to_string b ^" can be: "^
-                    (L.uppers b |> List.map L.to_string |> List.unique |> String.concat ", ") ^"."
+                    "\n  On top of "^ Lay.to_string b ^" can be: "^
+                    (Lay.uppers b |> List.map Lay.to_string |> List.unique |> String.concat ", ") ^"."
                 | hint -> hint in
-            error loc "%s cannot be on top of %s%s" (lname name) (L.to_string b) hint
+            error loc "%s cannot be on top of %s%s" (lname name) (Lay.to_string b) hint
 
 (* What to append to the message about an unknown field [f] of [l], on top
  * of the layers [below]: a field of [l] of a similar name, or else the
  * layers that have one of that name, on top of [l] or below it: *)
 (* A misspelling of a field of [l], else the layers that can be on top of
  * it or below it and have field [f]: *)
-let field_hint (l : L.layer) f =
-    match A.did_you_mean (Array.to_list l.fields |> List.map (fun (fd : L.field) -> fd.name)) f with
+let field_hint (l : Lay.layer) f =
+    match Ast.did_you_mean (Array.to_list l.fields |> List.map (fun (fd : Lay.field) -> fd.name)) f with
     | "" ->
         let having ls =
-            List.filter (fun u -> L.find_field u f <> None) ls |>
-            List.map L.to_string |> List.unique in
+            List.filter (fun u -> Lay.find_field u f <> None) ls |>
+            List.map Lay.to_string |> List.unique in
         let names = function
             | [ n ] -> n ^" has one"
             | ns -> String.concat ", " (List.take (List.length ns - 1) ns) ^
                     " and "^ List.last ns ^" have one" in
-        (match having (L.uppers l), having l.above with
+        (match having (Lay.uppers l), having l.above with
         | [], [] -> ""
         | [], ns -> ": "^ names ns ^", below it"
         | ns, [] -> ": "^ names ns ^", on top of it"
@@ -1116,45 +1117,45 @@ let field_hint (l : L.layer) f =
 (* A layer as written in a stack or a pattern, for the fixes of where it
  * goes: *)
 type written =
-    { w_name : A.Layer_name.t ;
+    { w_name : Ast.Layer_name.t ;
       bang : bool ;
       (* With no options, or no condition: *)
       plain : bool ;
       text : string }
 
 let string_of_written anchor ws =
-    IO.to_string A.print_anchor anchor ^ String.concat "/" (List.map (fun w -> w.text) ws)
+    IO.to_string Ast.print_anchor anchor ^ String.concat "/" (List.map (fun w -> w.text) ws)
 
 (* The layers [ws] (bottom first) are on top of [base], if they can be: *)
 let fits base ws =
-    let no_loc = A.{ line = 0 ; column = 0 } in
+    let no_loc = Ast.{ line = 0 ; column = 0 } in
     try
         List.fold_left (fun (base, ls) w ->
             let base, l = push no_loc base w.w_name in
-            (l, L.mode_of l ~bang:w.bang) :: base, l :: ls) (base, []) ws |>
+            (l, Lay.mode_of l ~bang:w.bang) :: base, l :: ls) (base, []) ws |>
         fun (_, ls) -> Some (List.rev ls)
     with Error _ -> None
 
 (* Whether a layer in mode [m] can be on top of [base], as [mode_on]
  * requires: *)
 let carried base m =
-    m = L.Manual ||
-    not (List.exists (fun ((b : L.layer), bm) -> b.driven && bm = L.Manual) base)
+    m = Lay.Manual ||
+    not (List.exists (fun ((b : Lay.layer), bm) -> b.driven && bm = Lay.Manual) base)
 
-let written_of (l : L.layer) m =
-    let bang = m = L.Manual && l.driven in
+let written_of (l : Lay.layer) m =
+    let bang = m = Lay.Manual && l.driven in
     { w_name = l.name ; bang ; plain = true ;
-      text = L.to_string l ^ (if bang then "!" else "") }
+      text = Lay.to_string l ^ (if bang then "!" else "") }
 
 (* [ws] (bottom first) with the layers of [over] (bottom first, with their
  * modes) that they skip put back, so that they fit on top of [base] and
  * overlay [over], if they can; [None] if none is skipped: *)
 let filled base over ws =
-    let no_loc = A.{ line = 0 ; column = 0 } in
+    let no_loc = Ast.{ line = 0 ; column = 0 } in
     let rec go base over ws acc skipped =
         match ws, over with
         | [], _ -> if skipped then Some (List.rev acc) else None
-        | w :: _, ((o : L.layer), om) :: over' when o.name <> w.w_name ->
+        | w :: _, ((o : Lay.layer), om) :: over' when o.name <> w.w_name ->
             (match go ((o, om) :: base) over' ws (written_of o om :: acc) true with
             | Some _ as r -> r
             | None -> place base over ws acc skipped)
@@ -1166,7 +1167,7 @@ let filled base over ws =
             match push no_loc base w.w_name with
             | exception Error _ -> None
             | base, l ->
-                let m = L.mode_of l ~bang:w.bang in
+                let m = Lay.mode_of l ~bang:w.bang in
                 if not (carried base m) then None else
                 let over = match over with (o, _) :: over when o == l -> over | _ -> [] in
                 go ((l, m) :: base) over ws (w :: acc) skipped in
@@ -1178,12 +1179,12 @@ let filled base over ws =
  * time the only way with the fewest. [None] if none is missing, or if that
  * is not known: *)
 let bridged base ws =
-    let no_loc = A.{ line = 0 ; column = 0 } in
+    let no_loc = Ast.{ line = 0 ; column = 0 } in
     let on base w =
         match push no_loc base w.w_name with
         | exception Error _ -> None
         | base, l ->
-            let m = L.mode_of l ~bang:w.bang in
+            let m = Lay.mode_of l ~bang:w.bang in
             if carried base m then Some ((l, m) :: base) else None in
     let rec go base acc added = function
         | [] -> if added then Some (List.rev acc) else None
@@ -1204,7 +1205,7 @@ let bridged base ws =
             (* Of a way through IP and one through IP6, the first: *)
             let found =
                 match List.filter (fun (path, _) ->
-                          not (List.exists (fun (l, _) -> l == L.ip6) path)) found with
+                          not (List.exists (fun (l, _) -> l == Lay.ip6) path)) found with
                 | [ _ ] as v4 when List.length found = 2 -> v4
                 | _ -> found in
             match found with
@@ -1213,12 +1214,12 @@ let bridged base ws =
             | [] when depth >= max -> None
             | [] ->
                 List.concat_map (fun (path, base) ->
-                    let base = if base = [] then [ L.root, L.Driven ] else base in
-                    L.uppers (fst (List.hd base)) |> List.filter_map (fun (u : L.layer) ->
+                    let base = if base = [] then [ Lay.root, Lay.Driven ] else base in
+                    Lay.uppers (fst (List.hd base)) |> List.filter_map (fun (u : Lay.layer) ->
                         if u.terminal || u.quoted || List.exists (fun (l, _) -> l == u) base
                         then None else
-                        let m = if carried base L.Driven then L.mode_of u ~bang:false
-                                else L.Manual in
+                        let m = if carried base Lay.Driven then Lay.mode_of u ~bang:false
+                                else Lay.Manual in
                         Some ((u, m) :: path, (u, m) :: base))) paths |>
                 search (depth + 1) in
         search 0 [ [], base ] in
@@ -1234,7 +1235,7 @@ let bridged base ws =
 let where_to_hint env anchor ws =
     lazy (
         match anchor with
-        | A.Relative k when env.stack <> [] ->
+        | Ast.Relative k when env.stack <> [] ->
             let n = List.length env.stack in
             let context =
                 Printf.sprintf "\n  In this block, the stack is %s (%s)."
@@ -1270,48 +1271,48 @@ let where_to_hint env anchor ws =
             | [] -> context
             | (j, ls, ws) :: _ ->
                 let rec same m = function
-                    | ((o : L.layer), om) :: over, ((l : L.layer), w) :: rest
-                      when o == l && w.plain && L.mode_of l ~bang:w.bang = om ->
+                    | ((o : Lay.layer), om) :: over, ((l : Lay.layer), w) :: rest
+                      when o == l && w.plain && Lay.mode_of l ~bang:w.bang = om ->
                         same (m + 1) (over, rest)
                     | _ -> m in
                 let m = same 0 (List.rev (List.take j env.stack), List.combine ls ws) in
                 Printf.sprintf "%s\n  Do you mean \"%s\"%s?" context
-                    (string_of_written (A.Relative j) ws)
+                    (string_of_written (Ast.Relative j) ws)
                     (if m = 0 || m = List.length ws then ""
                      else Printf.sprintf " (the same as \"%s\")"
-                            (string_of_written (A.Relative (j - m)) (List.drop m ws))))
-        | A.Relative _ | A.Absolute when anchor <> A.Absolute || fits [] ws = None ->
+                            (string_of_written (Ast.Relative (j - m)) (List.drop m ws))))
+        | Relative _ | Absolute when anchor <> Ast.Absolute || fits [] ws = None ->
             (* With the fewest layers put below, from the root, and in
              * between: *)
             (match bridged [] ws with
-            | Some ws -> Printf.sprintf "\n  Do you mean \"%s\"?" (string_of_written A.Absolute ws)
+            | Some ws -> Printf.sprintf "\n  Do you mean \"%s\"?" (string_of_written Ast.Absolute ws)
             | None -> "")
         | _ -> "")
 
-let mode_on loc base (l : L.layer) ~bang =
-    let mode = L.mode_of l ~bang in
-    if mode = L.Driven then
-        Option.may (fun ((b : L.layer), _) ->
+let mode_on loc base (l : Lay.layer) ~bang =
+    let mode = Lay.mode_of l ~bang in
+    if mode = Lay.Driven then
+        Option.may (fun ((b : Lay.layer), _) ->
             error loc "%s cannot be self-driven on top of a manual %s"
-                (L.to_string l) (L.to_string b)
-        ) (List.find_opt (fun ((b : L.layer), m) -> b.driven && m = L.Manual) base) ;
+                (Lay.to_string l) (Lay.to_string b)
+        ) (List.find_opt (fun ((b : Lay.layer), m) -> b.driven && m = Lay.Manual) base) ;
     mode
 
 (* The other mode of [l], when [modes] has it and not [mode]: *)
-let other_mode_hint (l : L.layer) mode modes =
-    let other = if mode = L.Driven then L.Manual else L.Driven in
+let other_mode_hint (l : Lay.layer) mode modes =
+    let other = if mode = Lay.Driven then Lay.Manual else Lay.Driven in
     if l.driven && List.mem other modes then
-        Printf.sprintf "\n  Do you mean \"%s%s\"?" (L.to_string l)
-            (if other = L.Manual then "!" else "")
+        Printf.sprintf "\n  Do you mean \"%s%s\"?" (Lay.to_string l)
+            (if other = Lay.Manual then "!" else "")
     else ""
 
-let implicit_root loc = { layer_loc = loc ; layer = L.root ; mode = L.Driven ; options = [] }
+let implicit_root loc = { layer_loc = loc ; layer = Lay.root ; mode = Lay.Driven ; options = [] }
 
 (* How many of [layers] (bottom first), from the first, are the same as
  * those of [over]: *)
-let overlay over (layers : L.layer list) =
+let overlay over (layers : Lay.layer list) =
     let rec loop n = function
-        | (o : L.layer) :: over, (l : L.layer) :: layers when o == l ->
+        | (o : Lay.layer) :: over, (l : Lay.layer) :: layers when o == l ->
             loop (n + 1) (over, layers)
         | _ -> n in
     loop 0 (over, layers)
@@ -1320,8 +1321,8 @@ let overlay over (layers : L.layer list) =
  * of the current stack once [n] layers are taken off. Returns that base and
  * the layers taken off, bottom first: *)
 let anchor_base ?(hint=lazy "") env loc = function
-    | A.Absolute -> [], []
-    | A.Relative n ->
+    | Ast.Absolute -> [], []
+    | Relative n ->
         if env.stack = [] && n > 0 then
             error loc "../ goes back in the current stack, and there is none \
                        out of a block%s" (Lazy.force hint) ;
@@ -1332,7 +1333,7 @@ let anchor_base ?(hint=lazy "") env loc = function
 (** {2 Expressions} *)
 
 type default =
-    | Literal of A.literal
+    | Literal of Ast.literal
     (* The source of the argument for that parameter, after this text: *)
     | Quote of string * string
     (* No argument at all: *)
@@ -1367,7 +1368,7 @@ let any_map t = match t with Type.Map _ -> Some t | _ -> None
 let item_of what (items : expr) =
     match items.typ with
     | Type.Array t -> t
-    | Type.Map (k, v) -> record_type [ "key", k ; "value", v ]
+    | Map (k, v) -> record_type [ "key", k ; "value", v ]
     | t -> error items.loc "The items of %s must be an array or a map, not %s"
                what (a_type t)
 
@@ -1416,7 +1417,7 @@ let builtins =
         | [ t ] when values_type t = Some Type.Interval -> Type.Interval
         | _ -> Type.Float in
     [ "rand", Rand,
-        [ param "max" "an int, bool or float" ~default:(Literal (A.Float 1.))
+        [ param "max" "an int, bool or float" ~default:(Literal (Ast.Float 1.))
                 (only_exactly Type.[ Int ; Bool ; Float ]) ],
         (fun ts -> List.hd ts) ;
       "randbytes", Randbytes, [ param "len" "an int" (only Type.[ Int ]) ],
@@ -1552,14 +1553,14 @@ let builtins =
         res Type.Void ] @
     List.map (fun (name, size, big) ->
         name, Word (size, big), [ param "x" "an int" (only Type.[ Int ]) ],
-        res Type.bytes) A.words
+        res Type.bytes) Ast.words
 
 let find_builtin loc name =
     match List.find_opt (fun (n, _, _, _) -> same_name n name) builtins with
     | Some b -> b
     | None ->
         error loc "Unknown function %s%s" name
-            (A.did_you_mean (List.map (fun (n, _, _, _) -> n) builtins) name)
+            (Ast.did_you_mean (List.map (fun (n, _, _, _) -> n) builtins) name)
 
 let numeric t = t = Type.Int || t = Type.Float
 
@@ -1572,16 +1573,16 @@ let array_join f loc x y =
     let mk_typ typ = Some { loc ; typ ; desc = Call (f, [ x ; y ]) ; taint = [] } in
     match f, x.typ, y.typ with
     | Concat, Type.Array Type.Void, Type.Array _ -> mk_typ y.typ
-    | Concat, Type.Array _, Type.Array Type.Void -> mk_typ x.typ
-    | Append, Type.Array Type.Void, t when t <> Type.Void -> mk_typ (Type.Array t)
-    | Prepend, t, Type.Array Type.Void when t <> Type.Void -> mk_typ (Type.Array t)
-    | Concat, Type.Array _, Type.Array _ ->
+    | Concat, Array _, Array Void -> mk_typ x.typ
+    | Append, Array Void, t when t <> Type.Void -> mk_typ (Type.Array t)
+    | Prepend, t, Array Void when t <> Type.Void -> mk_typ (Type.Array t)
+    | Concat, Array _, Array _ ->
         (match coerce y x.typ, coerce x y.typ with
         | Some y, _ -> mk x y
         | _, Some x -> mk x y
         | None, None -> None)
-    | Append, Type.Array t, _ -> Option.bind (coerce y t) (mk x)
-    | Prepend, _, Type.Array t -> Option.bind (coerce x t) (fun x -> mk x y)
+    | Append, Array t, _ -> Option.bind (coerce y t) (mk x)
+    | Prepend, _, Array t -> Option.bind (coerce x t) (fun x -> mk x y)
     | _ -> None
 
 (* That call of [Has] or [Remove] on map [m], if [k] converts to its keys: *)
@@ -1620,27 +1621,27 @@ let is_last_eth r =
     match r.desc with
     | Select { packet = { desc = Var { name = "LAST" ; _ } ; _ } ;
                layer = Some layer ; _ } ->
-        layer.name = L.(eth.name)
+        layer.name = Lay.(eth.name)
     | _ -> false
 
 (* The value of an int expression made of literals and constants only, as
  * evaluating it would make it, if that cannot fail: *)
 let rec const_int e =
     match e.desc with
-    | Lit (A.Int i) -> Some i
-    | Unop (A.Neg, a) -> Option.map (~-) (const_int a)
+    | Lit (Ast.Int i) -> Some i
+    | Unop (Neg, a) -> Option.map (~-) (const_int a)
     | Binop (op, a, b) ->
         (match const_int a, const_int b with
         | Some a, Some b ->
             (match op with
-            | A.Add -> Some (a + b)
-            | A.Sub -> Some (a - b)
-            | A.Mul -> Some (a * b)
-            | A.BitAnd -> Some (a land b)
-            | A.BitOr -> Some (a lor b)
-            | A.BitXor -> Some (a lxor b)
-            | A.Shl when b >= 0 -> Some (if b >= Sys.int_size then 0 else a lsl b)
-            | A.Shr when b >= 0 -> Some (a asr min b (Sys.int_size - 1))
+            | Ast.Add -> Some (a + b)
+            | Sub -> Some (a - b)
+            | Mul -> Some (a * b)
+            | BitAnd -> Some (a land b)
+            | BitOr -> Some (a lor b)
+            | BitXor -> Some (a lxor b)
+            | Shl when b >= 0 -> Some (if b >= Sys.int_size then 0 else a lsl b)
+            | Shr when b >= 0 -> Some (a asr min b (Sys.int_size - 1))
             | _ -> None)
         | _ -> None)
     | _ -> None
@@ -1649,9 +1650,9 @@ let rec const_int e =
 
 (* The layers decoded on top of [l]: any but a terminal one can have its
  * payload left in a [Raw]: *)
-let decoded_over (l : L.layer) =
-    let ls = List.filter (fun (u : L.layer) -> u.received_as = None) (L.uppers l) in
-    if l.terminal || List.memq L.raw ls then ls else ls @ [ L.raw ]
+let decoded_over (l : Lay.layer) =
+    let ls = List.filter (fun (u : Lay.layer) -> u.received_as = None) (Lay.uppers l) in
+    if l.terminal || List.memq Lay.raw ls then ls else ls @ [ Lay.raw ]
 
 (* The names of the layers, from the bottom, of each packet that a pattern
  * fixing those [known] layers can match, decoded up to any of the layers on
@@ -1660,7 +1661,7 @@ let match_stacks known =
     let rec up rev =
         rev :: List.concat_map (fun u -> up (u :: rev)) (decoded_over (List.hd rev)) in
     if known = [] then [] else
-    List.map (List.rev_map (fun (l : L.layer) -> lname l.name)) (up (List.rev known))
+    List.map (List.rev_map (fun (l : Lay.layer) -> lname l.name)) (up (List.rev known))
 
 (* The layers, from the bottom, that pattern [p] fixes: *)
 let pattern_known env (p : pattern) =
@@ -1675,7 +1676,7 @@ let match_of env a =
         Option.map (fun knowns ->
             List.concat_map match_stacks knowns,
             String.concat " or " (List.map (fun known ->
-                string_of_layers (List.rev_map (fun l -> l, L.Driven) known)) knowns))
+                string_of_layers (List.rev_map (fun l -> l, Lay.Driven) known)) knowns))
             (Hashtbl.find_opt env.matched v.id)
     | _ -> None
 
@@ -1694,40 +1695,40 @@ let narrow (t : Type.t) cs =
 (* With [tail], [e] is the value of a declaration, an assignment or a
  * statement, which can wait if its block can. Without [used], the value of
  * a block, [if] or [case] is that of a statement: void. *)
-let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
+let rec expr ?expected ?(tail=false) ?(used=true) env (e : Ast.expr) =
     let loc = e.loc in
     let mk typ desc = { loc ; typ ; desc ; taint = [] } in
     (* Where the branches of a block, an [if] or a [case] are typed: *)
     let inner = if tail then env else { env with may_wait = false } in
     let branch ?(env=inner) b = block_value ?expected ~used env.errors env b in
     match e.desc with
-    | A.Lit l | A.Constant (_, l) -> mk (type_of_literal l) (Lit l)
-    | A.String parts ->
+    | Ast.Lit l | Ast.Constant (_, l) -> mk (type_of_literal l) (Lit l)
+    | String parts ->
         mk Type.String (String (List.map (function
-            | A.Text s -> Text s
-            | A.Interp e ->
+            | Ast.Text s -> Text s
+            | Interp e ->
                 let e = expr env e in
                 if any_value e.typ = None then
                     error e.loc "Cannot print %s" (a_type e.typ) ;
                 Interp e) parts))
-    | A.Var name when A.is_constructor name && not (Crafty_parser.is_reserved name) &&
-                      not (bound env name) ->
+    | Var name when Ast.is_constructor name && not (Prs.is_reserved name) &&
+                    not (bound env name) ->
         mk (variant_type [ name, Type.Void ]) (Construct (name, None))
-    | A.Var name -> var env loc name
-    | A.Construct (c, None) -> mk (variant_type [ c, Type.Void ]) (Construct (c, None))
-    | A.Construct (c, Some e) ->
+    | Var name -> var env loc name
+    | Construct (c, None) -> mk (variant_type [ c, Type.Void ]) (Construct (c, None))
+    | Construct (c, Some e) ->
         let e = expr env e in
         if any_value e.typ = None then
             error e.loc "A constructor cannot hold %s" (a_type e.typ) ;
         mk (variant_type [ c, e.typ ]) (Construct (c, Some e))
-    | A.Layer { path ; absolute } ->
+    | Layer { path ; absolute } ->
         let name = string_of_path ~absolute (List.map (Option.map lname) path) in
         error loc "A layer is no value: %s needs a field, as in %s.src, or to \
                    select a layer of a packet, as in MATCH[%s]"
               name name name
-    | A.Field ({ desc = A.Layer { path ; absolute } ; _ }, f) ->
+    | Field ({ desc = Layer { path ; absolute } ; _ }, f) ->
         layer_field env loc path absolute f
-    | A.Field (r, f) ->
+    | Field (r, f) ->
         let r = expr env r in
         (* A layer that can only be of one kind reads as its record: *)
         let rt =
@@ -1739,8 +1740,8 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             let has f = List.exists (fun (n, _) -> same_name n f) fs in
             let f =
                 if has f then f else
-                List.filter (fun l -> packet_record l = rt) L.all |>
-                List.map (fun l -> L.unalias l f) |> List.find_opt has |? f in
+                List.filter (fun l -> packet_record l = rt) Lay.all |>
+                List.map (fun l -> Lay.unalias l f) |> List.find_opt has |? f in
             (match List.findi (fun _ (n, _) -> same_name n f) fs with
             | _, ("ts", _) when is_last_eth r ->
                 error loc "LAST[Eth].ts is not known: %s" only_captured
@@ -1751,14 +1752,14 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                     (* What ICMP errors quote is on top of them: *)
                     let quoted =
                         match packet.desc with
-                        | Var { name ; _ } when List.memq layer L.quoted_ip.above ->
-                            let l = L.to_string layer in
+                        | Var { name ; _ } when List.memq layer Lay.quoted_ip.above ->
+                            let l = Lay.to_string layer in
                             Printf.sprintf "\n  The packet it quotes is on top of it: \
                                             %s[%s/IP].id is the id of the quoted IP, \
                                             %s[/IP] the IP of the error." name l name
                         | _ -> "" in
                     let hint = field_hint layer f in
-                    error loc "No field %s in %s (only %s)%s" f (L.to_string layer)
+                    error loc "No field %s in %s (only %s)%s" f (Lay.to_string layer)
                         (tname rt) (if hint = "" then quoted else hint)
                 | _ ->
                     (* A layer of a packet, of a kind that [case] told: *)
@@ -1767,17 +1768,17 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                         | Var v -> Hashtbl.find_opt env.held_by v.id
                         | _ -> Option.bind (layer_kinds r.typ) List.Exceptionless.hd in
                     let ls =
-                        List.filter (fun (l : L.layer) ->
+                        List.filter (fun (l : Lay.layer) ->
                             packet_record l = rt &&
-                            Option.map_default ((=) (lname l.name)) true ctor) L.all in
+                            Option.map_default ((=) (lname l.name)) true ctor) Lay.all in
                     let hint =
                         match List.unique (List.map (fun l -> field_hint l f) ls) with
                         | [ h ] -> h
-                        | _ -> A.did_you_mean (List.map fst fs) f in
-                    (match List.unique (List.map (fun (l : L.layer) -> lname l.name) ls) with
+                        | _ -> Ast.did_you_mean (List.map fst fs) f in
+                    (match List.unique (List.map (fun (l : Lay.layer) -> lname l.name) ls) with
                     | [ n ] -> error loc "No field %s in %s (only %s)%s" f n (tname rt) hint
                     | _ -> error loc "No field %s in %s%s" f (tname rt) hint)))
-        | Type.Variant cs as t ->
+        | Variant cs as t ->
             no_constructor env r ;
             let have =
                 List.filter_map (function
@@ -1788,7 +1789,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             error loc "No field %s in %s: case tells its constructors apart, \
                        and %s have one" f (a_type t) (String.concat ", " have)
         | t -> no_constructor env r ; error loc "No field %s in %s" f (a_type t))
-    | A.Index (a, { desc = A.Layer { path ; absolute } ; _ }) ->
+    | Index (a, { desc = Layer { path ; absolute } ; _ }) ->
         let a = expr env a in
         (match a.typ with
         | Type.Array (Type.Variant cs as t) ->
@@ -1796,7 +1797,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 if not (List.mem_assoc (lname n) cs) then
                     error loc "No %s in %s" (lname n) (a_type a.typ))) path ;
             let layer =
-                Option.map (fun n -> List.find (fun (l : L.layer) -> l.name = n) L.all)
+                Option.map (fun n -> List.find (fun (l : Lay.layer) -> l.name = n) Lay.all)
                            (List.last path) in
             let t = Option.map_default (fun n -> List.assoc (lname n) cs) t (List.last path) in
             let path = List.map (Option.map lname) path in
@@ -1815,7 +1816,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                     narrow t kinds in
             mk t (Select { packet = a ; layer ; path ; absolute })
         | t -> no_constructor env a ; error loc "Cannot select a layer of %s" (a_type t))
-    | A.Index (a, i) ->
+    | Index (a, i) ->
         let a = expr env a in
         (match a.typ with
         | Type.Array t ->
@@ -1835,19 +1836,19 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                     narrow t kinds
                 | _ -> t in
             mk t (Index (a, i))
-        | Type.Map (k, v) -> mk v (Index (a, expect "A key" (expr ~expected:k env i) k))
+        | Map (k, v) -> mk v (Index (a, expect "A key" (expr ~expected:k env i) k))
         | t -> no_constructor env a ; error loc "Cannot index %s" (a_type t))
-    | A.Slice (a, from, to_) ->
+    | Slice (a, from, to_) ->
         let a = expr env a in
         let bound = Option.map (fun i -> expect "A bound" (expr env i) Type.Int) in
         (match a.typ with
         | Type.Array _ | Type.String -> mk a.typ (Slice (a, bound from, bound to_))
         | t -> no_constructor env a ; error loc "Cannot slice %s" (a_type t))
-    | A.Call (f, _) when same_name f "sort" ->
+    | Call (f, _) when same_name f "sort" ->
         error loc "sort changes its array and has no value; sorted(a) is a sorted copy"
-    | A.Call (f, _) when same_name f "encode" ->
+    | Call (f, _) when same_name f "encode" ->
         error loc "encode takes a stack: encode(UDP(src=1, dst=2)/Raw(\"x\"))"
-    | A.Encode { anchor ; layers } ->
+    | Encode { anchor ; layers } ->
         (* Making nodes, which cannot be while the tree is walked: *)
         (match env.layer_ctx with
         | Some { in_cond = true ; _ } -> error loc "encode cannot be in a condition"
@@ -1856,11 +1857,11 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         let base, over = anchor_base ~hint env loc anchor in
         let _, tls, overlay = stack_layers ~hint env base over layers in
         List.iter (fun tl ->
-            if tl.mode = L.Driven && tl.layer != L.root then
-                let n = L.to_string tl.layer in
+            if tl.mode = Lay.Driven && tl.layer != Lay.root then
+                let n = Lay.to_string tl.layer in
                 error tl.layer_loc "encode needs manual layers: %s!, not %s" n n) tls ;
         mk Type.bytes (Encode { depth = List.length base ; overlay ; layers = tls })
-    | A.Call (f, args) ->
+    | Call (f, args) ->
         (match call ?expected env loc f args with
         | (Concat | Append | Prepend as b), [ x ; y ], _ ->
             (match array_join b loc x y with
@@ -1880,8 +1881,8 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             | [] -> error loc "stats() is only defined on a protocol stack"
             | stack ->
                 let per_stream =
-                    List.rev_map (fun ((l : L.layer), _) -> L.stream_stats @ l.stats) stack in
-                mk (record_type (L.stack_stats per_stream)) (Call (Stats, [])))
+                    List.rev_map (fun ((l : Lay.layer), _) -> Lay.stream_stats @ l.stats) stack in
+                mk (record_type (Lay.stack_stats per_stream)) (Call (Stats, [])))
         | Histogram, [ a ; bucket ], _ ->
             let t =
                 if values_type a.typ = Some Type.Interval then Type.Interval
@@ -1903,7 +1904,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 (match Hashtbl.find_opt env.reports n with
                 | Some (typ, where) when typ <> x.typ ->
                     error x.loc "Report %s is of %s since line %d, not of %s" n
-                        (a_type typ) where.A.line (a_type x.typ)
+                        (a_type typ) where.Ast.line (a_type x.typ)
                 | Some _ -> ()
                 | None -> Hashtbl.add env.reports n (x.typ, x.loc))
             | _ -> error name.loc "The name of a report must be a literal string") ;
@@ -1911,26 +1912,26 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         | Sum, [ a ], t ->
             let zero =
                 match t with
-                | Type.Float -> A.Float 0.
-                | Type.Interval -> A.Interval Clock.Interval.zero
-                | _ -> A.Int 0 in
+                | Type.Float -> Ast.Float 0.
+                | Interval -> Ast.Interval Clock.Interval.zero
+                | _ -> Ast.Int 0 in
             mk t (Call (Sum, [ a ; { loc ; typ = t ; desc = Lit zero ; taint = [] } ]))
         | Word (size, _) as b, [ x ], t ->
             Option.may (fun i ->
-                if not (A.word_fits size i) then
+                if not (Ast.word_fits size i) then
                     error x.loc "%d does not fit in %d bytes" i size) (const_int x) ;
             mk t (Call (b, [ x ]))
         | b, args, t -> mk t (Call (b, args)))
-    | A.Unop (A.Not, e) ->
+    | Unop (Not, e) ->
         let e = as_bool "The operand of !" (expr env e) in
-        mk Type.Bool (Unop (A.Not, e))
-    | A.Unop (A.Neg, e) ->
+        mk Type.Bool (Unop (Ast.Not, e))
+    | Unop (Neg, e) ->
         let e = expr env e in
         if not (numeric e.typ || e.typ = Type.Interval) then
             error loc "Cannot negate %s" (a_type e.typ) ;
-        mk e.typ (Unop (A.Neg, e))
-    | A.Binop (op, a, b) -> binop env loc op a b
-    | A.Record fields ->
+        mk e.typ (Unop (Ast.Neg, e))
+    | Binop (op, a, b) -> binop env loc op a b
+    | Record fields ->
         let rec dup = function
             | [] -> ()
             | (n, _) :: rest ->
@@ -1945,19 +1946,19 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             mk typ (Record (List.map (fun (n, _) ->
                 List.find (fun (n', _) -> n' = n) fields |> snd) fs))
         | _ -> assert false)
-    | A.Array [] ->
+    | Array [] ->
         (match expected with
         | Some (Type.Array _ as t) -> mk t (Array [])
         | _ when env.provisional -> mk unknown_items (Array [])
         | _ -> error loc "Cannot tell the type of the items of an empty array")
-    | A.Array items ->
+    | Array items ->
         let expected_item =
             match expected with Some (Type.Array t) -> Some t | _ -> None in
         let items = List.map (expr ?expected:expected_item env) items in
         let item_typ = common_type expected_item items in
         let items = List.map (fun i -> expect "An item of this array" i item_typ) items in
         mk (Type.Array item_typ) (Array items)
-    | A.Map kvs ->
+    | Map kvs ->
         let ek, ev =
             match expected with
             | Some (Type.Map (k, v)) -> Some k, Some v
@@ -1968,14 +1969,14 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         let ks = List.map (fun k -> expect "A key of this map" k kt) ks
         and vs = List.map (fun v -> expect "A value of this map" v vt) vs in
         mk (Type.Map (kt, vt)) (Map (List.combine ks vs))
-    | A.Comprehension { key ; value ; clauses } ->
+    | Comprehension { key ; value ; clauses } ->
         let env, clauses =
             List.fold_left (fun (env, clauses) -> function
-                | A.Bind (name, items) ->
+                | Ast.Bind (name, items) ->
                     let items = expr env items in
                     let v = new_var name (item_of "for" items) in
                     { env with vars = v :: env.vars }, Bind (v, items) :: clauses
-                | A.Filter c ->
+                | Filter c ->
                     env, Filter (as_bool "The condition of if" (expr env c)) :: clauses
             ) (env, []) clauses in
         let clauses = List.rev clauses in
@@ -1998,24 +1999,24 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             and value = item vt "A value of a map" value in
             mk (Type.Map (key.typ, value.typ))
                (Comprehension { key = Some key ; value ; clauses }))
-    | A.Matches _ -> error loc "=~ is not supported yet"
-    | A.Block b ->
+    | Matches _ -> error loc "=~ is not supported yet"
+    | Block b ->
         let b, typ = branch b in
         mk typ (Block b)
-    | A.If { cond ; then_ ; else_ = None } ->
+    | If { cond ; then_ ; else_ = None } ->
         let cond = as_bool "The condition of if" (expr env cond) in
         let then_, typ = branch then_ in
         if typ <> Type.Void && not (diverges then_) then
             error loc "This if needs an else, to have a value when its condition is false" ;
         mk Type.Void (If { cond ; then_ ; else_ = [] })
-    | A.If { cond ; then_ ; else_ = Some else_ } ->
+    | If { cond ; then_ ; else_ = Some else_ } ->
         let cond = as_bool "The condition of if" (expr env cond) in
         let then_ = branch then_ in
         let else_ = branch else_ in
         (match join loc "if" [ then_ ; else_ ] with
         | typ, [ then_ ; else_ ] -> mk typ (If { cond ; then_ ; else_ })
         | _ -> assert false)
-    | A.Case { var ; subject ; arms ; else_ } ->
+    | Case { var ; subject ; arms ; else_ } ->
         let subject = expr env subject in
         let ctors =
             match subject.typ with
@@ -2029,7 +2030,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             hides_i env var &&
             match subject.desc with Var { name = "I" ; _ } -> false | _ -> true in
         let arms =
-            List.fold_left (fun arms (a : A.arm) ->
+            List.fold_left (fun arms (a : Ast.arm) ->
                 let ctor =
                     match List.find_opt (fun (n, _) -> n = a.ctor) ctors with
                     | None -> List.find_opt (fun (n, _) -> same_name n a.ctor) ctors
@@ -2083,7 +2084,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             let arm_bs, else_bs = List.split_at (List.length arms) bs in
             mk typ (Case { subject ; arms = with_branches arm_bs ;
                            else_ = List.Exceptionless.hd else_bs })
-    | A.Expect { timeout ; cases ; else_ } ->
+    | Expect { timeout ; cases ; else_ } ->
         if not env.may_wait then
             error loc "expect cannot be in a block within an expression, but for \
                        the value of a declaration, an assignment or a statement" ;
@@ -2105,7 +2106,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             List.map2 (fun (patterns, match_, _) body -> { patterns ; match_ ; body })
                 cases case_bs in
         mk typ (Expect { timeout ; cases ; else_ = List.Exceptionless.hd else_bs })
-    | A.Try { body ; handlers ; else_ } ->
+    | Try { body ; handlers ; else_ } ->
         if not env.may_wait then
             error loc "try cannot be in a block within an expression, but for \
                        the value of a declaration, an assignment or a statement" ;
@@ -2117,17 +2118,17 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                        try { ... } Timeout|Closed { ... }, or else { ... } \
                        for any error that can be caught" ;
         let handlers =
-            List.map (fun (h : A.handler) ->
+            List.map (fun (h : Ast.handler) ->
                 h, List.map (error_name h.handler_loc) h.errors) handlers in
         if body = [] then
             env.warnings :=
                 (loc, "This try has an empty block: it catches nothing") ::
                 !(env.warnings) ;
-        ignore (List.fold_left (fun seen ((h : A.handler), names) ->
+        ignore (List.fold_left (fun seen ((h : Ast.handler), names) ->
             List.fold_left (fun seen n ->
                 if List.mem n seen then
                     error h.handler_loc "%s is caught twice"
-                        (A.Error_name.to_string n) ;
+                        (Ast.Error_name.to_string n) ;
                 n :: seen) seen names) [] handlers) ;
         let handler names b =
             let error_ = new_var "ERROR" Type.String
@@ -2135,7 +2136,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             (names, error_, match_),
             branch ~env:{ env with vars = error_ :: match_ :: env.vars } b in
         let hs =
-            List.map (fun ((h : A.handler), names) -> handler names h.handler) handlers @
+            List.map (fun ((h : Ast.handler), names) -> handler names h.handler) handlers @
             Option.map_default (fun b -> [ handler [] b ]) [] else_ in
         let typ, bs = join loc "try" (branch body :: List.map snd hs) in
         let handlers =
@@ -2160,7 +2161,7 @@ and origin env (v : var) =
         let as_ =
             match Hashtbl.find_opt env.declared_as v.id with
             | Some e ->
-                let s = IO.to_string A.print_bare_expr e in
+                let s = IO.to_string Ast.print_bare_expr e in
                 if String.length s <= 40 && not (String.contains s '\n') then " as "^ s else ""
             | None -> "" in
         Printf.sprintf "declared at line %d%s" loc.line as_
@@ -2181,7 +2182,7 @@ and var env loc name =
         mk v.typ (Var v) in
     match env.layer_ctx with
     | Some ctx when ctx.in_cond ->
-        (match L.find_field ctx.cur name with
+        (match Lay.find_field ctx.cur name with
         | Some i when bound env name ->
             ctx.shadowing := (loc, name, i) :: !(ctx.shadowing) ;
             as_var ()
@@ -2189,7 +2190,7 @@ and var env loc name =
             let f = ctx.cur.fields.(i) in
             if not (List.mem ctx.cur_mode f.read_in) then
                 error loc "%s cannot be read in a %s %s%s" f.name
-                    (L.string_of_mode ctx.cur_mode) (L.to_string ctx.cur)
+                    (Lay.string_of_mode ctx.cur_mode) (Lay.to_string ctx.cur)
                     (other_mode_hint ctx.cur ctx.cur_mode f.read_in) ;
             mk f.typ (Packet_field { layer = Array.length ctx.below ; field = i })
         | None -> as_var ())
@@ -2211,11 +2212,11 @@ and layer_field env loc path absolute f =
                 n f n f n f in
     (* The current layer included: *)
     let layers = Array.to_list ctx.below @ [ ctx.cur, ctx.cur_mode ] in
-    let names = List.map (fun ((l : L.layer), _) -> lname l.name) layers in
+    let names = List.map (fun ((l : Lay.layer), _) -> lname l.name) layers in
     let path = List.map (Option.map lname) path in
     let where =
         match List.last path with
-        | Some n when n <> lname ctx.cur.name -> " below "^ L.to_string ctx.cur
+        | Some n when n <> lname ctx.cur.name -> " below "^ Lay.to_string ctx.cur
         | _ -> ", this one included" in
     match path_positions names ~absolute path with
     | [] -> error loc "There is no %s%s" (string_of_path ~absolute path) where
@@ -2230,16 +2231,16 @@ and layer_field env loc path absolute f =
                           (String.concat " or " (List.map written others))) ::
                 !(env.warnings)) ;
         let l, mode = List.nth layers layer in
-        match L.find_field l f with
+        match Lay.find_field l f with
         | None ->
-            error loc "%s has no field %s%s" (L.to_string l) f (field_hint l f)
+            error loc "%s has no field %s%s" (Lay.to_string l) f (field_hint l f)
         | Some i ->
             if layer = Array.length ctx.below then
                 ctx.prefixed := i :: !(ctx.prefixed) ;
             let fd = l.fields.(i) in
             if not (List.mem mode fd.read_in) then
                 error loc "%s cannot be read in a %s %s%s" fd.name
-                    (L.string_of_mode mode) (L.to_string l)
+                    (Lay.string_of_mode mode) (Lay.to_string l)
                     (other_mode_hint l mode fd.read_in) ;
             { loc ; typ = fd.typ ; desc = Packet_field { layer ; field = i } ; taint = [] }
 
@@ -2247,7 +2248,7 @@ and layer_field env loc path absolute f =
  * of its result: *)
 and call ?expected env loc f args =
     let fname, b, params, result = find_builtin loc f in
-    let unnamed = List.filter (fun (a : A.arg) -> a.arg_name = None) args in
+    let unnamed = List.filter (fun (a : Ast.arg) -> a.arg_name = None) args in
     (* The parameters of the unnamed arguments, in order: the only one, else
      * those that are not named, the ones that must be given first: *)
     let slots =
@@ -2256,7 +2257,7 @@ and call ?expected env loc f args =
         | _ ->
             let free =
                 List.filter (fun p ->
-                    not (List.exists (fun (a : A.arg) ->
+                    not (List.exists (fun (a : Ast.arg) ->
                         Option.map_default (same_name p.pname) false a.arg_name) args)
                 ) params in
             let required, optional = List.partition (fun p -> p.default = None) free in
@@ -2267,14 +2268,14 @@ and call ?expected env loc f args =
             (String.concat ", " (List.map (fun p -> p.pname) params)) ;
     let slots = ref slots in
     let named =
-        List.map (fun (a : A.arg) ->
+        List.map (fun (a : Ast.arg) ->
             match a.arg_name with
             | Some n ->
                 (match List.find_opt (fun p -> same_name p.pname n) params with
                 | Some p -> p.pname, a
                 | None ->
                     error a.arg_loc "%s has no parameter %s%s" fname n
-                        (A.did_you_mean (List.map (fun p -> p.pname) params) n))
+                        (Ast.did_you_mean (List.map (fun p -> p.pname) params) n))
             | None ->
                 let p = List.hd !slots in
                 slots := List.tl !slots ;
@@ -2300,19 +2301,19 @@ and call ?expected env loc f args =
         | Make_map, "default" ->
             (match expected with Some (Type.Map (_, v)) -> Some v | _ -> None)
         | _ -> None in
-    let typed_arg (a : A.arg) pname =
+    let typed_arg (a : Ast.arg) pname =
         match Hashtbl.find_opt typed pname with
         | Some e -> e
         | None ->
             let e = expr ?expected:(expected_arg pname) env a.value in
             Hashtbl.replace typed pname e ;
             e in
-    List.iter (fun (pname, (a : A.arg)) ->
+    List.iter (fun (pname, (a : Ast.arg)) ->
         if not (is_empty_array a.value) then ignore (typed_arg a pname)) named ;
     let args =
         List.filter_map (fun p ->
             match List.assoc p.pname named with
-            | (a : A.arg) ->
+            | (a : Ast.arg) ->
                 let e = typed_arg a p.pname in
                 (match p.accept e.typ with
                 | Some t -> Some (expect "" e t)
@@ -2323,9 +2324,9 @@ and call ?expected env loc f args =
                 (match p.default with
                 | Some (Literal l) -> Some { loc ; typ = type_of_literal l ; desc = Lit l ; taint = [] }
                 | Some (Quote (text, quoted)) ->
-                    let (a : A.arg) = List.assoc quoted named in
+                    let (a : Ast.arg) = List.assoc quoted named in
                     Some { loc ; typ = Type.String ;
-                           desc = String [ Text (text ^ IO.to_string A.print_bare_expr a.value) ] ;
+                           desc = String [ Text (text ^ IO.to_string Ast.print_bare_expr a.value) ] ;
                            taint = [] }
                 | Some Omitted -> None
                 | None -> error loc "%s needs an argument %s" fname p.pname)
@@ -2342,7 +2343,7 @@ and binop env loc op a b =
             a, expr ?expected:(if is_empty_array b then empty_next_to a.typ else None)
                     env b in
     let mk typ desc = { loc ; typ ; desc ; taint = [] } in
-    let sym = A.string_of_binop op in
+    let sym = Ast.string_of_binop op in
     let cannot () =
         no_constructor env a ; no_constructor env b ;
         error loc "Cannot apply %s to %s and %s" sym (describe env a) (describe env b) in
@@ -2352,99 +2353,99 @@ and binop env loc op a b =
             { x with typ = Type.bytes ; desc = Array [ x ] }
         else x in
     match op with
-    | A.Add | A.Sub | A.Mul | A.Div | A.Mod ->
+    | Ast.Add | Ast.Sub | Ast.Mul | Ast.Div | Ast.Mod ->
         (* To [+], a byte is one-element bytes: *)
-        let a, b = if op = A.Add then as_bytes a, as_bytes b else a, b in
+        let a, b = if op = Ast.Add then as_bytes a, as_bytes b else a, b in
         (match a.typ, b.typ with
         | (Type.Int | Type.Float), (Type.Int | Type.Float) ->
             let a, b = unify sym a b in
             mk a.typ (Binop (op, a, b))
-        | Type.Interval, Type.Interval when op = A.Add || op = A.Sub ->
+        | Interval, Interval when op = Ast.Add || op = Ast.Sub ->
             mk Type.Interval (Binop (op, a, b))
-        | Type.Interval, Type.Interval when op = A.Div ->
+        | Interval, Interval when op = Ast.Div ->
             mk Type.Float (Binop (op, a, b))
-        | Type.Interval, (Type.Int | Type.Float) when op = A.Mul || op = A.Div ->
+        | Interval, (Int | Float) when op = Ast.Mul || op = Ast.Div ->
             mk Type.Interval (Binop (op, a, expect "" b Type.Float))
-        | (Type.Int | Type.Float), Type.Interval when op = A.Mul ->
+        | (Int | Float), Interval when op = Ast.Mul ->
             mk Type.Interval (Binop (op, expect "" a Type.Float, b))
         (* A repetition, of a byte as of bytes: *)
         | (Type.Array _ | Type.Byte), Type.Int | Type.Int, (Type.Array _ | Type.Byte)
-          when op = A.Mul ->
+          when op = Ast.Mul ->
             let a = as_bytes a and b = as_bytes b in
             mk (if b.typ = Type.Int then a.typ else b.typ) (Binop (op, a, b))
-        | Type.String, Type.Int | Type.Int, Type.String when op = A.Mul ->
+        | String, Int | Int, String when op = Ast.Mul ->
             mk Type.String (Binop (op, a, b))
         (* Numbers offset times by that many seconds: *)
-        | Type.Time, Type.Time when op = A.Sub ->
+        | Type.Time, Type.Time when op = Ast.Sub ->
             mk Type.Interval (Binop (op, a, b))
-        | Type.Time, Type.Interval when op = A.Add || op = A.Sub ->
+        | Time, Interval when op = Ast.Add || op = Ast.Sub ->
             mk Type.Time (Binop (op, a, b))
-        | Type.Interval, Type.Time when op = A.Add ->
+        | Interval, Time when op = Ast.Add ->
             mk Type.Time (Binop (op, a, b))
-        | Type.Time, (Type.Int | Type.Float) when op = A.Add || op = A.Sub ->
+        | Time, (Int | Float) when op = Ast.Add || op = Ast.Sub ->
             mk Type.Time (Binop (op, a, expect "" b Type.Float))
-        | (Type.Int | Type.Float), Type.Time when op = A.Add ->
+        | (Int | Float), Time when op = Ast.Add ->
             mk Type.Time (Binop (op, expect "" a Type.Float, b))
         (* A string and a string or bytes, as their interpolations: *)
         | (Type.String, Type.String | Type.String, Type.Array Type.Byte | Type.Array Type.Byte, Type.String)
-          when op = A.Add ->
+          when op = Ast.Add ->
             let parts x =
                 match x.desc with
                 | String ps -> ps
                 | _ -> [ Interp x ] in
             mk Type.String (String (parts a @ parts b))
         (* A concatenation, else an append, else a prepend: *)
-        | (Type.Array _, _ | _, Type.Array _) when op = A.Add ->
+        | (Type.Array _, _ | _, Type.Array _) when op = Ast.Add ->
             (match List.filter_map (fun f -> array_join f loc a b)
                                    [ Concat ; Append ; Prepend ] with
             | e :: _ -> e
             | [] -> cannot ())
         | _ -> cannot ())
-    | A.BitAnd | A.BitOr | A.BitXor ->
+    | BitAnd | BitOr | BitXor ->
         (match a.typ, b.typ with
         | Type.Int, Type.Int | Type.Byte, Type.Byte ->
             mk a.typ (Binop (op, a, b))
-        | (Type.Int | Type.Byte), (Type.Int | Type.Byte) ->
+        | (Int | Byte), (Int | Byte) ->
             mk Type.Int (Binop (op, expect "" a Type.Int, expect "" b Type.Int))
         | _ -> cannot ())
-    | A.Shl | A.Shr ->
+    | Shl | Shr ->
         (match a.typ, b.typ with
         | (Type.Int | Type.Byte), (Type.Int | Type.Byte) ->
             mk a.typ (Binop (op, a, expect "" b Type.Int))
         | _ -> cannot ())
-    | A.And | A.Or ->
+    | And | Or ->
         let what = "An operand of "^ sym in
         mk Type.Bool (Binop (op, as_bool what a, as_bool what b))
-    | A.Eq | A.Ne ->
+    | Eq | Ne ->
         if any_value a.typ = None || any_value b.typ = None then cannot () ;
         let a, b = unify "compare" a b in
         mk Type.Bool (Binop (op, a, b))
-    | A.Lt | A.Le | A.Gt | A.Ge ->
+    | Lt | Le | Gt | Ge ->
         let a, b = unify "compare" a b in
         if not (List.mem a.typ ordered) then
             error loc "Cannot order values of type %s" (tname a.typ) ;
         mk Type.Bool (Binop (op, a, b))
-    | A.In ->
+    | In ->
         (match a.typ, b.typ with
         | Type.Ip, Type.Cidr -> mk Type.Bool (Binop (op, a, b))
         | _ -> cannot ())
 
 (* What tells where the [layers] of a stack statement can go: *)
-and stack_hint env anchor (layers : A.layer list) ~sends =
-    where_to_hint env anchor (List.mapi (fun i (al : A.layer) ->
+and stack_hint env anchor (layers : Ast.layer list) ~sends =
+    where_to_hint env anchor (List.mapi (fun i (al : Ast.layer) ->
         let sends = sends && i = List.length layers - 1 in
         { w_name = al.layer_name ; bang = al.manual ; plain = al.options = [] ;
-          text = A.string_of_stack ~sends (A.Relative 0) [ al ] }) layers)
+          text = Ast.string_of_stack ~sends (Ast.Relative 0) [ al ] }) layers)
 
 (* The stack as written (top first) that [tls], typed from [layers], make on
  * top of the [depth] first layers of the current stack; a layer that overlays
  * one of the same mode without options is written as that one: *)
-and stack_text env depth overlay (layers : A.layer list) tls =
+and stack_text env depth overlay (layers : Ast.layer list) tls =
     let n = List.length env.stack - depth in
     let over = List.rev (List.take n (List.combine env.stack env.stack_text)) in
     let written =
-        List.map (fun (al : A.layer) ->
-            al.options = [], A.string_of_stack (A.Relative 0) [ al ]) layers in
+        List.map (fun (al : Ast.layer) ->
+            al.options = [], Ast.string_of_stack (Ast.Relative 0) [ al ]) layers in
     let written =
         if List.length tls > List.length layers then (true, "Eth") :: written
         else written in
@@ -2458,8 +2459,8 @@ and stack_text env depth overlay (layers : A.layer list) tls =
  * (bottom first) that were taken off the current stack, and the new stack.
  * The layers that are over the same ones take their key, which they need
  * not give: *)
-and stack_layers ~hint env base over (layers : A.layer list) =
-    List.fold_left (fun (base, tls) (al : A.layer) ->
+and stack_layers ~hint env base over (layers : Ast.layer list) =
+    List.fold_left (fun (base, tls) (al : Ast.layer) ->
         let base', l = push ~hint al.layer_loc base al.layer_name in
         let tls =
             if base' == base then tls else implicit_root al.layer_loc :: tls in
@@ -2469,32 +2470,32 @@ and stack_layers ~hint env base over (layers : A.layer list) =
                     shadowing = ref [] ; prefixed = ref [] } in
         let env = { env with layer_ctx = Some ctx } in
         let options =
-            List.map (fun (a : A.arg) ->
+            List.map (fun (a : Ast.arg) ->
                 let i =
                     match a.arg_name with
                     | Some n ->
-                        (match L.find_field l n with
+                        (match Lay.find_field l n with
                         | Some i -> i
                         | None ->
-                            error a.arg_loc "%s has no field %s%s" (L.to_string l) n
+                            error a.arg_loc "%s has no field %s%s" (Lay.to_string l) n
                                 (field_hint l n))
                     | None ->
                         (match l.default_field with
                         | Some i -> i
-                        | None when Crafty_parser.is_condition a.value ->
-                            error a.arg_loc "%s" (Crafty_parser.condition_hint a.value)
-                        | None -> error a.arg_loc "The options of %s must be named" (L.to_string l)) in
+                        | None when Prs.is_condition a.value ->
+                            error a.arg_loc "%s" (Prs.condition_hint a.value)
+                        | None -> error a.arg_loc "The options of %s must be named" (Lay.to_string l)) in
                 let f = l.fields.(i) in
                 if not (List.mem mode f.set_in) then (
                     if f.set_in = [] then
-                        let ln = L.to_string l in
+                        let ln = Lay.to_string l in
                         error a.arg_loc "%s.%s is a virtual field%s: it cannot be set"
                             ln f.name
                             (if f.about = "" then "" else
                              " ("^ String.nreplace ~str:f.about ~sub:"%s" ~by:ln ^")")
                     else
                         error a.arg_loc "%s cannot be set in a %s %s%s" f.name
-                            (L.string_of_mode mode) (L.to_string l)
+                            (Lay.string_of_mode mode) (Lay.to_string l)
                             (other_mode_hint l mode f.set_in)) ;
                 let e = expr ~expected:f.typ env a.value in
                 i, expect ("The value of "^ f.name) e f.typ
@@ -2514,16 +2515,16 @@ and stack_layers ~hint env base over (layers : A.layer list) =
         let n = overlay over (List.map (fun tl -> tl.layer) tls) in
         List.iteri (fun j tl ->
             if j >= n then
-                Array.iteri (fun i (f : L.field) ->
-                    if f.pick = Some L.Required && not (List.mem_assoc i tl.options) then
-                        error tl.layer_loc "%s needs a %s" (L.to_string tl.layer) f.name
+                Array.iteri (fun i (f : Lay.field) ->
+                    if f.pick = Some Lay.Required && not (List.mem_assoc i tl.options) then
+                        error tl.layer_loc "%s needs a %s" (Lay.to_string tl.layer) f.name
                 ) tl.layer.fields ;
             (* The type and code of ICMP are those of the message on top, but
              * for Raw: *)
-            if tl.layer == L.icmp || tl.layer == L.icmp6 then
-                let name = L.to_string tl.layer in
+            if tl.layer == Lay.icmp || tl.layer == Lay.icmp6 then
+                let name = Lay.to_string tl.layer in
                 match List.nth_opt tls (j + 1) with
-                | Some up when up.layer == L.raw ->
+                | Some up when up.layer == Lay.raw ->
                     if j >= n && not (List.exists (fun (i, _) ->
                                          tl.layer.fields.(i).name = "type") tl.options) then
                         error tl.layer_loc "%s needs a type, with Raw on top" name
@@ -2531,28 +2532,28 @@ and stack_layers ~hint env base over (layers : A.layer list) =
                     List.iter (fun (i, (e : expr)) ->
                         error e.loc "The %s of %s is that of the %s on top: \
                                      it can be set only with Raw on top"
-                            tl.layer.fields.(i).name name (L.to_string up.layer)) tl.options
+                            tl.layer.fields.(i).name name (Lay.to_string up.layer)) tl.options
                 | None -> ()) tls ;
         base, tls, n
 
-and pattern env (p : A.pattern) =
+and pattern env (p : Ast.pattern) =
     let hint =
-        where_to_hint env p.anchor (List.map (fun (pl : A.pattern_layer) ->
+        where_to_hint env p.anchor (List.map (fun (pl : Ast.pattern_layer) ->
             { w_name = pl.pl_name ; bang = pl.pl_manual ; plain = pl.cond = None ;
-              text = IO.to_string (A.print_pattern ~all:false ~indent:0)
-                       { p with anchor = A.Relative 0 ; pat_layers = [ pl ] } })
+              text = IO.to_string (Ast.print_pattern ~all:false ~indent:0)
+                       { p with anchor = Ast.Relative 0 ; pat_layers = [ pl ] } })
             p.pat_layers) in
     let base, over = anchor_base ~hint env p.pat_loc p.anchor in
     let depth = List.length base in
     let _, pls =
-        List.fold_left (fun (base, pls) (pl : A.pattern_layer) ->
+        List.fold_left (fun (base, pls) (pl : Ast.pattern_layer) ->
             let base', l = push ~hint pl.pl_loc base pl.pl_name in
             Option.may (fun n ->
                 error pl.pl_loc "%s is only sent: it is received as %s"
-                    (L.to_string l) (lname n)) l.received_as ;
+                    (Lay.to_string l) (lname n)) l.received_as ;
             let pls =
                 if base' == base then pls
-                else { pl_loc = pl.pl_loc ; pl_layer = L.root ; pl_mode = L.Driven ;
+                else { pl_loc = pl.pl_loc ; pl_layer = Lay.root ; pl_mode = Lay.Driven ;
                        cond = None } :: pls in
             let mode = mode_on pl.pl_loc base' l ~bang:pl.pl_manual in
             let ctx = { cur = l ; cur_mode = mode ; in_cond = true ;
@@ -2585,17 +2586,17 @@ and pattern env (p : A.pattern) =
                               desc = Packet_field { layer = Array.length ctx.below ;
                                                     field = i } ;
                               taint = [] } in
-                        { loc = c.loc ; typ = Type.Bool ; desc = Binop (A.Eq, field, c) ;
+                        { loc = c.loc ; typ = Type.Bool ; desc = Binop (Ast.Eq, field, c) ;
                           taint = [] }
                     | t, _ ->
                         error c.loc "The condition on %s must be a bool, not %s"
-                            (L.to_string l) (a_type t)
+                            (Lay.to_string l) (a_type t)
                 ) pl.cond in
             (l, mode) :: base',
             { pl_loc = pl.pl_loc ; pl_layer = l ; pl_mode = mode ; cond } :: pls
         ) (base, []) p.pat_layers in
     let pat_layers = List.rev pls in
-    if p.anchor = A.Absolute then overreach env p pat_layers ;
+    if p.anchor = Ast.Absolute then overreach env p pat_layers ;
     { pat_loc = p.pat_loc ; depth ; pat_layers ;
       overlay = overlay over (List.map (fun pl -> pl.pl_layer) pat_layers) }
 
@@ -2604,7 +2605,7 @@ and pattern env (p : A.pattern) =
  * then matches the packets of any stream rather than of the stack's; the
  * relative pattern suggested instead overlays from the lowest shared layer
  * that has a condition: *)
-and overreach env (p : A.pattern) pat_layers =
+and overreach env (p : Ast.pattern) pat_layers =
     let n = List.length env.stack in
     let shared =
         overlay (List.rev_map fst env.stack) (List.map (fun pl -> pl.pl_layer) pat_layers) in
@@ -2615,7 +2616,7 @@ and overreach env (p : A.pattern) pat_layers =
                 if shared = List.length pat_layers then shared - 1 else shared) in
         let written = List.length pat_layers - List.length p.pat_layers in
         let fix =
-            { p with anchor = A.Relative (n - i0) ;
+            { p with anchor = Ast.Relative (n - i0) ;
                      pat_layers = List.drop (i0 - written) p.pat_layers } in
         env.warnings :=
             (p.pat_loc,
@@ -2623,7 +2624,7 @@ and overreach env (p : A.pattern) pat_layers =
                              current stack %s.\n  Do you mean \"%s\"?"
                 (string_of_layers (List.rev_map (fun pl -> pl.pl_layer, pl.pl_mode) pat_layers))
                 (string_of_stack_text env.stack_text)
-                (IO.to_string (A.print_pattern ~all:false ~indent:0) fix)) ::
+                (IO.to_string (Ast.print_pattern ~all:false ~indent:0) fix)) ::
             !(env.warnings)
 
 (** {2 Statements} *)
@@ -2636,8 +2637,8 @@ and timeout_of env form timeout =
     try opt_expr env ("The timeout of "^ form) Type.Interval timeout
     with Error (loc, msg) as ex ->
         match timeout with
-        | Some { desc = A.Var c | A.Construct (c, _) ; _ } when A.is_constructor c ->
-            (match A.did_you_mean (List.map A.Layer_name.to_string A.Layer_name.all) c with
+        | Some { desc = Ast.Var c | Ast.Construct (c, _) ; _ } when Ast.is_constructor c ->
+            (match Ast.did_you_mean (List.map Ast.Layer_name.to_string Ast.Layer_name.all) c with
             | "" -> raise ex
             | hint -> error loc "%s\n  If %s is a misspelled layer%s" msg c hint)
         | _ -> raise ex
@@ -2649,14 +2650,14 @@ and block_value ?expected ~used errors env stmts =
     (* An [on] or a [spawn] ending with its block, which nothing after it
      * keeps waiting, ends as it starts: *)
     let rec ends_at_once = function
-        | { A.stmt = A.On { for_ = None ; linger = None ; _ } ; stmt_loc } :: rest ->
+        | { Ast.stmt = Ast.On { for_ = None ; linger = None ; _ } ; stmt_loc } :: rest ->
             ends_at_once rest &&
             (env.warnings :=
                 (stmt_loc, "This on ends at once, with its block: give it a \
                             duration (for), or a linger after its block") ::
                 !(env.warnings) ;
              true)
-        | { A.stmt = A.Spawn { for_ = None ; _ } ; stmt_loc } :: rest ->
+        | { Ast.stmt = Spawn { for_ = None ; _ } ; stmt_loc } :: rest ->
             ends_at_once rest &&
             (env.warnings :=
                 (stmt_loc, "This spawn ends at once, with its block: give it a \
@@ -2668,7 +2669,7 @@ and block_value ?expected ~used errors env stmts =
     ignore (ends_at_once stmts) ;
     let rec loop env ss = function
         | [] -> List.rev ss, Type.Void
-        | [ { A.stmt = A.Expr e ; stmt_loc } ] when used ->
+        | [ { Ast.stmt = Ast.Expr e ; stmt_loc } ] when used ->
             let e = expr ?expected ~tail:true env e in
             List.rev ({ stmt_loc ; stmt = Expr e } :: ss), e.typ
         | s :: rest ->
@@ -2681,7 +2682,7 @@ and block errors env stmts = fst (block_value ~used:false errors env stmts)
 
 (* The environment for the next statements, and the statement unless it is
  * in error: *)
-and stmt errors env (s : A.stmt) =
+and stmt errors env (s : Ast.stmt) =
     let loc = s.stmt_loc in
     let mk stmt = { stmt_loc = loc ; stmt } in
     let cases ?(loops=[]) cs =
@@ -2693,7 +2694,7 @@ and stmt errors env (s : A.stmt) =
                                         loops = loops @ env.loops } body in
             { patterns ; match_ ; body }) cs in
     let declare_typ env name typ =
-        Option.may (fun (at : A.location) ->
+        Option.may (fun (at : Ast.location) ->
             error loc "%s is already declared in this block, at line %d: \
                        use := instead of = to update it" name at.line
         ) (List.assoc_opt name env.declared_here) ;
@@ -2706,22 +2707,22 @@ and stmt errors env (s : A.stmt) =
         if not env.may_wait then (
             let what =
                 match s.stmt with
-                | A.Stack { body = None ; _ } | A.Capture _ -> Some "A packet"
-                | A.Stack _ -> Some "A stack"
-                | A.Repeat _ -> Some "repeat" | A.For _ -> Some "for"
-                | A.Retry _ -> Some "retry"
-                | A.Break { continue = false ; _ } -> Some "break"
-                | A.Break { continue = true ; _ } -> Some "continue"
-                | A.Exit -> Some "exit"
-                | A.Wait _ -> Some "wait"
-                | A.On _ -> Some "on" | A.Spawn _ -> Some "spawn"
-                | A.Expr _ | A.Declare _ | A.Assign _ -> None in
+                | Ast.Stack { body = None ; _ } | Ast.Capture _ -> Some "A packet"
+                | Stack _ -> Some "A stack"
+                | Repeat _ -> Some "repeat" | Ast.For _ -> Some "for"
+                | Retry _ -> Some "retry"
+                | Break { continue = false ; _ } -> Some "break"
+                | Break { continue = true ; _ } -> Some "continue"
+                | Exit -> Some "exit"
+                | Wait _ -> Some "wait"
+                | On _ -> Some "on" | Ast.Spawn _ -> Some "spawn"
+                | Expr _ | Declare _ | Assign _ -> None in
             Option.may (fun what ->
                 error loc "%s cannot be in a block within an expression, but for \
                            the value of a declaration, an assignment or a statement"
                       what) what) ;
         match s.stmt with
-        | A.Stack { anchor ; layers ; body } ->
+        | Ast.Stack { anchor ; layers ; body } ->
             let hint = stack_hint env anchor layers ~sends:(body = None) in
             let base, over = anchor_base ~hint env s.stmt_loc anchor in
             let stack, tls, overlay = stack_layers ~hint env base over layers in
@@ -2736,7 +2737,7 @@ and stmt errors env (s : A.stmt) =
                 env, Some (mk (Stack { depth ; overlay ; layers = tls ; body }))
             | None ->
                 env, Some (mk (Send { depth ; overlay ; layers = tls ; capture = None })))
-        | A.Capture { var ; declare = decl ; anchor ; layers } ->
+        | Capture { var ; declare = decl ; anchor ; layers } ->
             let hint = stack_hint env anchor layers ~sends:true in
             let base, over = anchor_base ~hint env s.stmt_loc anchor in
             let _, tls, overlay = stack_layers ~hint env base over layers in
@@ -2751,33 +2752,33 @@ and stmt errors env (s : A.stmt) =
             env, Some (mk (Send { depth = List.length base ; overlay ; layers = tls ;
                                   capture = Some capture }))
         (* [sort(x[i])] is [x[i] := sorted(x[i])]: *)
-        | A.Expr { desc = A.Call (f, [ arg ]) ; _ }
+        | Ast.Expr { desc = Ast.Call (f, [ arg ]) ; _ }
           when same_name f "sort" && (arg.arg_name = None || arg.arg_name = Some "a") ->
-            let rec target (e : A.expr) =
+            let rec target (e : Ast.expr) =
                 match e.desc with
-                | A.Var n -> n, []
-                | A.Index (a, i) -> let n, is = target a in n, is @ [ i ]
+                | Ast.Var n -> n, []
+                | Index (a, i) -> let n, is = target a in n, is @ [ i ]
                 | _ -> error e.loc "sort needs a variable, or an item of one" in
             let name, is = target arg.value in
             (match (expr env arg.value).typ with
             | Type.Array t when List.mem t ordered -> ()
             | t -> error arg.value.loc "sort needs an array of ordered values, not %s" (a_type t)) ;
-            let sorted = { arg.value with desc = A.Call ("sorted", [ arg ]) } in
-            stmt errors env { s with stmt = A.Assign (name, is, None, sorted) }
-        | A.Expr e ->
+            let sorted = { arg.value with desc = Ast.Call ("sorted", [ arg ]) } in
+            stmt errors env { s with stmt = Ast.Assign (name, is, None, sorted) }
+        | Expr e ->
             let te = expr ~tail:true ~used:false env e in
             if te.typ <> Type.Void then (
                 match e.desc with
-                | A.Call (f, _) -> error loc "The result of %s is not used" f
-                | A.Construct (c, _) ->
+                | Ast.Call (f, _) -> error loc "The result of %s is not used" f
+                | Construct (c, _) ->
                     (* Rather a misspelled layer than a value: *)
                     error loc "This %s is not used%s" (tname te.typ)
-                        (A.did_you_mean (List.map A.Layer_name.to_string A.Layer_name.all) c)
+                        (Ast.did_you_mean (List.map Ast.Layer_name.to_string Ast.Layer_name.all) c)
                 | _ -> error loc "This %s is not used" (tname te.typ)) ;
             env, Some (mk (Expr te))
-        | A.Declare (name, _) when List.mem name A.self_declared ->
+        | Declare (name, _) when List.mem name Ast.self_declared ->
             error loc "%s can only be declared at the top level of the program" name
-        | A.Declare (name, value) ->
+        | Declare (name, value) ->
             let e = value in
             (* A declaration in error still declares its variable, so that
              * its uses are not reported as well: *)
@@ -2807,7 +2808,7 @@ and stmt errors env (s : A.stmt) =
             | exception (Error _ | Already_told as ex) ->
                 tell errors ex ;
                 poisoned ())
-        | A.Assign (name, (_ :: _ as is), op, e) ->
+        | Assign (name, (_ :: _ as is), op, e) ->
             let v = lookup_var env loc name in
             (* Each index is evaluated once, into a variable no program can
              * name, [x[i] op= e] being [x[#0] op e]: *)
@@ -2816,13 +2817,13 @@ and stmt errors env (s : A.stmt) =
                     let t, i =
                         match t with
                         | Type.Array t -> t, expect "An index" (expr env i) Type.Int
-                        | Type.Map (k, t) -> t, expect "A key" (expr ~expected:k env i) k
+                        | Map (k, t) -> t, expect "A key" (expr ~expected:k env i) k
                         | t -> error loc "Cannot index %s" (a_type t) in
                     let iv = new_var ("#"^ string_of_int n) i.typ in
                     t, (iv, i) :: path,
-                    { A.loc ; A.desc = A.Index (lhs, { A.loc ; A.desc = A.Var iv.name }) },
+                    { Ast.loc ; Ast.desc = Ast.Index (lhs, { Ast.loc ; Ast.desc = Ast.Var iv.name }) },
                     { env' with vars = iv :: env'.vars }
-                ) (v.typ, [], { A.loc ; A.desc = A.Var name }, env) is in
+                ) (v.typ, [], { Ast.loc ; Ast.desc = Ast.Var name }, env) is in
             let e =
                 match op with
                 | None -> expr ~expected:typ ~tail:true env e
@@ -2836,7 +2837,7 @@ and stmt errors env (s : A.stmt) =
             | None, _ ->
                 error loc "Cannot assign %s to an item of %s, which is %s"
                     (a_type e.typ) name (a_type typ))
-        | A.Assign (name, [], op, e) ->
+        | Assign (name, [], op, e) ->
             let v = lookup_var env loc name in
             let e =
                 match op with
@@ -2844,7 +2845,7 @@ and stmt errors env (s : A.stmt) =
                     expr ?expected:(if has_unknown v.typ then None else Some v.typ)
                          ~tail:true env e
                 | Some op ->
-                    binop env loc op { A.loc ; A.desc = A.Var name } e in
+                    binop env loc op { Ast.loc ; Ast.desc = Ast.Var name } e in
             (match coerce e v.typ, Hashtbl.find_opt env.declared_at v.id with
             | Some e, _ -> env, Some (mk (Assign { var = v ; path = [] ; value = e }))
             | None, Some at when fills v.typ e.typ ->
@@ -2863,7 +2864,7 @@ and stmt errors env (s : A.stmt) =
                     (match origin env v with "" -> "" | o -> " ("^ o ^")")
                     (if v.typ = Type.Interval && e.typ = Type.Time then
                         "\n  A time variable starts as now(), or time(0)." else ""))
-        | A.Repeat { var ; count ; every ; for_ ; body } ->
+        | Repeat { var ; count ; every ; for_ ; body } ->
             let count = opt_expr env "The count of repeat" Type.Int count
             and every = opt_expr env "The period of repeat" Type.Interval every
             and for_ = opt_expr env "The duration of repeat" Type.Interval for_ in
@@ -2875,7 +2876,7 @@ and stmt errors env (s : A.stmt) =
                 warn_hidden_i env "the number of the iteration of this repeat" v ;
             env, Some (mk (Repeat { var = v ; count ; items = None ; every ;
                                     for_ ; body }))
-        | A.For { var ; items ; every ; for_ ; body } ->
+        | For { var ; items ; every ; for_ ; body } ->
             let items = expr env items in
             let t = item_of "for" items in
             let every = opt_expr env "The period of for" Type.Interval every
@@ -2886,7 +2887,7 @@ and stmt errors env (s : A.stmt) =
                                         loops = "for" :: env.loops } body in
             env, Some (mk (Repeat { var = v ; count = None ; items = Some items ;
                                     every ; for_ ; body }))
-        | A.Retry { max ; on ; body } ->
+        | Retry { max ; on ; body } ->
             if on = [] then
                 error loc "retry needs the errors it retries on, as in \
                            retry Timeout|Closed max=3 { ... }" ;
@@ -2897,12 +2898,12 @@ and stmt errors env (s : A.stmt) =
                     !(env.warnings) ;
             let max = opt_expr env "The maximum of retry" Type.Int max in
             env, Some (mk (Retry { max ; on ; body = block errors env body }))
-        | A.Break { depth ; continue } ->
+        | Break { depth ; continue } ->
             let what = if continue then "continue" else "break" in
             let depth =
                 match depth with
                 | None -> 1
-                | Some { desc = A.Lit (A.Int n) ; _ } when n > 0 -> n
+                | Some { desc = Ast.Lit (Ast.Int n) ; _ } when n > 0 -> n
                 | Some e -> error e.loc "The depth of %s must be a positive integer" what in
             if depth > List.length env.loops then
                 error loc "%s out of %d repeat, for, on or spawn, but %s"
@@ -2914,10 +2915,10 @@ and stmt errors env (s : A.stmt) =
             if continue && List.nth env.loops (depth - 1) = "spawn" then
                 error loc "A spawn has no next iteration to continue with" ;
             env, Some (mk (Break { depth ; continue }))
-        | A.Exit -> env, Some (mk Exit)
-        | A.Wait dur ->
+        | Exit -> env, Some (mk Exit)
+        | Wait dur ->
             env, Some (mk (Wait (expect "The duration of wait" (expr env dur) Type.Interval)))
-        | A.On { for_ ; linger ; timeout ; max ; cases = cs } ->
+        | On { for_ ; linger ; timeout ; max ; cases = cs } ->
             if for_ <> None && linger <> None then
                 error loc "An on lasts either for its own duration (for), \
                            keeping its block waiting, or until its block ends, \
@@ -2928,7 +2929,7 @@ and stmt errors env (s : A.stmt) =
             and max = opt_expr env "The maximum of on" Type.Int max in
             env, Some (mk (On { for_ ; linger ; timeout ; max ;
                                 cases = cases ~loops:[ "on" ] cs }))
-        | A.Spawn { for_ ; body } ->
+        | Spawn { for_ ; body } ->
             let for_ = opt_expr env "The duration of spawn" Type.Interval for_ in
             let body = block errors { env with loops = "spawn" :: env.loops } body in
             env, Some (mk (Spawn { for_ ; body }))
@@ -2938,8 +2939,8 @@ and stmt errors env (s : A.stmt) =
 
 (* Errors in the order of the source: *)
 let in_order es =
-    List.rev_map (fun (where, message) -> Crafty_parser.{ where ; message ; kind = None ; packet = None }) es |>
-    List.sort (fun (a : Crafty_parser.error) b -> compare a.where b.where)
+    List.rev_map (fun (where, message) -> Prs.{ where ; message ; kind = None ; packet = None }) es |>
+    List.sort (fun (a : Prs.error) b -> compare a.where b.where)
 
 (* The expressions directly within [s], not within its blocks: *)
 let stmt_exprs s =
@@ -3081,16 +3082,16 @@ let denied_literals ~local ~remote ~mac (b : block) =
                     else "" in
                 deny ~hint e what a) (if is_local then local else remote) in
     let layer l =
-        let quoted = l.layer.L.quoted in
+        let quoted = l.layer.Lay.quoted in
         let q = if quoted then "Quoted source" else "Source"
         and r = if quoted then "Quoted destination" else "Destination" in
         List.iter (fun (i, e) ->
-            match l.layer.L.name, l.layer.L.fields.(i).L.name, e.desc with
-            | (A.Layer_name.IP | IP6), "src", Lit (A.Ip a) ->
+            match l.layer.Lay.name, l.layer.Lay.fields.(i).Lay.name, e.desc with
+            | (Ast.Layer_name.IP | IP6), "src", Lit (Ast.Ip a) ->
                 ip e (q ^" address") ~is_local:(not quoted) a
-            | (A.Layer_name.IP | IP6), "dst", Lit (A.Ip a) ->
+            | (IP | IP6), "dst", Lit (Ip a) ->
                 ip e (r ^" address") ~is_local:quoted a
-            | A.Layer_name.Eth, "src", Lit (A.Mac m) ->
+            | Eth, "src", Lit (Mac m) ->
                 Option.may (fun mac ->
                     if not (Eth.Addr.eq m mac) then
                         deny e "Source MAC" (Eth.Addr.to_hexstring m)) mac
@@ -3106,10 +3107,10 @@ let denied_literals ~local ~remote ~mac (b : block) =
 let destinations (b : block) =
     let dsts = ref [] in
     let layer l =
-        if not l.layer.L.quoted then
+        if not l.layer.Lay.quoted then
             List.iter (fun (i, e) ->
-                match l.layer.L.name, l.layer.L.fields.(i).L.name, e.desc with
-                | (A.Layer_name.IP | IP6), "dst", Lit (A.Ip a) -> dsts := a :: !dsts
+                match l.layer.Lay.name, l.layer.Lay.fields.(i).Lay.name, e.desc with
+                | (Ast.Layer_name.IP | IP6), "dst", Lit (Ast.Ip a) -> dsts := a :: !dsts
                 | _ -> ()) l.options in
     iter_stmts (fun s ->
         match s.stmt with
@@ -3119,7 +3120,7 @@ let destinations (b : block) =
 
 (* What a message carries, which is the payload of the packet: its bytes and
  * strings, and what holds them, rather than its numbers: *)
-let is_payload (l : L.layer) (f : L.field) =
+let is_payload (l : Lay.layer) (f : Lay.field) =
     l.ends &&
     match f.typ with
     | Type.Bool | Type.Byte | Type.Int | Type.Float -> false
@@ -3133,7 +3134,7 @@ let union a b = List.fold_left (fun acc x -> if List.mem x acc then acc else acc
 let env_sources = List.filter (function Env _ -> true | Received _ -> false)
 
 (* The layers of a stack, bottom first, and the options they are given: *)
-type stack = (L.layer * (int * expr) list) list
+type stack = (Lay.layer * (int * expr) list) list
 
 (* The stack made of the [depth] first layers of [stack] and [layers], the
  * first [overlay] of which take the options of those of [stack] they are
@@ -3153,10 +3154,10 @@ let ip_dst (stack : stack) =
     let rec loop i = function
         | [] -> None
         | (l, opts) :: rest ->
-            if (l.L.name = A.Layer_name.IP || l.L.name = IP6) && not l.L.quoted then
+            if (l.Lay.name = Ast.Layer_name.IP || l.Lay.name = IP6) && not l.Lay.quoted then
                 Some (i, List.find_map_opt (fun (f, e) ->
                     match e.desc with
-                    | Lit (A.Ip a) when l.L.fields.(f).L.name = "dst" -> Some a
+                    | Lit (Ast.Ip a) when l.Lay.fields.(f).Lay.name = "dst" -> Some a
                     | _ -> None) opts)
             else loop (i + 1) rest in
     loop 0 stack
@@ -3168,7 +3169,7 @@ let pattern_peer (stack : stack) (p : pattern) =
     match ip_dst stack with
     | Some (i, dst) when p.depth > i + 1 ->
         (match List.drop (i + 1) stack with
-        | (l, _) :: _ when (l.L.name = A.Layer_name.ICMP || l.L.name = ICMP6) &&
+        | (l, _) :: _ when (l.Lay.name = Ast.Layer_name.ICMP || l.Lay.name = ICMP6) &&
                            p.depth <= i + 2 -> None
         | _ -> dst)
     | _ -> None
@@ -3211,10 +3212,10 @@ let taint_analysis (b : block) =
             (match r.typ with
             | Type.Record fs ->
                 let name = fst (List.nth fs i) in
-                if List.exists (fun (l : L.layer) ->
+                if List.exists (fun (l : Lay.layer) ->
                     packet_record l = r.typ &&
-                    Array.exists (fun (f : L.field) -> f.name = name && is_payload l f)
-                                 l.fields) L.all
+                    Array.exists (fun (f : Lay.field) -> f.name = name && is_payload l f)
+                                 l.fields) Lay.all
                 then received (is_packet r) else []
             | _ -> [])
         | _ when is_packet e <> [] -> []
@@ -3251,7 +3252,7 @@ let taint_analysis (b : block) =
         let to_ = Option.bind (ip_dst stack) snd in
         List.iter (fun l ->
             List.iter (fun (i, e) ->
-                if is_payload l.layer l.layer.L.fields.(i) then
+                if is_payload l.layer l.layer.Lay.fields.(i) then
                     match union (taints e) pc with
                     | [] -> ()
                     | ss -> Hashtbl.modify_def (to_, []) e.loc (fun (to_, ss') -> to_, union ss' ss) sinks)
@@ -3374,11 +3375,11 @@ let exfiltrations ?(public_env=[]) (b : block) =
  * in that program: *)
 (*$inject
   let exfiltrated ?public_env text =
-      match Result.bind (Result.map_error (fun e -> [ e ]) (Crafty_parser.parse text)) check with
-      | Error es -> String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es)
+      match Result.bind (Result.map_error (fun e -> [ e ]) (Prs.parse text)) check with
+      | Error es -> String.concat "\n" (List.map (IO.to_string Prs.print_error) es)
       | Ok b ->
           exfiltrations ?public_env b |>
-          List.map (fun (e : Crafty_parser.error) -> Printf.sprintf "%d:%d" e.where.line e.where.column) |>
+          List.map (fun (e : Prs.error) -> Printf.sprintf "%d:%d" e.where.line e.where.column) |>
           String.concat " "
 *)
 (*$= exfiltrated & ~printer:identity
@@ -3441,9 +3442,9 @@ let exfiltrations ?(public_env=[]) (b : block) =
 (*$= exfiltrations & ~printer:identity
   ("This payload depends on the environment variable X and what was received from 1.2.3.4, " ^ \
    "which PERMISSIONS.exfiltration does not allow; add X to PERMISSIONS.public_env if no secret") \
-    (match Result.bind (Result.map_error (fun e -> [ e ]) (Crafty_parser.parse \
+    (match Result.bind (Result.map_error (fun e -> [ e ]) (Prs.parse \
           "x = randbytes(1)\n/IP(dst=1.2.3.4)/UDP(dst=7) { expect Raw { x := MATCH[Raw].data } }\n/IP(dst=5.6.7.8)/UDP(dst=7)/Raw(x + bytes(getenv(\"X\")))")) check with \
-       | Ok b -> String.concat "\n" (List.map (fun (e : Crafty_parser.error) -> e.message) (exfiltrations b)) \
+       | Ok b -> String.concat "\n" (List.map (fun (e : Prs.error) -> e.message) (exfiltrations b)) \
        | Error _ -> "")
 *)
 
@@ -3453,13 +3454,13 @@ let exfiltrations ?(public_env=[]) (b : block) =
 (*$inject
   let denied text =
       let cidr = Firewall.cidr_of_string in
-      match Result.bind (Result.map_error (fun e -> [ e ]) (Crafty_parser.parse text)) check with
-      | Error es -> String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es)
+      match Result.bind (Result.map_error (fun e -> [ e ]) (Prs.parse text)) check with
+      | Error es -> String.concat "\n" (List.map (IO.to_string Prs.print_error) es)
       | Ok b ->
           denied_literals b ~local:(Some [ Firewall.Accept, cidr "10.0.0.0/8" ])
               ~remote:(Some [ Firewall.Deny, cidr "192.0.2.66" ; Firewall.Accept, cidr "0.0.0.0/0" ])
               ~mac:(Some (Eth.Addr.of_string "02:00:00:00:00:01")) |>
-          List.map (IO.to_string Crafty_parser.print_error) |> String.concat "\n"
+          List.map (IO.to_string Prs.print_error) |> String.concat "\n"
 *)
 (*$= denied & ~printer:identity
   "" (denied "/IP(dst=192.0.2.1)/UDP(dst=7)/Raw()")
@@ -3534,7 +3535,7 @@ let cache_constants (b : block) =
 (* [memos text] is how many constants of that program are cached. *)
 (*$inject
   let memos text =
-      match check (Result.get_ok (Crafty_parser.parse text)) with
+      match check (Result.get_ok (Prs.parse text)) with
       | Error _ -> -1
       | Ok b ->
           fold_exprs (fun n e ->
@@ -3569,7 +3570,7 @@ let cache_constants (b : block) =
 (** The typed program, or the errors, in the order of the source; and in
  * [warnings], what makes sense but is likely not what was meant. [BUDGET]
  * and [PORTS] are what {!limits} reads. *)
-let check ?(warnings=ref []) (program : A.program) =
+let check ?(warnings=ref []) (program : Ast.program) =
     let self, program = self_declarations program in
     let self_errors = ref [] in
     ignore (limits_of self_errors self) ;
@@ -3622,14 +3623,14 @@ let check ?(warnings=ref []) (program : A.program) =
     if errors = [] then (cache_constants p ; Ok p) else Error (in_order errors)
 
 (** What [program] declares of itself, or what is wrong with it. *)
-let limits (program : A.program) =
+let limits (program : Ast.program) =
     let errors = ref [] in
     let l = limits_of errors (fst (self_declarations program)) in
     if !errors = [] then Ok l else Error (in_order !errors)
 
 (** The typed patterns, absolute and with no variable but the fields of their
  * layers, or what is wrong with them. *)
-let check_patterns (ps : A.patterns) =
+let check_patterns (ps : Ast.patterns) =
     let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
                 stack_text = [] ; loops = [] ; layer_ctx = None ; may_wait = false ;
                 in_expect_else = false ; errors = ref [] ; warnings = ref [] ; declared_at = Hashtbl.create 1 ;
@@ -3642,33 +3643,33 @@ let check_patterns (ps : A.patterns) =
                 reports = Hashtbl.create 1 ; provisional = false ;
                 unknown = Hashtbl.create 1 } in
     try
-        Ok (List.map (fun (p : A.pattern) ->
-            if p.anchor <> A.Absolute then
+        Ok (List.map (fun (p : Ast.pattern) ->
+            if p.anchor <> Ast.Absolute then
                 error p.pat_loc "The pattern must be absolute (start with /)" ;
             pattern env p) ps)
-    with Error (where, message) -> Error Crafty_parser.{ where ; message ; kind = None ; packet = None }
+    with Error (where, message) -> Error Prs.{ where ; message ; kind = None ; packet = None }
 
 (* [types text] is what the program in that text declares, with the types,
  * or what is wrong with it. *)
 (*$inject
   let types text =
-      match Crafty_parser.parse text with
-      | Error e -> IO.to_string Crafty_parser.print_error e
+      match Prs.parse text with
+      | Error e -> IO.to_string Prs.print_error e
       | Ok p ->
           match check p with
           | Ok b ->
               String.concat ", " (List.map (fun (v : var) ->
                   v.name ^": "^ Type.to_string v.typ) (declarations b))
           | Error es ->
-              String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es)
+              String.concat "\n" (List.map (IO.to_string Prs.print_error) es)
 *)
 
 (* [warns text] is what the program in that text is warned of. *)
 (*$inject
   let warns text =
       let warnings = ref [] in
-      ignore (check ~warnings (Result.get_ok (Crafty_parser.parse text))) ;
-      String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) !warnings)
+      ignore (check ~warnings (Result.get_ok (Prs.parse text))) ;
+      String.concat "\n" (List.map (IO.to_string Prs.print_error) !warnings)
 *)
 
 (*$= warns & ~printer:identity

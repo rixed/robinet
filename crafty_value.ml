@@ -19,7 +19,7 @@
  *)
 (** The values of crafty programs, and the errors met computing them. *)
 open Batteries
-module A = Crafty_ast
+module Ast = Crafty_ast
 module Interval = Clock.Interval
 
 type value =
@@ -42,15 +42,15 @@ type value =
     | Variant of string * value
 
 let of_literal = function
-    | A.Bool b -> Bool b
-    | A.Int i -> Int i
-    | A.Float f -> Float f
-    | A.Byte b -> Byte b
-    | A.Interval i -> Interval i
-    | A.Time t -> Time t
-    | A.Ip ip -> Ip ip
-    | A.Mac mac -> Mac mac
-    | A.Cidr c -> Cidr c
+    | Ast.Bool b -> Bool b
+    | Int i -> Int i
+    | Float f -> Float f
+    | Byte b -> Byte b
+    | Interval i -> Interval i
+    | Time t -> Time t
+    | Ip ip -> Ip ip
+    | Mac mac -> Mac mac
+    | Cidr c -> Cidr c
 
 let all_bytes = Array.init 256 (fun b -> Byte b)
 
@@ -94,13 +94,13 @@ let rec compare_keys a b =
 let empty_map default = Map (Map.PMap.create compare_keys, default)
 
 (* How a value of type [typ] is written into a string: *)
-let rec to_string (typ : A.Type.t) v =
+let rec to_string (typ : Ast.Type.t) v =
     match typ, v with
     | _, Void -> "?"
     | _, Bool b -> if b then "true" else "false"
     | _, Byte b -> Printf.sprintf "#%02x" b
     | _, Int i -> string_of_int i
-    | _, Float f -> A.string_of_float f
+    | _, Float f -> Ast.string_of_float f
     | _, String s -> s
     | _, Interval i -> Interval.to_short_string i
     | _, Time t -> Clock.Wall.to_iso8601 t
@@ -121,13 +121,13 @@ let rec to_string (typ : A.Type.t) v =
         "["^ String.concat ", " (List.map (fun (key, v) ->
             to_string k key ^": "^ to_string t v) (Map.PMap.bindings m)) ^"]"
     | Variant cs, Variant (n, v) ->
-        let t = try List.assoc n cs with Not_found -> A.Type.Void in
-        if t = A.Type.Void then n else n ^" "^ to_string t v
+        let t = try List.assoc n cs with Not_found -> Ast.Type.Void in
+        if t = Ast.Type.Void then n else n ^" "^ to_string t v
     | _ -> invalid_arg "Crafty_value.to_string"
 
 (* As JSON, with durations in seconds, and what JSON has no type for as
  * {!to_string} writes it: *)
-let rec to_json (typ : A.Type.t) v : Yojson.Basic.t =
+let rec to_json (typ : Ast.Type.t) v : Yojson.Basic.t =
     match typ, v with
     | _, Void -> `Null
     | _, Bool b -> `Bool b
@@ -175,7 +175,7 @@ let csv_field s =
     else s
 
 (* A value with no others in it (bytes are one), as a CSV field: *)
-let csv_scalar (typ : A.Type.t) v =
+let csv_scalar (typ : Ast.Type.t) v =
     match typ with
     | Record _ | Map _ | Variant _ | Void | Pattern -> None
     | Array t when t <> Byte -> None
@@ -186,7 +186,7 @@ let csv_scalar (typ : A.Type.t) v =
 
 (* As CSV: a scalar, or a record or array of scalars, as a line; a map of
  * scalars as a line per key and value; and nothing else. *)
-let to_csv (typ : A.Type.t) v =
+let to_csv (typ : Ast.Type.t) v =
     let row l =
         String.concat "," (List.map (fun (t, v) ->
             Option.get_exn (csv_scalar t v) Exit) l) in
@@ -202,19 +202,19 @@ let to_csv (typ : A.Type.t) v =
     with Exit -> None
 
 (*$= to_csv & ~printer:(function None -> "None" | Some s -> s)
-  (Some "1.5") (to_csv A.Type.Interval (Interval (Interval.of_secs 1.5)))
-  (Some "#0102") (to_csv A.Type.bytes (Array [| Byte 1 ; Byte 2 |]))
+  (Some "1.5") (to_csv Ast.Type.Interval (Interval (Interval.of_secs 1.5)))
+  (Some "#0102") (to_csv Ast.Type.bytes (Array [| Byte 1 ; Byte 2 |]))
   (Some "1,\"a,\"\"b\"\"\",true") \
-    (to_csv A.Type.(Record [ "x", Int ; "s", String ; "b", Bool ]) \
+    (to_csv Ast.Type.(Record [ "x", Int ; "s", String ; "b", Bool ]) \
             (Record [| Int 1 ; String "a,\"b\"" ; Bool true |]))
-  (Some "1,2") (to_csv A.Type.(Array Int) (Array [| Int 1 ; Int 2 |]))
-  (Some "") (to_csv A.Type.(Array Int) (Array [||]))
+  (Some "1,2") (to_csv Ast.Type.(Array Int) (Array [| Int 1 ; Int 2 |]))
+  (Some "") (to_csv Ast.Type.(Array Int) (Array [||]))
   (Some "a,1\nb,2") \
-    (to_csv A.Type.(Map (String, Int)) \
+    (to_csv Ast.Type.(Map (String, Int)) \
             (Map (Map.PMap.add (String "b") (Int 2) \
                     (Map.PMap.add (String "a") (Int 1) (Map.PMap.create compare_keys)), None)))
-  None (to_csv A.Type.(Array (Array Int)) (Array [| Array [||] |]))
-  None (to_csv A.Type.(Record [ "a", Array Int ]) (Record [| Array [||] |]))
+  None (to_csv Ast.Type.(Array (Array Int)) (Array [| Array [||] |]))
+  None (to_csv Ast.Type.(Record [ "a", Array Int ]) (Record [| Array [||] |]))
 *)
 
 (** [v] of type [typ] in that format, unless CSV cannot tell it. *)
@@ -225,7 +225,7 @@ let format fmt typ v =
     | Json -> Some (json_to_string (to_json typ v))
 
 (* The value of type [typ] that a field takes when nothing tells it: *)
-let rec zero (typ : A.Type.t) =
+let rec zero (typ : Ast.Type.t) =
     match typ with
     | Void -> Void
     | Bool -> Bool false
@@ -270,7 +270,7 @@ let bits_of_bytes = function
 (** {2 Errors} *)
 
 (* Named if the program may catch it, else a fault of the program: *)
-exception Runtime_error of A.Error_name.t option * A.location * string
+exception Runtime_error of Ast.Error_name.t option * Ast.location * string
 
 let error loc fmt = Printf.ksprintf (fun s -> raise (Runtime_error (None, loc, s))) fmt
 
@@ -279,7 +279,7 @@ let error_as name loc fmt =
 
 (* An error of what has no location to tell, such as a layer building a
  * packet, which whoever runs it places: *)
-exception Failed of A.Error_name.t option * string
+exception Failed of Ast.Error_name.t option * string
 
 let fail fmt = Printf.ksprintf (fun s -> raise (Failed (None, s))) fmt
 

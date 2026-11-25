@@ -384,11 +384,11 @@ end = struct
         o (q * i)
 
     (*$T &
-      (Clock.Time.(trunc (of_secs 3.7) (Clock.Interval.sec 1.)) :> int) = \
+      (Time.(trunc (of_secs 3.7) (Interval.sec 1.)) :> int) = \
         3_000_000_000_000
-      (Clock.Time.(trunc (of_secs 3.) (Clock.Interval.sec 1.)) :> int) = \
+      (Time.(trunc (of_secs 3.) (Interval.sec 1.)) :> int) = \
         3_000_000_000_000
-      (Clock.Time.(trunc (of_secs (-3.7)) (Clock.Interval.sec 1.)) :> int) = \
+      (Time.(trunc (of_secs (-3.7)) (Interval.sec 1.)) :> int) = \
         -4_000_000_000_000
     *)
 
@@ -488,8 +488,8 @@ end = struct
     let now () = o (realtime_ns ())
 
     (*$T
-      let a = Clock.Wall.now () in \
-      Float.abs (Clock.Wall.to_secs a -. Unix.gettimeofday ()) < 0.1
+      let a = Wall.now () in \
+      Float.abs (Wall.to_secs a -. Unix.gettimeofday ()) < 0.1
     *)
 
     (* Picoseconds to the nearest nanosecond: *)
@@ -524,33 +524,33 @@ end = struct
         o (if r < 0 then t - r - i else t - r)
 
     (*$= & ~printer:(Printf.sprintf "%.17g")
-      3. Clock.Wall.(trunc (of_secs 3.7) (Clock.Interval.sec 1.) |> to_secs)
-      3. Clock.Wall.(trunc (of_secs 3.) (Clock.Interval.sec 1.) |> to_secs)
-      (-4.) Clock.Wall.(trunc (of_secs (-3.7)) (Clock.Interval.sec 1.) |> to_secs)
-      (-128.) Clock.Wall.(trunc (of_secs (-128.)) (Clock.Interval.sec 1.) |> to_secs)
+      3. Wall.(trunc (of_secs 3.7) (Interval.sec 1.) |> to_secs)
+      3. Wall.(trunc (of_secs 3.) (Interval.sec 1.) |> to_secs)
+      (-4.) Wall.(trunc (of_secs (-3.7)) (Interval.sec 1.) |> to_secs)
+      (-128.) Wall.(trunc (of_secs (-128.)) (Interval.sec 1.) |> to_secs)
       1785221520. \
-        Clock.Wall.(trunc (of_secs 1785221556.318881) (Clock.Interval.min 1.) |> to_secs)
+        Wall.(trunc (of_secs 1785221556.318881) (Interval.min 1.) |> to_secs)
       1785196800. \
-        Clock.Wall.(trunc (of_secs 1785196800.) (Clock.Interval.day 1.) |> to_secs)
-      3.7 Clock.Wall.(trunc (of_secs 3.75) (Clock.Interval.msec 100.) |> to_secs)
+        Wall.(trunc (of_secs 1785196800.) (Interval.day 1.) |> to_secs)
+      3.7 Wall.(trunc (of_secs 3.75) (Interval.msec 100.) |> to_secs)
     *)
     (*$T
-      try ignore (Clock.Wall.(trunc (of_secs 3.) (Clock.Interval.psec 1500))) ; \
+      try ignore (Wall.(trunc (of_secs 3.) (Interval.psec 1500))) ; \
         false with Invalid_argument _ -> true
-      try ignore (Clock.Wall.(trunc (of_secs 3.) (Clock.Interval.sec 0.))) ; \
+      try ignore (Wall.(trunc (of_secs 3.) (Interval.sec 0.))) ; \
         false with Invalid_argument _ -> true
     *)
 
     (* To the nanosecond, from libpcap through the simulation's timeline and
      * back, whatever the date: *)
     (*$T
-      let t = Clock.Wall.of_ns 1_792_533_765_123_456_789 \
-      and epoch = Clock.Wall.of_ns 1_792_533_700_000_000_001 in \
-      Clock.Wall.(to_ns (add epoch (diff t epoch))) = 1_792_533_765_123_456_789
-      (Clock.Wall.(diff (of_ns 1_792_533_765_123_456_789) (of_ns 1_792_533_765_123_456_788)) :> int) = 1000
-      try ignore Clock.Wall.(diff (of_secs 1e9) (of_secs 0.)) ; false \
+      let t = Wall.of_ns 1_792_533_765_123_456_789 \
+      and epoch = Wall.of_ns 1_792_533_700_000_000_001 in \
+      Wall.(to_ns (add epoch (diff t epoch))) = 1_792_533_765_123_456_789
+      (Wall.(diff (of_ns 1_792_533_765_123_456_789) (of_ns 1_792_533_765_123_456_788)) :> int) = 1000
+      try ignore Wall.(diff (of_secs 1e9) (of_secs 0.)) ; false \
       with Invalid_argument _ -> true
-      try ignore (Clock.Wall.of_secs 1e10) ; false with Invalid_argument _ -> true
+      try ignore (Wall.of_secs 1e10) ; false with Invalid_argument _ -> true
     *)
 
     (** Convert a timestamp to a pair of ints with seconds, microseconds,
@@ -618,22 +618,22 @@ end = struct
 
     (*$= & ~printer:identity
       "2026-10-20T22:02:45Z" \
-        Clock.Wall.(to_iso8601 (of_date ~utc_offset:Clock.Interval.zero 2026 10 20 22 2 45.))
+        Wall.(to_iso8601 (of_date ~utc_offset:Interval.zero 2026 10 20 22 2 45.))
       "2026-10-20T20:02:45.25Z" \
-        Clock.Wall.(to_iso8601 (of_date ~utc_offset:(Clock.Interval.hour 2.) 2026 10 20 22 2 45.25))
+        Wall.(to_iso8601 (of_date ~utc_offset:(Interval.hour 2.) 2026 10 20 22 2 45.25))
       "2024-02-29T00:00:00Z" \
-        Clock.Wall.(to_iso8601 (of_date ~utc_offset:Clock.Interval.zero 2024 2 29 0 0 0.))
-      "1969-12-31T23:59:59.5Z" Clock.Wall.(to_iso8601 (of_secs (-0.5)))
-      "1970-01-01T00:00:00.000001Z" Clock.Wall.(to_iso8601 (of_secs 1e-6))
+        Wall.(to_iso8601 (of_date ~utc_offset:Interval.zero 2024 2 29 0 0 0.))
+      "1969-12-31T23:59:59.5Z" Wall.(to_iso8601 (of_secs (-0.5)))
+      "1970-01-01T00:00:00.000001Z" Wall.(to_iso8601 (of_secs 1e-6))
       "2026-10-20T22:02:45.123456789Z" \
-        Clock.Wall.(to_iso8601 (of_ns 1_792_533_765_123_456_789))
+        Wall.(to_iso8601 (of_ns 1_792_533_765_123_456_789))
     *)
     (*$= & ~printer:(Printf.sprintf "%.17g")
-      1792533765. Clock.Wall.(to_secs (of_date ~utc_offset:Clock.Interval.zero 2026 10 20 22 2 45.))
+      1792533765. Wall.(to_secs (of_date ~utc_offset:Interval.zero 2026 10 20 22 2 45.))
     *)
     (*$T
-      try ignore (Clock.Wall.of_date 2026 2 29 0 0 0.) ; false with Invalid_argument _ -> true
-      try ignore (Clock.Wall.of_date 2026 13 1 0 0 0.) ; false with Invalid_argument _ -> true
+      try ignore (Wall.of_date 2026 2 29 0 0 0.) ; false with Invalid_argument _ -> true
+      try ignore (Wall.of_date 2026 13 1 0 0 0.) ; false with Invalid_argument _ -> true
     *)
 
     (* Sentinels, for a value that has to be an instant while meaning "not yet" or

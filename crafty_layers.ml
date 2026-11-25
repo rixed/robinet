@@ -31,7 +31,8 @@
 open Batteries
 open Bitstring
 open Crafty_ast
-module V = Crafty_value
+module Ast = Crafty_ast
+module Val = Crafty_value
 module N = Layer_name
 
 (** A layer is either crafted packet by packet ([Manual], written with a
@@ -77,7 +78,7 @@ type field =
       peer : string ;
       (* What a self-driven layer sends when it is not given, if that is
        * known before it sends: *)
-      driven_default : V.value option ;
+      driven_default : Val.value option ;
       (* For a field that is never set, what it tells of the layer [%s]: *)
       about : string }
 
@@ -90,10 +91,10 @@ type field =
 (** What a layer tells the layer below it about itself, by the names of the
  * fields of that one (the protocol of IP, the type of ICMP, the port of a
  * DNS server...): *)
-type hints = (string * V.value) list
+type hints = (string * Val.value) list
 
 (** The fields of a node by name: its key and the options of a stack. *)
-type fields = string -> V.value option
+type fields = string -> Val.value option
 
 (** What a decoded layer tells of the layer on top of it: *)
 type upper =
@@ -109,7 +110,7 @@ type upper =
 (** A layer of a received packet, decoded: *)
 type unpacked =
     { (* The fields that can be read, by name: *)
-      values : (string * V.value) list ;
+      values : (string * Val.value) list ;
       upper : upper ;
       payload : bitstring ;
       (* What the layer on top needs to know (the code of an ICMP error): *)
@@ -163,7 +164,7 @@ type ops =
       messages : bool ;
       (* What it tells of its stream, by name, among the [stats] of its layer
        * or the counts of {!stream_stats}, which it then replaces: *)
-      stats : unit -> (string * V.value) list }
+      stats : unit -> (string * Val.value) list }
 
 (** What follows a route: *)
 type next_hop = Resolve of Ip.Addr.t | To_mac of Eth.Addr.t
@@ -183,9 +184,9 @@ type context =
       below : ops option }
 
 let int_value name lo hi = function
-    | V.Int v ->
+    | Val.Int v ->
         if v < lo || v > hi then
-            V.fail "The %s must be between %d and %d, not %d" name lo hi v ;
+            Val.fail "The %s must be between %d and %d, not %d" name lo hi v ;
         v
     | _ -> invalid_arg ("Crafty_layers: "^ name ^" is not an int")
 
@@ -198,28 +199,28 @@ let int_of ?(hints=[]) ?def (fields : fields) layer name lo hi =
         (match List.assoc_opt name hints, def with
         | Some v, _ -> int_value name lo hi v
         | None, Some d -> d
-        | None, None -> V.fail "%s needs a %s" layer name)
+        | None, None -> Val.fail "%s needs a %s" layer name)
 
 let opt_int (fields : fields) name lo hi =
     Option.map (int_value name lo hi) (fields name)
 
 let opt_bool (fields : fields) name =
     match fields name with
-    | Some (V.Bool b) -> Some b
+    | Some (Val.Bool b) -> Some b
     | None -> None
     | Some _ -> invalid_arg ("Crafty_layers: "^ name ^" is not a bool")
 
 let bool_of fields name ~def = opt_bool fields name |? def
 
 let bytes_of (fields : fields) name =
-    Option.map_default V.bits_of_bytes empty_bitstring (fields name)
+    Option.map_default Val.bits_of_bytes empty_bitstring (fields name)
 
 (* Key fields, which a node always has, of the family of [layer]: *)
 let ip_of ~v6 (fields : fields) layer name =
     match fields name with
-    | Some (V.Ip a) when Ip.Addr.is_v6 a = v6 -> a
-    | Some (V.Ip a) ->
-        V.fail "%s takes %s addresses, not %s: use %s" layer
+    | Some (Val.Ip a) when Ip.Addr.is_v6 a = v6 -> a
+    | Some (Ip a) ->
+        Val.fail "%s takes %s addresses, not %s: use %s" layer
             (if v6 then "IPv6" else "IPv4") (Ip.Addr.to_dotted_string a)
             (if v6 then "IP" else "IP6")
     | _ -> invalid_arg ("Crafty_layers: no address "^ name)
@@ -240,7 +241,7 @@ let manual pack =
       failure = (fun () -> None) ; icmp_error = (fun _ _ -> ()) ; messages = false ;
       stats = (fun () -> []) }
 
-let bytes_value bits = V.bytes_of_string (string_of_bitstring bits)
+let bytes_value bits = Val.bytes_of_string (string_of_bitstring bits)
 
 let unpacked ?(upper=Nothing) ?(up_hints=[]) ?(payload=empty_bitstring) values bits =
     Some { values ; upper ; payload ; up_hints ; bits }
@@ -248,7 +249,7 @@ let unpacked ?(upper=Nothing) ?(up_hints=[]) ?(payload=empty_bitstring) values b
 (* [u] with the bytes its layer carries, or holds if [terminal]: *)
 let with_length ~terminal u =
     let carried = if terminal then u.bits else u.payload in
-    { u with values = u.values @ [ "length", V.Int (bitstring_length carried / 8) ] }
+    { u with values = u.values @ [ "length", Val.Int (bitstring_length carried / 8) ] }
 
 let ip4 = (Eth.Proto.ip4 :> int)
 and ip6_proto = (Eth.Proto.ip6 :> int)
@@ -258,7 +259,7 @@ let known_mac (st : Eth.State.t) ip =
     match Tools.BitHash.find st.neighbors ip with
     | Some mac -> mac
     | None | exception Not_found ->
-        V.fail "The MAC address of %s is not known: Eth! needs a dst"
+        Val.fail "The MAC address of %s is not known: Eth! needs a dst"
             (Ip.Addr.to_dotted_string (Ip.Addr.of_bitstring ip))
 
 (* Neither a broadcast nor an IPv6 group follows a route: *)
@@ -311,7 +312,7 @@ let make_router ~ifname ~lookup ~on_unrouted =
 let check_route route dst =
     match route dst with
     | Ok _ -> ()
-    | Error e -> V.fail_as Error_name.NoRoute "Cannot send to %s: %s" (Ip.Addr.to_dotted_string dst) e
+    | Error e -> Val.fail_as Error_name.NoRoute "Cannot send to %s: %s" (Ip.Addr.to_dotted_string dst) e
 
 (* Sends the IP packet [bits] along the route to [dst], which [Eth.TRX.tx]
  * would otherwise find from the configuration of [st], or drops it if there is
@@ -346,8 +347,8 @@ let next_mac (st : Eth.State.t) proto payload =
         else (match Eth.TRX.gw_for_ip st a with
             | None -> known dst
             | Some (Eth.Gateway.Mac mac) -> mac
-            | Some (Eth.Gateway.Ip gw) -> known (Ip.Addr.to_bitstring gw))
-    | _ -> V.fail "Eth! needs a dst"
+            | Some (Ip gw) -> known (Ip.Addr.to_bitstring gw))
+    | _ -> Val.fail "Eth! needs a dst"
 
 let unpack_eth _ bits =
     match Eth.Pdu.unpack bits with
@@ -355,8 +356,8 @@ let unpack_eth _ bits =
     | Ok e ->
         let proto = (e.proto :> int) in
         (* [ts] is for the receiver to tell: *)
-        unpacked [ "src", V.Mac e.src ; "dst", V.Mac e.dst ; "proto", V.Int proto ;
-                   "ts", V.Time (Clock.Wall.of_secs 0.) ]
+        unpacked [ "src", Val.Mac e.src ; "dst", Val.Mac e.dst ; "proto", Val.Int proto ;
+                   "ts", Val.Time (Clock.Wall.of_secs 0.) ]
                  ~upper:(Only (if proto = ip4 then N.IP
                                else if proto = ip6_proto then N.IP6
                                else N.Raw))
@@ -372,19 +373,19 @@ let eth_node ?router ctx =
     let trx = Eth.TRX.make st in
     let receive _ (u : unpacked) =
         match List.assoc "proto" u.values, List.assoc "dst" u.values with
-        | V.Int p, _ when p = (Eth.Proto.arp :> int) ||
-                          (p = ip6_proto && Eth.Ndp.message u.payload <> None) ->
+        | Val.Int p, _ when p = (Eth.Proto.arp :> int) ||
+                            (p = ip6_proto && Eth.Ndp.message u.payload <> None) ->
             Eth.TRX.rx st u.bits ;
             []
-        | _, V.Mac dst when st.promisc <> None || Eth.State.accepts st dst ->
+        | _, Mac dst when st.promisc <> None || Eth.State.accepts st dst ->
             pass u
         | _ -> [] in
     { (manual @@ fun fields hints payload ->
         let proto = int_of ~hints fields "Eth!" "proto" 0 0xffff in
-        let src = match fields "src" with Some (V.Mac m) -> m | _ -> st.mac in
+        let src = match fields "src" with Some (Val.Mac m) -> m | _ -> st.mac in
         let dst =
             match fields "dst" with
-            | Some (V.Mac m) -> m
+            | Some (Val.Mac m) -> m
             | _ ->
                 match router, routed_dst proto payload with
                 | Some r, Some dst ->
@@ -392,17 +393,17 @@ let eth_node ?router ctx =
                     | Ok (To_mac m) -> m
                     | Ok (Resolve ip) -> known_mac st (Ip.Addr.to_bitstring ip)
                     | Error e ->
-                        V.fail "No route to %s, %s: Eth! needs a dst"
+                        Val.fail "No route to %s, %s: Eth! needs a dst"
                             (Ip.Addr.to_dotted_string dst) e)
                 | _ -> next_mac st proto payload in
         Eth.Pdu.(pack (make (Eth.Proto.o proto) src dst payload)), []) with
       send = (fun _ hints payload ->
         match List.assoc_opt "proto" hints with
-        | Some (V.Int p) when p = ip4 || p = ip6_proto ->
+        | Some (Val.Int p) when p = ip4 || p = ip6_proto ->
             (match router, routed_dst p payload with
             | Some r, Some dst -> send_routed st r dst payload
             | _ -> Tools.tx trx payload)
-        | _ -> V.fail "A self-driven Eth carries only IP and IP6: use Eth!") ;
+        | _ -> Val.fail "A self-driven Eth carries only IP and IP6: use Eth!") ;
       receive ;
       busy_for = Eth.Iface.tx_busy_for st.iface }
 
@@ -424,19 +425,19 @@ let ip_record_route opts =
 
 let ip_values (ip : Ip.Pdu.t) =
     let rr_slots, record_route = ip_record_route ip.options in
-    [ "src", V.Ip ip.src ; "dst", V.Ip ip.dst ; "proto", V.Int (ip.proto :> int) ;
-      "tos", V.Int (ip.tos :> int) ; "ttl", V.Int ip.ttl ;
-      "dont_frag", V.Bool ip.dont_frag ; "id", V.Int ip.id ;
-      "more_frags", V.Bool ip.more_frags ; "frag_offset", V.Int ip.frag_offset ;
-      "tot_len", V.Int ip.tot_len ; "options", bytes_value (Ip.Pdu.Opt.pack ip.options) ;
-      "record_route", V.Array (Array.of_list (List.map (fun a -> V.Ip a) record_route)) ;
-      "rr_slots", V.Int rr_slots ;
-      "is_fragment", V.Bool (Ip.Pdu.is_fragment ip) ]
+    [ "src", Val.Ip ip.src ; "dst", Val.Ip ip.dst ; "proto", Val.Int (ip.proto :> int) ;
+      "tos", Val.Int (ip.tos :> int) ; "ttl", Val.Int ip.ttl ;
+      "dont_frag", Val.Bool ip.dont_frag ; "id", Val.Int ip.id ;
+      "more_frags", Val.Bool ip.more_frags ; "frag_offset", Val.Int ip.frag_offset ;
+      "tot_len", Val.Int ip.tot_len ; "options", bytes_value (Ip.Pdu.Opt.pack ip.options) ;
+      "record_route", Val.Array (Array.of_list (List.map (fun a -> Val.Ip a) record_route)) ;
+      "rr_slots", Val.Int rr_slots ;
+      "is_fragment", Val.Bool (Ip.Pdu.is_fragment ip) ]
 
 (* What a fragment tells of the layer on top: the first is the start of it,
  * which the layers that can be cut short are told: *)
 let fragment_upper ~first proto_upper =
-    if first then Partial proto_upper, [ "partial", V.Bool true ]
+    if first then Partial proto_upper, [ "partial", Val.Bool true ]
     else Only N.Raw, []
 
 (* A fragment goes on as Raw, and the first as the start of its protocol: *)
@@ -462,29 +463,29 @@ let ip_options fields =
     | Some _ ->
         let options = bytes_of fields "options" in
         if Tools.bytelength options mod 4 <> 0 || Tools.bytelength options > 40 then
-            V.fail "The options of IP must be a multiple of 4 bytes, up to 40" ;
+            Val.fail "The options of IP must be a multiple of 4 bytes, up to 40" ;
         Ip.Pdu.Opt.unpack options
     | None ->
         let route =
             match fields "record_route" with
             | None -> []
-            | Some (V.Array a) ->
+            | Some (Val.Array a) ->
                 Array.to_list a |> List.map (function
-                    | V.Ip a when not (Ip.Addr.is_v6 a) -> a
-                    | V.Ip a ->
-                        V.fail "A record_route has IPv4 addresses, not %s"
+                    | Val.Ip a when not (Ip.Addr.is_v6 a) -> a
+                    | Ip a ->
+                        Val.fail "A record_route has IPv4 addresses, not %s"
                             (Ip.Addr.to_dotted_string a)
                     | _ -> invalid_arg "Crafty_layers: record_route is not of addresses")
             | Some _ -> invalid_arg "Crafty_layers: record_route is not an array" in
         let n = List.length route in
         match opt_int fields "rr_slots" (-1) 9 with
-        | Some -1 when n > 0 -> V.fail "A record_route needs rr_slots, not -1"
+        | Some -1 when n > 0 -> Val.fail "A record_route needs rr_slots, not -1"
         | Some -1 -> []
         | None when fields "record_route" = None -> []
         | slots ->
             let slots = slots |? n in
             if n > slots then
-                V.fail "A record_route of %d addresses needs as many rr_slots, not %d" n slots ;
+                Val.fail "A record_route of %d addresses needs as many rr_slots, not %d" n slots ;
             Ip.Pdu.Opt.[ Rr (4 + 4 * n, route @ List.make (slots - n) Ip.Addr.zero) ]
 
 (* An IPv4 header as given around [payload], its id from [next_id] if not: *)
@@ -494,7 +495,7 @@ let pack_ip next_id fields hints payload =
     let tot_len = opt_int fields "tot_len" 0 0xffff in
     if tot_len = None &&
        20 + Tools.bytelength (Ip.Pdu.Opt.pack options) + Tools.bytelength payload > 0xffff then
-        V.fail "Too long for an IP packet" ;
+        Val.fail "Too long for an IP packet" ;
     let id = Option.default_delayed next_id (opt_int fields "id" 0 0xffff) in
     Ip.Pdu.make ~tos:(Ip.ToS.o (int ~def:0 "tos" 0xff)) ?tot_len ~id
         ~dont_frag:(bool_of fields "dont_frag" ~def:false)
@@ -503,13 +504,13 @@ let pack_ip next_id fields hints payload =
         ~ttl:(int ~def:64 "ttl" 0xff) ~options
         (Ip.Proto.o (ip_proto fields hints))
         (ip_of ~v6:false fields "IP" "src") (ip_of ~v6:false fields "IP" "dst") payload |>
-    Ip.Pdu.pack, [ "proto", V.Int ip4 ]
+    Ip.Pdu.pack, [ "proto", Val.Int ip4 ]
 
 (* What IP and IP6 streams tell of their fragments: *)
 let frag_stats (c : Ip.TRX.counters) =
-    [ "fragmented", V.Int c.fragmented ; "frags_out", V.Int c.frags_out ;
-      "frags_in", V.Int c.frags_in ; "reassembled", V.Int c.reassembled ;
-      "reasm_timeouts", V.Int c.reasm_timeouts ]
+    [ "fragmented", Val.Int c.fragmented ; "frags_out", Val.Int c.frags_out ;
+      "frags_in", Val.Int c.frags_in ; "reassembled", Val.Int c.reassembled ;
+      "reasm_timeouts", Val.Int c.reasm_timeouts ]
 
 (* Both modes share the ids. A self-driven IP has a TRX per protocol. The
  * fragments received are seen in manual mode, and reassembled for the
@@ -523,7 +524,7 @@ let ip_node ctx =
     let fragments = Hashtbl.create 3 in
     let counters = Ip.TRX.make_counters () in
     let receive _ (u : unpacked) =
-        if List.assoc "is_fragment" u.values <> V.Bool true then pass u else
+        if List.assoc "is_fragment" u.values <> Val.Bool true then pass u else
         let fragment = u, [ Manual ] in
         match Ip.Pdu.unpack u.bits with
         | Error _ -> [ fragment ]
@@ -542,7 +543,7 @@ let ip_node ctx =
     { (manual (pack_ip next_id)) with
       send = (fun fields hints payload ->
         if Tools.bytelength payload = 0 then
-            V.fail "A self-driven IP sends no empty packet: use IP!" ;
+            Val.fail "A self-driven IP sends no empty packet: use IP!" ;
         let proto = ip_proto fields hints
         and options = ip_options fields in
         let t =
@@ -554,7 +555,7 @@ let ip_node ctx =
                         (ip_of ~v6:false fields "IP" "src") (ip_of ~v6:false fields "IP" "dst")
                         (Ip.Proto.o proto) st.iface.widget.logger in
                 Tools.((Ip.TRX.trx_of t).out -->
-                    sink (below.send (fun _ -> None) [ "proto", V.Int ip4 ])) ;
+                    sink (below.send (fun _ -> None) [ "proto", Val.Int ip4 ])) ;
                 Hashtbl.add trxs proto t ;
                 t in
         Ip.TRX.tx ?tos:(Option.map Ip.ToS.o (opt_int fields "tos" 0 0xff))
@@ -578,12 +579,12 @@ let ip6_values (ip : Ip6.Pdu.t) =
             | Ip6.Extension.Fragment f ->
                 Some (Int32.to_int f.id land 0xffff_ffff, f.offset, f.more)
             | _ -> None) ip.extensions |? (0, 0, false) in
-    [ "src", V.Ip ip.src ; "dst", V.Ip ip.dst ; "proto", V.Int (ip.proto :> int) ;
-      "traffic_class", V.Int (ip.diff_serv lsl 2 lor ip.ecn) ;
-      "hop_limit", V.Int ip.ttl ; "flow_label", V.Int ip.flow_label ;
-      "frag_id", V.Int frag_id ; "frag_offset", V.Int frag_offset ;
-      "more_frags", V.Bool more_frags ;
-      "is_fragment", V.Bool (Ip6.Pdu.is_fragment ip) ]
+    [ "src", Val.Ip ip.src ; "dst", Val.Ip ip.dst ; "proto", Val.Int (ip.proto :> int) ;
+      "traffic_class", Val.Int (ip.diff_serv lsl 2 lor ip.ecn) ;
+      "hop_limit", Val.Int ip.ttl ; "flow_label", Val.Int ip.flow_label ;
+      "frag_id", Val.Int frag_id ; "frag_offset", Val.Int frag_offset ;
+      "more_frags", Val.Bool more_frags ;
+      "is_fragment", Val.Bool (Ip6.Pdu.is_fragment ip) ]
 
 (* As IP: *)
 let unpack_ip6 _ bits =
@@ -612,14 +613,14 @@ let pack_ip6 fields hints payload =
                  offset = int ~def:0 "frag_offset" 0x1fff ;
                  more = bool_of fields "more_frags" ~def:false } ] in
     if Tools.bytelength payload + 8 * List.length extensions > 0xffff then
-        V.fail "Too long for an IP6 packet" ;
+        Val.fail "Too long for an IP6 packet" ;
     let tc = int ~def:0 "traffic_class" 0xff in
     Ip6.Pdu.make ~ttl:(int_of ~hints ~def:64 fields "IP6!" "hop_limit" 0 0xff)
         ~diff_serv:(tc lsr 2) ~extensions
         ~ecn:(tc land 3) ~flow_label:(int ~def:0 "flow_label" 0xfffff)
         (Ip.Proto.o (ip6_proto_of fields hints))
         (ip_of ~v6:true fields "IP6" "src") (ip_of ~v6:true fields "IP6" "dst") payload |>
-    Ip6.Pdu.pack, [ "proto", V.Int ip6_proto ]
+    Ip6.Pdu.pack, [ "proto", Val.Int ip6_proto ]
 
 (* As IP: a self-driven IP6 has a TRX per protocol, and the fragments
  * received are seen in manual mode, and reassembled for the self-driven
@@ -631,7 +632,7 @@ let ip6_node ctx =
     let fragments = Hashtbl.create 3 in
     let counters = Ip.TRX.make_counters () in
     let receive _ (u : unpacked) =
-        if List.assoc "is_fragment" u.values <> V.Bool true then pass u else
+        if List.assoc "is_fragment" u.values <> Val.Bool true then pass u else
         let fragment = u, [ Manual ] in
         match Ip6.Pdu.unpack u.bits with
         | Error _ -> [ fragment ]
@@ -647,21 +648,21 @@ let ip6_node ctx =
     { (manual pack_ip6) with
       send = (fun fields hints payload ->
         if Tools.bytelength payload = 0 then
-            V.fail "A self-driven IP6 sends no empty packet: use IP6!" ;
-        if Tools.bytelength payload > 0xffff then V.fail "Too long for an IP6 packet" ;
+            Val.fail "A self-driven IP6 sends no empty packet: use IP6!" ;
+        if Tools.bytelength payload > 0xffff then Val.fail "Too long for an IP6 packet" ;
         let proto = ip6_proto_of fields hints in
         let t =
             match Hashtbl.find_option trxs proto with
             | Some t -> t
             | None ->
                 if st.mtu < 1280 then
-                    V.fail "IP6 needs an MTU of 1280 bytes at least, not %d" st.mtu ;
+                    Val.fail "IP6 needs an MTU of 1280 bytes at least, not %d" st.mtu ;
                 let t =
                     Ip6.TRX.create st.iface.widget.power ~mtu:st.mtu ~counters
                         (ip_of ~v6:true fields "IP6" "src") (ip_of ~v6:true fields "IP6" "dst")
                         (Ip.Proto.o proto) st.iface.widget.logger in
                 Tools.((Ip6.TRX.trx_of t).out -->
-                    sink (below.send (fun _ -> None) [ "proto", V.Int ip6_proto ])) ;
+                    sink (below.send (fun _ -> None) [ "proto", Val.Int ip6_proto ])) ;
                 Hashtbl.add trxs proto t ;
                 t in
         let hop_limit =
@@ -680,13 +681,13 @@ let unpack_quoted_udp _ bits =
          rest : -1 : bitstring |} ->
         let payload =
             takebits (min (bitstring_length rest) (max 0 (length - 8) * 8)) rest in
-        unpacked [ "src", V.Int src ; "dst", V.Int dst ;
-                   "length", V.Int length ; "checksum", V.Int checksum ]
+        unpacked [ "src", Val.Int src ; "dst", Val.Int dst ;
+                   "length", Val.Int length ; "checksum", Val.Int checksum ]
                  ~upper:(if bitstring_length payload > 0 then Only N.Raw else Nothing)
                  ~payload bits
     | {| _ |} -> None
 
-let is_partial hints = List.assoc_opt "partial" hints = Some (V.Bool true)
+let is_partial hints = List.assoc_opt "partial" hints = Some (Val.Bool true)
 
 (* Of a first fragment, as much as there is: *)
 let unpack_udp hints bits =
@@ -695,8 +696,8 @@ let unpack_udp hints bits =
     | Error _ -> None
     | Ok u ->
         let payload = (u.payload :> bitstring) in
-        unpacked [ "src", V.Int (u.src_port :> int) ; "dst", V.Int (u.dst_port :> int) ;
-                   "length", V.Int u.length ; "checksum", V.Int u.checksum ]
+        unpacked [ "src", Val.Int (u.src_port :> int) ; "dst", Val.Int (u.dst_port :> int) ;
+                   "length", Val.Int u.length ; "checksum", Val.Int u.checksum ]
                  ~upper:(if bitstring_length payload > 0 then Any N.Raw else Nothing)
                  ~payload bits
 
@@ -706,10 +707,10 @@ let udp_node _ =
         let port name = Udp.Port.o (int_of fields "UDP" name 0 0xffff) in
         let length = opt_int fields "length" 0 0xffff in
         if length = None && 8 + Tools.bytelength payload > 0xffff then
-            V.fail "Too long for a UDP datagram" ;
+            Val.fail "Too long for a UDP datagram" ;
         Udp.Pdu.make ~src_port:(port "src") ~dst_port:(port "dst") ?length
                      ?checksum:(opt_int fields "checksum" 0 0xffff) payload |>
-        Udp.Pdu.pack, [ "proto", V.Int (Ip.Proto.udp :> int) ])
+        Udp.Pdu.pack, [ "proto", Val.Int (Ip.Proto.udp :> int) ])
 
 let tcp_proto = (Ip.Proto.tcp :> int)
 
@@ -720,13 +721,13 @@ let int_of_seq_num (n : Tcp.SeqNum.t) = Int32.to_int (n :> int32) land 0xffff_ff
  * option of each kind tells; those missing read -1, but [sack_ok]: *)
 let tcp_option_values opts =
     let open Tcp.Pdu.Opt in
-    let int f = V.Int (List.find_map_opt f opts |? -1)
+    let int f = Val.Int (List.find_map_opt f opts |? -1)
     and u32 n = Int32.to_int n land 0xffff_ffff in
     let ts f = int (function Timestamps (v, e) -> Some (u32 (f (v, e))) | _ -> None) in
     [ "options", bytes_value (pack opts) ;
       "mss", int (function Mss m -> Some m | _ -> None) ;
       "wscale", int (function Wscale s -> Some s | _ -> None) ;
-      "sack_ok", V.Bool (List.mem Sack_permitted opts) ;
+      "sack_ok", Val.Bool (List.mem Sack_permitted opts) ;
       "ts_val", ts fst ; "ts_ecr", ts snd ]
 
 (* The options of a segment as given, either as bytes, or by their fields,
@@ -738,7 +739,7 @@ let tcp_options (fields : fields) =
     | Some _ ->
         let options = bytes_of fields "options" in
         if Tools.bytelength options mod 4 <> 0 || Tools.bytelength options > max_len then
-            V.fail "The options of TCP must be a multiple of 4 bytes, up to 40" ;
+            Val.fail "The options of TCP must be a multiple of 4 bytes, up to 40" ;
         unpack options
     | None ->
         let opt name hi =
@@ -771,10 +772,10 @@ let unpack_quoted_tcp _ bits =
                 (if bitstring_length rest > opt_len then dropbits opt_len rest
                  else empty_bitstring)
             | {| _ |} -> 0, 0, 0, 0, 0, empty_bitstring, empty_bitstring in
-        unpacked ([ "src", V.Int src ; "dst", V.Int dst ;
-                    "seq_num", V.Int (u32 seq_num) ; "ack_num", V.Int ack_num ;
-                    "flags", V.Int flags ; "win_size", V.Int win_size ;
-                    "urg_ptr", V.Int urg_ptr ; "checksum", V.Int checksum ] @
+        unpacked ([ "src", Val.Int src ; "dst", Val.Int dst ;
+                    "seq_num", Val.Int (u32 seq_num) ; "ack_num", Val.Int ack_num ;
+                    "flags", Val.Int flags ; "win_size", Val.Int win_size ;
+                    "urg_ptr", Val.Int urg_ptr ; "checksum", Val.Int checksum ] @
                   tcp_option_values (Tcp.Pdu.Opt.unpack options))
                  ~upper:(if bitstring_length payload > 0 then Only N.Raw else Nothing)
                  ~payload bits
@@ -791,19 +792,19 @@ let unpack_tcp hints bits =
             bit f.fin 1 lor bit f.syn 2 lor bit f.rst 4 lor bit f.psh 8 lor
             bit f.ack 16 lor bit f.urg 32 lor bit f.ece 64 lor bit f.cwr 128 in
         let payload = (t.payload :> bitstring) in
-        unpacked ([ "src", V.Int (t.src_port :> int) ; "dst", V.Int (t.dst_port :> int) ;
-                   "seq_num", V.Int (int_of_seq_num t.seq_num) ;
-                   "ack_num", V.Int (int_of_seq_num t.ack_num) ;
-                   "flags", V.Int flags ; "win_size", V.Int t.win_size ;
-                   "urg_ptr", V.Int t.urg_ptr ; "checksum", V.Int t.checksum ] @
+        unpacked ([ "src", Val.Int (t.src_port :> int) ; "dst", Val.Int (t.dst_port :> int) ;
+                   "seq_num", Val.Int (int_of_seq_num t.seq_num) ;
+                   "ack_num", Val.Int (int_of_seq_num t.ack_num) ;
+                   "flags", Val.Int flags ; "win_size", Val.Int t.win_size ;
+                   "urg_ptr", Val.Int t.urg_ptr ; "checksum", Val.Int t.checksum ] @
                  tcp_option_values t.options)
                  ~upper:(if bitstring_length payload > 0 then Any N.Raw else Nothing)
-                 ~up_hints:[ "more", V.Bool (not f.fin) ] ~payload bits
+                 ~up_hints:[ "more", Val.Bool (not f.fin) ] ~payload bits
 
 (*$T unpack_tcp
   match unpack_tcp [] Tcp.Pdu.(pack (make ~syn:true ~ece:true ~cwr:true \
                                           Bitstring.empty_bitstring)) with \
-  | Some u -> List.assoc "flags" u.values = V.Int (2 lor 64 lor 128) \
+  | Some u -> List.assoc "flags" u.values = Val.Int (2 lor 64 lor 128) \
   | None -> false
 *)
 
@@ -883,7 +884,7 @@ let tcp_node ctx =
             s.failure <-
                 Some (Printf.sprintf "Cannot connect to %s port %d: %s"
                         (match ctx.below_key "dst" with
-                         | Some (V.Ip a) -> Ip.Addr.to_dotted_string a
+                         | Some (Val.Ip a) -> Ip.Addr.to_dotted_string a
                          | _ -> "?")
                         (port "dst" :> int)
                         (s.refusal |? "connection timed out")) ;
@@ -892,14 +893,14 @@ let tcp_node ctx =
             wake () in
     let hdr_len =
         match ctx.below_key "src" with
-        | Some (V.Ip a) when Ip.Addr.is_v6 a -> 60
+        | Some (Val.Ip a) when Ip.Addr.is_v6 a -> 60
         | _ -> 40 in
     let new_stream ?(mss=st.mtu - hdr_len) ?wscale () =
         (match !state with
         | Stream s -> Tcp.TRX.reset s.trx ; Tcp.TRX.abort s.trx ; removed s
         | _ -> ()) ;
         let t = Tcp.TRX.make power ~sync_recv:true ~mss ?wscale (port "src") (port "dst") logger in
-        Tools.(t.tcp_trx.trx.out --> sink (below.send ctx.below_key [ "proto", V.Int tcp_proto ])) ;
+        Tools.(t.tcp_trx.trx.out --> sink (below.send ctx.below_key [ "proto", Val.Int tcp_proto ])) ;
         Tools.(t.tcp_trx.trx.ins --> sink (fun bits ->
             if bitstring_length bits > 0 then received := bits :: !received
             else ended := true)) ;
@@ -923,7 +924,7 @@ let tcp_node ctx =
         let trx = match !state with Stream s -> Some s.trx | _ -> None in
         Option.may (fun t ->
             if not (Tcp.TRX.is_established t || t.closed) then
-                V.fail "TCP! cannot go into a connection that is not established yet") trx ;
+                Val.fail "TCP! cannot go into a connection that is not established yet") trx ;
         let given name = opt_int fields name 0 0xffff_ffff in
         let seq_given = given "seq_num" in
         let seq =
@@ -964,27 +965,27 @@ let tcp_node ctx =
                 (seq + Tools.bytelength payload + (if bit 2 then 1 else 0) +
                  (if bit 1 then 1 else 0)) land 0xffff_ffff
         | Some _, _ -> ()) ;
-        Tcp.Pdu.pack pdu, [ "proto", V.Int tcp_proto ]) ;
+        Tcp.Pdu.pack pdu, [ "proto", Val.Int tcp_proto ]) ;
       send = (fun fields _ payload ->
         let s = stream fields in
         if bitstring_length payload > 0 then
             match s.failure with
-            | Some msg -> V.fail_as Error_name.CannotConnect "%s" msg
+            | Some msg -> Val.fail_as Error_name.CannotConnect "%s" msg
             | None ->
-            if s.trx.closed then V.fail_as Error_name.Closed "This TCP connection is closed"
+            if s.trx.closed then Val.fail_as Error_name.Closed "This TCP connection is closed"
             else if Tcp.TRX.is_established s.trx then Tcp.TRX.tx s.trx payload
             else s.pending <- payload :: s.pending) ;
       receive = (fun modes u ->
         let raw = u, [ Manual ] in
         if not (List.mem Driven modes) then [ raw ] else (
         (match !state, List.assoc "flags" u.values with
-        | Listening, V.Int f when f land 2 <> 0 && f land 16 = 0 ->
+        | Listening, Val.Int f when f land 2 <> 0 && f land 16 = 0 ->
             ignore (new_stream ())
         | _ -> ()) ;
         match !state with
         | Stream s ->
             (match List.assoc "flags" u.values with
-            | V.Int f when f land 4 <> 0 && not (Tcp.TRX.is_established s.trx) ->
+            | Val.Int f when f land 4 <> 0 && not (Tcp.TRX.is_established s.trx) ->
                 s.refusal <- Some "connection refused"
             | _ -> ()) ;
             received := [] ;
@@ -1001,8 +1002,8 @@ let tcp_node ctx =
             raw :: (if data = [] && not ended' then [] else
                 let d = Bitstring.concat data in
                 [ { u with payload = d ; upper = Any N.Raw ; bits = d ;
-                           up_hints = [ "stream", V.Bool true ;
-                                        "more", V.Bool (not ended') ] }, [ Driven ] ])
+                           up_hints = [ "stream", Val.Bool true ;
+                                        "more", Val.Bool (not ended') ] }, [ Driven ] ])
         | Idle | Listening -> [ raw ])) ;
       listen = (fun () -> match !state with Idle -> state := Listening | _ -> ()) ;
       drive = ignore ;
@@ -1040,7 +1041,7 @@ let tcp_node ctx =
        * connection, as on Linux: *)
       icmp_error = (fun quote why ->
         match !state, List.assoc_opt "seq_num" quote.values with
-        | Stream s, Some (V.Int seq)
+        | Stream s, Some (Val.Int seq)
           when s.trx.sent_pld > 0 && s.trx.rcvd_pld = 0 && not s.trx.closed &&
                seq = int_of_seq_num s.trx.isn ->
             s.refusal <- Some why ;
@@ -1053,26 +1054,26 @@ let tcp_node ctx =
         | Stream s ->
             let t = s.trx and c = s.trx.counters in
             let srtt, rttvar = t.rtt |? Clock.Interval.(zero, zero) in
-            [ "packets_out", V.Int c.segs_out ; "bytes_out", V.Int c.bytes_out ;
-              "packets_in", V.Int c.segs_in ; "bytes_in", V.Int c.bytes_in ;
-              "bytes_acked", V.Int c.bytes_acked ;
-              "bytes_received", V.Int c.bytes_received ;
-              "retrans", V.Int c.retrans ; "dupacks", V.Int c.dupacks ;
-              "timeouts", V.Int c.rto_expired ; "holes_in", V.Int c.holes_in ;
-              "ooo_in", V.Int c.ooo_in ; "dup_in", V.Int c.dup_in ;
-              "srtt", V.Interval srtt ; "rttvar", V.Interval rttvar ;
-              "min_rtt", V.Interval (c.min_rtt |? Clock.Interval.zero) ;
-              "rtt_samples", V.Int c.rtt_samples ; "rto", V.Interval t.rto ;
-              "snd_mss", V.Int t.snd_mss ; "rcv_mss", V.Int t.rcv_mss ;
+            [ "packets_out", Val.Int c.segs_out ; "bytes_out", Val.Int c.bytes_out ;
+              "packets_in", Val.Int c.segs_in ; "bytes_in", Val.Int c.bytes_in ;
+              "bytes_acked", Val.Int c.bytes_acked ;
+              "bytes_received", Val.Int c.bytes_received ;
+              "retrans", Val.Int c.retrans ; "dupacks", Val.Int c.dupacks ;
+              "timeouts", Val.Int c.rto_expired ; "holes_in", Val.Int c.holes_in ;
+              "ooo_in", Val.Int c.ooo_in ; "dup_in", Val.Int c.dup_in ;
+              "srtt", Val.Interval srtt ; "rttvar", Val.Interval rttvar ;
+              "min_rtt", Val.Interval (c.min_rtt |? Clock.Interval.zero) ;
+              "rtt_samples", Val.Int c.rtt_samples ; "rto", Val.Interval t.rto ;
+              "snd_mss", Val.Int t.snd_mss ; "rcv_mss", Val.Int t.rcv_mss ;
               (* Infinite until a loss, which Linux tells as 2^31-1: *)
-              "cwnd", V.Int t.cwnd ; "ssthresh", V.Int (min t.ssthresh 0x7fff_ffff) ;
-              "snd_wnd", V.Int t.snd_wnd ; "rcv_wnd", V.Int (Tcp.TRX.rcv_wnd t) ;
+              "cwnd", Val.Int t.cwnd ; "ssthresh", Val.Int (min t.ssthresh 0x7fff_ffff) ;
+              "snd_wnd", Val.Int t.snd_wnd ; "rcv_wnd", Val.Int (Tcp.TRX.rcv_wnd t) ;
               (* -1 for a side that offered no window scaling: *)
-              "snd_wscale", V.Int (t.snd_wscale |? -1) ;
-              "rcv_wscale", V.Int (match t.rcv_wscale with
-                                   | Some s when t.offered_wscale -> s
-                                   | _ -> -1) ;
-              "established", V.Bool (Tcp.TRX.is_established t) ]) }
+              "snd_wscale", Val.Int (t.snd_wscale |? -1) ;
+              "rcv_wscale", Val.Int (match t.rcv_wscale with
+                                     | Some s when t.offered_wscale -> s
+                                     | _ -> -1) ;
+              "established", Val.Bool (Tcp.TRX.is_established t) ]) }
 
 let icmp_upper = function
     | 0 | 8 -> Only N.Echo
@@ -1099,8 +1100,8 @@ let unpack_icmp ~upper _ bits =
             match upper typ with
             | Only N.Raw when bitstring_length payload = 0 -> Nothing
             | u -> u in
-        unpacked [ "type", V.Int typ ; "code", V.Int code ] ~upper
-                 ~up_hints:[ "type", V.Int typ ; "code", V.Int code ] ~payload bits
+        unpacked [ "type", Val.Int typ ; "code", Val.Int code ] ~upper
+                 ~up_hints:[ "type", Val.Int typ ; "code", Val.Int code ] ~payload bits
     | {| _ |} -> None
 
 (* The message on top tells the type and code, but for [Raw], under which
@@ -1112,7 +1113,7 @@ let icmp_node ~v6 _ =
         let typ, code =
             if List.mem_assoc "type" hints then (
                 if fields "type" <> None || fields "code" <> None then
-                    V.fail "The type and code of ICMP are those of the message on top" ;
+                    Val.fail "The type and code of ICMP are those of the message on top" ;
                 let none _ = None in
                 int_of ~hints none "ICMP" "type" 0 0xff,
                 int_of ~hints ~def:0 none "ICMP" "code" 0 0xff)
@@ -1123,9 +1124,9 @@ let icmp_node ~v6 _ =
             let%bitstring hdr = {| typ : 8 ; code : 8 ; chk : 16 |} in
             concat [ hdr ; payload ] in
         if v6 then
-            msg 0, ("proto", V.Int (Ip.Proto.icmpv6 :> int)) ::
+            msg 0, ("proto", Val.Int (Ip.Proto.icmpv6 :> int)) ::
                    List.filter (fun (n, _) -> n = "hop_limit") hints
-        else msg (Tools.sum (msg 0)), [ "proto", V.Int (Ip.Proto.icmp :> int) ])
+        else msg (Tools.sum (msg 0)), [ "proto", Val.Int (Ip.Proto.icmp :> int) ])
 
 (* The message on top is told by the type, [request] or [reply]: *)
 let unpack_echo ~request ~reply hints bits =
@@ -1133,10 +1134,10 @@ let unpack_echo ~request ~reply hints bits =
     | {| id : 16 ; payload : -1 : bitstring |} ->
         let upper =
             match List.assoc_opt "type" hints with
-            | Some (V.Int t) when t = request -> Only N.Request
-            | Some (V.Int t) when t = reply -> Only N.Reply
+            | Some (Val.Int t) when t = request -> Only N.Request
+            | Some (Int t) when t = reply -> Only N.Reply
             | _ -> Nothing in
-        unpacked [ "id", V.Int id ] ~upper ~payload bits
+        unpacked [ "id", Val.Int id ] ~upper ~payload bits
     | {| _ |} -> None
 
 (* The id of the stream; the message on top tells its type: *)
@@ -1149,7 +1150,7 @@ let echo_node _ =
 let unpack_echo_message _ bits =
     match%bitstring bits with
     | {| seq : 16 ; payload : -1 : bitstring |} ->
-        unpacked [ "seq", V.Int seq ; "payload", bytes_value payload ] bits
+        unpacked [ "seq", Val.Int seq ; "payload", bytes_value payload ] bits
     | {| _ |} -> None
 
 (* Its node lasts as long as its Echo, so the sequence numbers count from 1
@@ -1163,7 +1164,7 @@ let echo_message_node typ _ =
             | None -> seq := (!seq + 1) land 0xffff ; !seq in
         let%bitstring hdr = {| seq : 16 |} in
         concat [ hdr ; bytes_of fields "payload" ],
-        [ "type", V.Int typ ; "code", V.Int 0 ])
+        [ "type", Val.Int typ ; "code", Val.Int 0 ])
 
 (* The 4 bytes after the checksum, of which an MTU can be the last 2
  * ([`Low], ICMP) or all ([`Whole], ICMPv6): *)
@@ -1176,9 +1177,9 @@ let unpack_icmp_error ~(mtu : mtu_field) ~quote hints bits =
         let mtu =
             match mtu with
             | `None -> []
-            | `Low -> [ "mtu", V.Int low ]
-            | `Whole -> [ "mtu", V.Int (high lsl 16 lor low) ] in
-        unpacked (mtu @ [ "code", List.assoc_opt "code" hints |? V.Int 0 ])
+            | `Low -> [ "mtu", Val.Int low ]
+            | `Whole -> [ "mtu", Val.Int (high lsl 16 lor low) ] in
+        unpacked (mtu @ [ "code", List.assoc_opt "code" hints |? Val.Int 0 ])
                  ~upper:(if bitstring_length payload > 0 then Any quote else Nothing)
                  ~payload bits
     | {| _ |} -> None
@@ -1193,7 +1194,7 @@ let icmp_error_node typ ~(mtu : mtu_field) _ =
             | `Whole -> int_of ~def:0 fields "ICMP6" "mtu" 0 0xffff_ffff in
         let%bitstring hdr = {| mtu lsr 16 : 16 ; mtu land 0xffff : 16 |} in
         concat [ hdr ; payload ],
-        [ "type", V.Int typ ; "code", V.Int code ])
+        [ "type", Val.Int typ ; "code", Val.Int code ])
 
 (* Neighbor discovery messages that reach programs: those of routers.
  * Link-layer addresses read 00:00:00:00:00:00 without their option, and,
@@ -1202,14 +1203,14 @@ let icmp_error_node typ ~(mtu : mtu_field) _ =
 
 (* The message after the type, code and checksum, which [hints] tell: *)
 let unpack_ndp hints bits =
-    let hint n = match List.assoc_opt n hints with Some (V.Int i) -> i | _ -> -1 in
+    let hint n = match List.assoc_opt n hints with Some (Val.Int i) -> i | _ -> -1 in
     let%bitstring hdr = {| hint "type" : 8 ; hint "code" : 8 ; 0 : 16 |} in
     match Icmp6.Pdu.unpack (concat [ hdr ; bits ]) with
     | Ok m -> Some m.payload
     | Error _ -> None
 
 let lla_value a =
-    V.Mac (Option.map_default (fun a -> Eth.Addr.o (bitstring_of_string a)) Eth.Addr.zero a)
+    Val.Mac (Option.map_default (fun a -> Eth.Addr.o (bitstring_of_string a)) Eth.Addr.zero a)
 
 let source_lla = List.find_map_opt (function Icmp6.Opt.Source_lla a -> Some a | _ -> None)
 and target_lla = List.find_map_opt (function Icmp6.Opt.Target_lla a -> Some a | _ -> None)
@@ -1234,20 +1235,20 @@ let unpack_router_advert hints bits =
         let prefixes =
             List.filter_map (function
                 | Icmp6.Opt.Prefix p ->
-                    Some (V.Record [| V.Bool p.autonomous ; V.Bool p.on_link ;
-                                      V.Int p.preferred ;
-                                      V.Cidr (Ip.Cidr.o (p.prefix, p.prefix_len)) ;
-                                      V.Int p.valid |])
+                    Some (Val.Record [| Val.Bool p.autonomous ; Val.Bool p.on_link ;
+                                        Val.Int p.preferred ;
+                                        Val.Cidr (Ip.Cidr.o (p.prefix, p.prefix_len)) ;
+                                        Val.Int p.valid |])
                 | _ -> None) r.options in
-        unpacked [ "hop_limit", V.Int r.hop_limit ; "managed", V.Bool r.managed ;
-                   "other_config", V.Bool r.other_config ; "flags", V.Int r.flags ;
-                   "lifetime", V.Int r.lifetime ; "reachable", V.Int r.reachable ;
-                   "retrans", V.Int r.retrans ;
+        unpacked [ "hop_limit", Val.Int r.hop_limit ; "managed", Val.Bool r.managed ;
+                   "other_config", Val.Bool r.other_config ; "flags", Val.Int r.flags ;
+                   "lifetime", Val.Int r.lifetime ; "reachable", Val.Int r.reachable ;
+                   "retrans", Val.Int r.retrans ;
                    "src_lla", lla_value (source_lla r.options) ;
-                   "mtu", V.Int (List.find_map_opt (function
-                                     | Icmp6.Opt.Mtu m -> Some m
-                                     | _ -> None) r.options |? -1) ;
-                   "prefixes", V.Array (Array.of_list prefixes) ;
+                   "mtu", Val.Int (List.find_map_opt (function
+                                       | Icmp6.Opt.Mtu m -> Some m
+                                       | _ -> None) r.options |? -1) ;
+                   "prefixes", Val.Array (Array.of_list prefixes) ;
                    "options", ndp_options_value r.options ] bits
     | _ -> None
 
@@ -1261,7 +1262,7 @@ let unpack_redirect hints bits =
             match redirected with
             | Icmp6.Opt.Redirected p :: _ -> (p :> bitstring)
             | _ -> empty_bitstring in
-        unpacked [ "target", V.Ip r.target ; "dst", V.Ip r.dst ;
+        unpacked [ "target", Val.Ip r.target ; "dst", Val.Ip r.dst ;
                    "target_lla", lla_value (target_lla others) ;
                    "options", ndp_options_value others ]
                  ~upper:(if bitstring_length payload > 0 then Any N.IP6 else Nothing)
@@ -1274,13 +1275,13 @@ let ndp_options layer (fields : fields) of_fields =
     | Some _ ->
         let bits = bytes_of fields "options" in
         if Tools.bytelength bits mod 8 <> 0 then
-            V.fail "The options of %s must be a multiple of 8 bytes" layer ;
+            Val.fail "The options of %s must be a multiple of 8 bytes" layer ;
         Icmp6.Opt.unpack bits
     | None -> of_fields ()
 
 (* The option of the link-layer address [name], [def] if not given: *)
 let lla_option (fields : fields) name ~def make =
-    match (match fields name with Some (V.Mac m) -> Some m | _ -> def) with
+    match (match fields name with Some (Val.Mac m) -> Some m | _ -> def) with
     | Some m when not (Eth.Addr.eq m Eth.Addr.zero) ->
         [ make (string_of_bitstring (m :> bitstring)) ]
     | _ -> []
@@ -1291,7 +1292,7 @@ let ndp_node typ make ctx =
         let m = Icmp6.Pdu.{ msg_type = Icmp6.MsgType.o (typ, 0) ;
                             payload = make ctx fields payload } in
         Tools.dropbytes 4 (Icmp6.Pdu.pack m),
-        [ "type", V.Int typ ; "code", V.Int 0 ; "hop_limit", V.Int 255 ])
+        [ "type", Val.Int typ ; "code", Val.Int 0 ; "hop_limit", Val.Int 255 ])
 
 let router_solicit_node =
     ndp_node 133 (fun ctx fields _ ->
@@ -1310,13 +1311,13 @@ let router_advert_node =
                 | None | Some -1 -> []
                 | Some m -> [ Icmp6.Opt.Mtu m ]) @
                 (match fields "prefixes" with
-                | Some (V.Array ps) ->
+                | Some (Val.Array ps) ->
                     Array.to_list ps |> List.map (function
-                        | V.Record [| V.Bool autonomous ; V.Bool on_link ; preferred ;
-                                      V.Cidr c ; valid |] ->
+                        | Val.Record [| Val.Bool autonomous ; Val.Bool on_link ; preferred ;
+                                        Val.Cidr c ; valid |] ->
                             let prefix, prefix_len = (c :> Ip.Addr.t * int) in
                             if not (Ip.Addr.is_v6 prefix) then
-                                V.fail "A prefix is of IPv6, not %s" (Ip.Cidr.to_string c) ;
+                                Val.fail "A prefix is of IPv6, not %s" (Ip.Cidr.to_string c) ;
                             Icmp6.Opt.Prefix {
                                 prefix ; prefix_len ; on_link ; autonomous ; flags = 0 ;
                                 valid = int_value "valid" 0 0xffff_ffff valid ;
@@ -1337,10 +1338,10 @@ let redirect_node =
     ndp_node 137 (fun _ fields payload ->
         let addr name =
             match fields name with
-            | Some (V.Ip a) when Ip.Addr.is_v6 a -> a
-            | Some (V.Ip a) ->
-                V.fail "Redirect takes IPv6 addresses, not %s" (Ip.Addr.to_dotted_string a)
-            | _ -> V.fail "Redirect needs a %s" name in
+            | Some (Val.Ip a) when Ip.Addr.is_v6 a -> a
+            | Some (Ip a) ->
+                Val.fail "Redirect takes IPv6 addresses, not %s" (Ip.Addr.to_dotted_string a)
+            | _ -> Val.fail "Redirect needs a %s" name in
         let len = Tools.bytelength payload land (lnot 7) in
         Redirect {
             target = addr "target" ; dst = addr "dst" ;
@@ -1373,7 +1374,7 @@ let quoted_ip_node _ =
     let next_id () = id := (!id + 1) land 0xffff ; !id in
     manual (fun fields hints payload ->
         List.iter (fun n ->
-            if fields n = None then V.fail "A quoted IP needs a %s" n) [ "src" ; "dst" ] ;
+            if fields n = None then Val.fail "A quoted IP needs a %s" n) [ "src" ; "dst" ] ;
         pack_ip next_id fields hints payload)
 
 (* As much of the packet as there is, whatever its length says: *)
@@ -1399,7 +1400,7 @@ let unpack_quoted_ip6 _ bits =
 let quoted_ip6_node _ =
     manual (fun fields hints payload ->
         List.iter (fun n ->
-            if fields n = None then V.fail "A quoted IP6 needs a %s" n) [ "src" ; "dst" ] ;
+            if fields n = None then Val.fail "A quoted IP6 needs a %s" n) [ "src" ; "dst" ] ;
         pack_ip6 fields hints payload)
 
 (* Whatever the length says, the payload is what is left: *)
@@ -1409,8 +1410,8 @@ let unpack_quoted_udp _ bits =
          rest : -1 : bitstring |} ->
         let payload =
             takebits (min (bitstring_length rest) (max 0 (length - 8) * 8)) rest in
-        unpacked [ "src", V.Int src ; "dst", V.Int dst ;
-                   "length", V.Int length ; "checksum", V.Int checksum ]
+        unpacked [ "src", Val.Int src ; "dst", Val.Int dst ;
+                   "length", Val.Int length ; "checksum", Val.Int checksum ]
                  ~upper:(if bitstring_length payload > 0 then Only N.Raw else Nothing)
                  ~payload bits
     | {| _ |} -> None
@@ -1431,10 +1432,10 @@ let unpack_quoted_tcp _ bits =
                 (if bitstring_length rest > opt_len then dropbits opt_len rest
                  else empty_bitstring)
             | {| _ |} -> 0, 0, 0, 0, 0, empty_bitstring, empty_bitstring in
-        unpacked ([ "src", V.Int src ; "dst", V.Int dst ;
-                    "seq_num", V.Int (u32 seq_num) ; "ack_num", V.Int ack_num ;
-                    "flags", V.Int flags ; "win_size", V.Int win_size ;
-                    "urg_ptr", V.Int urg_ptr ; "checksum", V.Int checksum ] @
+        unpacked ([ "src", Val.Int src ; "dst", Val.Int dst ;
+                    "seq_num", Val.Int (u32 seq_num) ; "ack_num", Val.Int ack_num ;
+                    "flags", Val.Int flags ; "win_size", Val.Int win_size ;
+                    "urg_ptr", Val.Int urg_ptr ; "checksum", Val.Int checksum ] @
                   tcp_option_values (Tcp.Pdu.Opt.unpack options))
                  ~upper:(if bitstring_length payload > 0 then Only N.Raw else Nothing)
                  ~payload bits
@@ -1456,9 +1457,9 @@ let quoted_tcp_node _ =
             ~win_size:(int ~def:0xffff "win_size" 0xffff)
             ~urg_ptr:(int ~def:0 "urg_ptr" 0xffff) ~options:(tcp_options fields)
             ?checksum:(opt_int fields "checksum" 0 0xffff) payload |>
-        Tcp.Pdu.pack, [ "proto", V.Int tcp_proto ])
+        Tcp.Pdu.pack, [ "proto", Val.Int tcp_proto ])
 
-let more hints = List.assoc_opt "more" hints <> Some (V.Bool false)
+let more hints = List.assoc_opt "more" hints <> Some (Val.Bool false)
 
 (* The end of a stream, without data, is no Raw: *)
 let unpack_raw hints bits =
@@ -1474,7 +1475,7 @@ let unpack_dns _ bits =
     match Dns.Pdu.unpack bits with
     | Error _ -> None
     | Ok m ->
-        unpacked [ "id", V.Int m.id ]
+        unpacked [ "id", Val.Int m.id ]
                  ~upper:(Only (if m.is_query then N.Query else N.Answer))
                  ~payload:bits bits
 
@@ -1484,33 +1485,33 @@ let dns_node _ =
     manual (fun fields _ payload ->
         let id = int_of fields "DNS" "id" 0 0xffff in
         let%bitstring hdr = {| id : 16 |} in
-        concat [ hdr ; dropbits 16 payload ], [ "dst", V.Int 53 ])
+        concat [ hdr ; dropbits 16 payload ], [ "dst", Val.Int 53 ])
 
 (* As written, without the root label every name but the root ends with: *)
 let dns_name n = if n = "." then n else String.rchop n
 
 let dns_fqdn layer = function
-    | V.String n ->
+    | Val.String n ->
         (try Dns.Pdu.fqdn n
-        with Invalid_argument _ -> V.fail "%s: %S is not a DNS name" layer n)
+        with Invalid_argument _ -> Val.fail "%s: %S is not a DNS name" layer n)
     | _ -> invalid_arg "Crafty_layers: a DNS name is not a string"
 
 (* With its fields in the order of [dns_rr], those of a record: *)
 let dns_rr_value (name, (typ : Dns.QType.t), cls, ttl, data) =
-    V.Record [| V.Int cls ; V.bytes_of_string (Bytes.to_string data) ;
-                V.String (dns_name name) ; V.Int (Tools.uint32 ttl) ;
-                V.Int (typ :> int) |]
+    Val.Record [| Val.Int cls ; Val.bytes_of_string (Bytes.to_string data) ;
+                Val.String (dns_name name) ; Val.Int (Tools.uint32 ttl) ;
+                Val.Int (typ :> int) |]
 
 let dns_rrs_of layer (fields : fields) name =
     match fields name with
     | None -> []
-    | Some (V.Array rrs) ->
+    | Some (Val.Array rrs) ->
         Array.to_list rrs |> List.map (function
-            | V.Record [| cls ; data ; n ; ttl ; typ |] ->
+            | Val.Record [| cls ; data ; n ; ttl ; typ |] ->
                 dns_fqdn layer n, Dns.QType.o (int_value "type" 0 0xffff typ),
                 int_value "class" 0 0xffff cls,
                 Int32.of_int (int_value "ttl" 0 0xffff_ffff ttl),
-                Bytes.of_string (string_of_bitstring (V.bits_of_bytes data))
+                Bytes.of_string (string_of_bitstring (Val.bits_of_bytes data))
             | _ -> invalid_arg "Crafty_layers: not a DNS record")
     | Some _ -> invalid_arg ("Crafty_layers: "^ name ^" is not an array")
 
@@ -1523,16 +1524,16 @@ let unpack_dns_message _ bits =
             match m.questions with
             | (n, t, c) :: _ -> dns_name n, (t : Dns.QType.t :> int), c
             | [] -> "", 0, 0 in
-        let rrs l = V.Array (Array.of_list (List.map dns_rr_value l)) in
-        unpacked [ "name", V.String name ; "type", V.Int typ ; "class", V.Int cls ;
-                   "opcode", V.Int m.opcode ;
-                   "authoritative", V.Bool m.is_auth ;
-                   "truncated", V.Bool m.truncated ;
-                   "rec_desired", V.Bool m.rec_desired ;
-                   "rec_avail", V.Bool m.rec_avlb ;
-                   "authentic_data", V.Bool m.authentic_data ;
-                   "checking_disabled", V.Bool m.checking_disabled ;
-                   "status", V.Int m.status ;
+        let rrs l = Val.Array (Array.of_list (List.map dns_rr_value l)) in
+        unpacked [ "name", Val.String name ; "type", Val.Int typ ; "class", Val.Int cls ;
+                   "opcode", Val.Int m.opcode ;
+                   "authoritative", Val.Bool m.is_auth ;
+                   "truncated", Val.Bool m.truncated ;
+                   "rec_desired", Val.Bool m.rec_desired ;
+                   "rec_avail", Val.Bool m.rec_avlb ;
+                   "authentic_data", Val.Bool m.authentic_data ;
+                   "checking_disabled", Val.Bool m.checking_disabled ;
+                   "status", Val.Int m.status ;
                    "answers", rrs m.answer_rrs ;
                    "authority", rrs m.authority_rrs ;
                    "additional", rrs m.additional_rrs ] bits
@@ -1546,7 +1547,7 @@ let dns_message_node layer ~query _ =
         let name =
             match fields "name" with
             | Some n -> dns_fqdn layer n
-            | None -> V.fail "%s needs a name" layer in
+            | None -> Val.fail "%s needs a name" layer in
         Dns.Pdu.{
             id = 0 ; is_query = query ;
             opcode = int ~def:0 "opcode" 0xf ;
@@ -1589,8 +1590,8 @@ let rec http_units ?(seen=ignore) ~upgraded s eof =
             if n = String.length s then [], ""
             else http_units ~seen ~upgraded (String.sub s n (String.length s - n)) eof in
         unpacked_as (http_message_layer msg) (String.sub s 0 n) :: us, rest
-    | Http.Pdu.Truncated _ -> [], s
-    | Http.Pdu.Not_http -> [], ""
+    | Truncated _ -> [], s
+    | Not_http -> [], ""
 
 (* The WebSocket frames at the start of [s], with what is left: *)
 and ws_units s =
@@ -1613,7 +1614,7 @@ let segment_units ~upgraded s eof =
     | [] -> fill (not upgraded)
     | us -> us
 
-let is_stream hints = List.assoc_opt "stream" hints = Some (V.Bool true)
+let is_stream hints = List.assoc_opt "stream" hints = Some (Val.Bool true)
 
 (* The data of a TCP stream goes to the node, with whether more follows; a
  * segment, to the first of its units, its node seeing them all: *)
@@ -1643,31 +1644,31 @@ let http_node ctx =
     let seen (msg : Http.Pdu.t) =
         match msg.cmd with
         | Http.Request _ -> ws_key := header_value "Sec-WebSocket-Key" msg.headers
-        | Http.Status 101 -> upgraded := true
-        | Http.Status _ -> () in
+        | Status 101 -> upgraded := true
+        | Status _ -> () in
     let upgraded_now () = !upgraded in
     let pack _ hints payload =
         (match List.assoc_opt "opcode" hints, List.assoc_opt "code" hints with
-        | Some (V.Int op), _ ->
+        | Some (Val.Int op), _ ->
             let opcode =
                 match Websocket.opcode_of_int op with
                 | Some o -> o
-                | None -> V.fail "WebSocket has no opcode %d" op in
+                | None -> Val.fail "WebSocket has no opcode %d" op in
             let masked =
                 match List.assoc_opt "masked" hints with
-                | Some (V.Bool m) -> m
+                | Some (Val.Bool m) -> m
                 | _ -> !client in
             let mask =
                 match List.assoc_opt "mask" hints with
-                | Some (V.Int m) -> bswap32 (Int32.of_int m)
+                | Some (Val.Int m) -> bswap32 (Int32.of_int m)
                 | _ -> Websocket.Pdu.rand_mask () in
             Websocket.Pdu.pack {
-                fin = List.assoc_opt "final" hints <> Some (V.Bool false) ; opcode ;
+                fin = List.assoc_opt "final" hints <> Some (Val.Bool false) ; opcode ;
                 length = Tools.bytelength payload ; frame_length = 0 ;
                 mask = if masked then Some mask else None ;
                 payload = Payload.o payload }
-        | Some _, _ -> V.fail "A WebSocket opcode is an integer"
-        | None, Some (V.Int 101) ->
+        | Some _, _ -> Val.fail "A WebSocket opcode is an integer"
+        | None, Some (Int 101) ->
             client := false ;
             upgraded := true ;
             (match Http.Pdu.parse (string_of_bitstring payload) true, !ws_key with
@@ -1701,20 +1702,20 @@ let http_node ctx =
 let http_header = Type.Record [ "name", Type.String ; "value", Type.String ]
 
 let http_headers_value hs =
-    V.Array (Array.of_list (List.map (fun (n, v) -> V.Record [| V.String n ; V.String v |]) hs))
+    Val.Array (Array.of_list (List.map (fun (n, v) -> Val.Record [| Val.String n ; Val.String v |]) hs))
 
 let http_headers (fields : fields) =
     match fields "headers" with
     | None -> []
-    | Some (V.Array hs) ->
+    | Some (Val.Array hs) ->
         Array.to_list hs |> List.map (function
-            | V.Record [| V.String n ; V.String v |] -> n, v
+            | Val.Record [| Val.String n ; Val.String v |] -> n, v
             | _ -> invalid_arg "Crafty_layers: not an HTTP header")
     | Some _ -> invalid_arg "Crafty_layers: HTTP headers are not an array"
 
 let string_of ~def (fields : fields) name =
     match fields name with
-    | Some (V.String s) -> s
+    | Some (Val.String s) -> s
     | None -> def
     | Some _ -> invalid_arg ("Crafty_layers: "^ name ^" is not a string")
 
@@ -1724,9 +1725,9 @@ let unpack_http_message kind _ bits =
     | Http.Pdu.Parsed (msg, _) when http_message_layer msg = kind ->
         let first =
             match msg.cmd with
-            | Http.Request (meth, url) -> [ "method", V.String meth ; "url", V.String url ]
-            | Http.Status code -> [ "code", V.Int code ] in
-        unpacked (first @ [ "version", V.String msg.version ;
+            | Http.Request (meth, url) -> [ "method", Val.String meth ; "url", Val.String url ]
+            | Status code -> [ "code", Val.Int code ] in
+        unpacked (first @ [ "version", Val.String msg.version ;
                             "headers", http_headers_value msg.headers ])
                  ~upper:(if msg.body = "" then Nothing else Only N.Raw)
                  ~payload:(bitstring_of_string msg.body) bits
@@ -1760,11 +1761,11 @@ let http_upgrade_node _ =
         let url = Url.of_string (string_of ~def:"" fields "url")
         and headers = http_headers fields in
         if url.path = "" && url.net_loc = "" then
-            V.fail "HttpUpgrade needs a url" ;
+            Val.fail "HttpUpgrade needs a url" ;
         if List.mem (String.lowercase_ascii url.scheme) [ "wss" ; "https" ] then
-            V.fail "HttpUpgrade cannot do TLS, so not %s" url.scheme ;
+            Val.fail "HttpUpgrade cannot do TLS, so not %s" url.scheme ;
         if url.net_loc = "" && header_value "Host" headers = None then
-            V.fail "HttpUpgrade needs a url with a host (ws://example.com/chat) \
+            Val.fail "HttpUpgrade needs a url with a host (ws://example.com/chat) \
                     or a Host header" ;
         Http.Pdu.pack { (Websocket.upgrade_request ~headers url) with
                         version = string_of ~def:Http.Pdu.default_version fields "version" },
@@ -1774,7 +1775,7 @@ let http_upgrade_node _ =
 let http_answer_node _ =
     manual (fun fields _ payload ->
         let code = int_of fields "HttpAnswer" "code" 100 999 in
-        pack_http_message fields (Http.Status code) [ "code", V.Int code ] payload
+        pack_http_message fields (Http.Status code) [ "code", Val.Int code ] payload
             ~length_needed:(fun _ ->
                 not ((code >= 100 && code < 200) || code = 204 || code = 304)))
 
@@ -1783,12 +1784,12 @@ let unpack_ws _ bits =
     match Websocket.Pdu.unpack bits with
     | Ok f ->
         let payload = (f.payload :> bitstring) in
-        unpacked [ "final", V.Bool f.fin ;
-                   "opcode", V.Int (Websocket.int_of_opcode f.opcode) ;
-                   "masked", V.Bool (f.mask <> None) ;
-                   "mask", V.Int (match f.mask with
-                                  | Some m -> Int32.to_int (bswap32 m) land 0xffff_ffff
-                                  | None -> 0) ]
+        unpacked [ "final", Val.Bool f.fin ;
+                   "opcode", Val.Int (Websocket.int_of_opcode f.opcode) ;
+                   "masked", Val.Bool (f.mask <> None) ;
+                   "mask", Val.Int (match f.mask with
+                                    | Some m -> Int32.to_int (bswap32 m) land 0xffff_ffff
+                                    | None -> 0) ]
                  ~upper:(if bitstring_length payload = 0 then Nothing else Only N.Raw)
                  ~payload bits
     | Error _ -> None
@@ -1811,14 +1812,14 @@ let ws_node ctx =
     and fragments = ref None in
     let send opcode payload =
         if opcode = 8 then sent_close := true ;
-        below.send (fun _ -> None) [ "opcode", V.Int opcode ] payload in
+        below.send (fun _ -> None) [ "opcode", Val.Int opcode ] payload in
     let answer opcode payload =
         if !active then Simulation.asap power (fun () -> send opcode payload) () in
     let message (u : unpacked) opcode payload =
         let values =
             List.map (function
-                | "opcode", _ -> "opcode", V.Int opcode
-                | "final", _ -> "final", V.Bool true
+                | "opcode", _ -> "opcode", Val.Int opcode
+                | "final", _ -> "final", Val.Bool true
                 | v -> v) u.values in
         with_length ~terminal:false
             { u with values ; payload ; bits = payload ;
@@ -1828,30 +1829,30 @@ let ws_node ctx =
         let frame = u, [ Manual ] in
         if not (List.mem Driven modes) then [ frame ] else
         let data = u.payload
-        and final = List.assoc "final" u.values = V.Bool true in
+        and final = List.assoc "final" u.values = Val.Bool true in
         frame :: (
             match List.assoc "opcode" u.values with
-            | V.Int 9 -> answer 10 data ; []
-            | V.Int 10 -> []
-            | V.Int 8 ->
+            | Val.Int 9 -> answer 10 data ; []
+            | Int 10 -> []
+            | Int 8 ->
                 if not !sent_close then answer 8 (ws_status data) ;
                 [ message u 8 data ]
-            | V.Int 0 ->
+            | Int 0 ->
                 (match !fragments with
                 | None -> []
                 | Some (op, ds) when final ->
                     fragments := None ;
                     [ message u op (Bitstring.concat (List.rev (data :: ds))) ]
                 | Some (op, ds) -> fragments := Some (op, data :: ds) ; [])
-            | V.Int op when final -> [ message u op data ]
-            | V.Int op -> fragments := Some (op, [ data ]) ; []
+            | Int op when final -> [ message u op data ]
+            | Int op -> fragments := Some (op, [ data ]) ; []
             | _ -> invalid_arg "Crafty_layers: a WebSocket opcode is not an int") in
     { (manual (fun fields _ payload ->
         let opt name = Option.map (fun v -> name, v) (fields name) in
         let opcode = ws_opcode fields in
         if opcode = 8 then sent_close := true ;
         payload,
-        ("opcode", V.Int opcode) :: List.filter_map opt [ "final" ; "masked" ; "mask" ])) with
+        ("opcode", Val.Int opcode) :: List.filter_map opt [ "final" ; "masked" ; "mask" ])) with
       send = (fun fields _ payload -> active := true ; send (ws_opcode fields) payload) ;
       receive ;
       listen = (fun () -> active := true) ;
@@ -1904,7 +1905,7 @@ let overlap (l : layer) i j =
 
 
 let unsendable name _ =
-    let fail _ _ _ = V.fail "%s cannot be sent" (N.to_string name) in
+    let fail _ _ _ = Val.fail "%s cannot be sent" (N.to_string name) in
     { (manual fail) with send = fail }
 
 (* The bytes a layer carries, or a Raw holds, that a layer without a length of
@@ -1947,7 +1948,7 @@ let eth =
         field "src" Type.Mac ~read_in:both ;
         field "dst" Type.Mac ~read_in:both ;
         field "proto" Type.Int ~read_in:both ~discriminant:true
-              ~driven_default:(V.Int 0x800) ;
+              ~driven_default:(Val.Int 0x800) ;
         field "ts" Type.Time ~set_in:[] ~read_in:both ~about:"when the frame was captured" ]
 
 let ip_stats =
@@ -1962,16 +1963,16 @@ let ip =
         field "dst" Type.Ip ~set_in:both ~read_in:both ~discriminant:true
               ~pick:Required ~peer:"src" ;
         field "proto" Type.Int ~set_in:both ~read_in:both ~discriminant:true ;
-        field "tos" Type.Int ~set_in:both ~read_in:both ~driven_default:(V.Int 0) ;
-        field "ttl" Type.Int ~set_in:both ~read_in:both ~driven_default:(V.Int 64) ;
+        field "tos" Type.Int ~set_in:both ~read_in:both ~driven_default:(Val.Int 0) ;
+        field "ttl" Type.Int ~set_in:both ~read_in:both ~driven_default:(Val.Int 64) ;
         field "dont_frag" Type.Bool ~set_in:both ~read_in:both
-              ~driven_default:(V.Bool false) ;
+              ~driven_default:(Val.Bool false) ;
         field "id" Type.Int ~read_in:both ;
         field "more_frags" Type.Bool ;
         field "frag_offset" Type.Int ;
         field "tot_len" Type.Int ;
         field "options" Type.bytes ~set_in:both ~read_in:both
-              ~driven_default:(V.Array [||]) ;
+              ~driven_default:(Val.Array [||]) ;
         field "record_route" (Type.Array Type.Ip) ~set_in:both ~read_in:both
               ~part_of:"options" ;
         field "rr_slots" Type.Int ~set_in:both ~read_in:both ~part_of:"options" ;
@@ -1986,10 +1987,10 @@ let ip6 =
               ~pick:Required ~peer:"src" ;
         field "proto" Type.Int ~set_in:both ~read_in:both ~discriminant:true ;
         field "traffic_class" Type.Int ~set_in:both ~read_in:both
-              ~driven_default:(V.Int 0) ;
+              ~driven_default:(Val.Int 0) ;
         field "hop_limit" Type.Int ~set_in:both ~read_in:both
-              ~driven_default:(V.Int 64) ;
-        field "flow_label" Type.Int ~read_in:both ~driven_default:(V.Int 0) ;
+              ~driven_default:(Val.Int 64) ;
+        field "flow_label" Type.Int ~read_in:both ~driven_default:(Val.Int 0) ;
         field "frag_id" Type.Int ;
         field "frag_offset" Type.Int ;
         field "more_frags" Type.Bool ;
@@ -2341,10 +2342,10 @@ let record_type (l : layer) mode =
 (* A message, decoded as sent, its names as written: *)
 (*$T
   let fields = function \
-      | "name" -> Some (Crafty_value.String "example.com") \
-      | "answers" -> Some (Crafty_value.Array [| Crafty_value.Record [| \
-          Crafty_value.Int 1 ; Crafty_value.bytes_of_string "\001\002\003\004" ; \
-          Crafty_value.String "example.com" ; Crafty_value.Int 0xffff_ffff ; Crafty_value.Int 1 |] |]) \
+      | "name" -> Some (Val.String "example.com") \
+      | "answers" -> Some (Val.Array [| Val.Record [| \
+          Val.Int 1 ; Val.bytes_of_string "\001\002\003\004" ; \
+          Val.String "example.com" ; Val.Int 0xffff_ffff ; Val.Int 1 |] |]) \
       | _ -> None in \
   let eth = Eth.State.make ~parent:(Simulation.make ~realtime:false "dns").root ~name:"dns" \
               ~mac:(Eth.Addr.of_string "02:00:00:00:00:01") () in \
@@ -2355,10 +2356,10 @@ let record_type (l : layer) mode =
   | Some { upper = Only N.Answer ; payload ; _ } -> \
       (match answer.unpack [] payload with \
       | Some u -> \
-          List.assoc "name" u.values = Crafty_value.String "example.com" && \
-          List.assoc "rec_desired" u.values = Crafty_value.Bool true && \
+          List.assoc "name" u.values = Val.String "example.com" && \
+          List.assoc "rec_desired" u.values = Val.Bool true && \
           (match List.assoc "answers" u.values with \
-           | Crafty_value.Array [| Crafty_value.Record [| _ ; _ ; Crafty_value.String "example.com" ; Crafty_value.Int 0xffff_ffff ; _ |] |] -> true \
+           | Val.Array [| Val.Record [| _ ; _ ; Val.String "example.com" ; Val.Int 0xffff_ffff ; _ |] |] -> true \
            | _ -> false) \
       | None -> false) \
   | _ -> false
@@ -2385,14 +2386,14 @@ let record_type (l : layer) mode =
   key_fields (echo_message N.Reply 0) = []
 *)
 (*$T find_constant
-  find_constant "RST" = Some (Crafty_ast.Int 4)
-  find_constant "PORT_UNREACHABLE" = Some (Crafty_ast.Int 3)
+  find_constant "RST" = Some (Ast.Int 4)
+  find_constant "PORT_UNREACHABLE" = Some (Ast.Int 3)
   find_constant "rst" = None
   find_constant "src" = None
 *)
-(*$= record_type & ~printer:Crafty_ast.Type.to_string
-  (Crafty_ast.Type.Record [ "src", Crafty_ast.Type.Int ; "dst", Crafty_ast.Type.Int ]) (record_type tcp Driven)
-  (Crafty_ast.Type.Record [ "data", Crafty_ast.Type.bytes ; "length", Crafty_ast.Type.Int ]) (record_type raw Manual)
+(*$= record_type & ~printer:Ast.Type.to_string
+  (Ast.Type.Record [ "src", Ast.Type.Int ; "dst", Ast.Type.Int ]) (record_type tcp Driven)
+  (Ast.Type.Record [ "data", Ast.Type.bytes ; "length", Ast.Type.Int ]) (record_type raw Manual)
 *)
 (* The registry holds together: *)
 (*$T
@@ -2423,7 +2424,7 @@ let record_type (l : layer) mode =
   List.length (List.unique names) = List.length names && \
   List.for_all (fun n -> \
       N.of_string n = None && \
-      not (List.mem n Crafty_ast.(keywords @ functions @ \
-                                  List.map String.lowercase_ascii predefined)) && \
+      not (List.mem n Ast.(keywords @ functions @ \
+                           List.map String.lowercase_ascii predefined)) && \
       List.for_all (fun (l : layer) -> find_field l n = None) all) names
 *)

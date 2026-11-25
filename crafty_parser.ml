@@ -38,17 +38,19 @@
    several ways is an error. *)
 open Batteries
 open Crafty_ast
+module Ast = Crafty_ast
+module Lay = Crafty_layers
 
 (* Whether nothing can be on top of the layer of that name: *)
 let terminal name =
-    List.exists (fun (l : Crafty_layers.layer) ->
-        l.terminal && l.name = name) Crafty_layers.all
+    List.exists (fun (l : Lay.layer) ->
+        l.terminal && l.name = name) Lay.all
 
 (* Whether the layer of that name sends a packet, if not followed by a
  * block: *)
 let ends name =
-    List.exists (fun (l : Crafty_layers.layer) ->
-        l.ends && l.name = name) Crafty_layers.all
+    List.exists (fun (l : Lay.layer) ->
+        l.ends && l.name = name) Lay.all
 
 (* What is wrong with a stack of [layers] that is followed by a block although
  * it sends, and the fixes: *)
@@ -74,11 +76,11 @@ let no_block_after anchor layers =
 let not_a_message ?(block=false) anchor layers =
     let top = Layer_name.to_string (List.last layers).layer_name in
     let terminals =
-        List.filter_map (fun (l : Crafty_layers.layer) ->
+        List.filter_map (fun (l : Lay.layer) ->
             if l.ends &&
-               List.exists (fun (b : Crafty_layers.layer) ->
+               List.exists (fun (b : Lay.layer) ->
                    Layer_name.to_string b.name = top) l.above
-            then Some (Layer_name.to_string l.name) else None) Crafty_layers.all |>
+            then Some (Layer_name.to_string l.name) else None) Lay.all |>
         List.unique in
     Printf.sprintf "%s is not a terminal layer, therefore %s is not a complete \
                     message that could be sent: it needs %s%s."
@@ -214,7 +216,7 @@ let is_keyword s = is_in keywords s
 let is_reserved s =
     s = "_" || is_keyword s || is_in functions s || Layer_name.of_string s <> None ||
     List.mem s predefined ||
-    Crafty_layers.find_constant s <> None
+    Lay.find_constant s <> None
 
 (* Names of the user's variables: *)
 let name =
@@ -226,7 +228,7 @@ let predefined_var =
 
 let constant =
     identifier >>= fun s ->
-        match Crafty_layers.find_constant s with
+        match Lay.find_constant s with
         | Some l -> return (s, l)
         | None -> fail
 
@@ -431,17 +433,17 @@ let parse_literal s =
     | Ok (l, _) -> Some l
     | Error _ -> None
 
-(*$= parse_literal & ~printer:(function None -> "None" | Some l -> IO.to_string Crafty_ast.print_literal l)
-  (Some (Crafty_ast.Int 16)) (parse_literal "0x10")
-  (Some (Crafty_ast.Float (-1.5))) (parse_literal "-1.5")
+(*$= parse_literal & ~printer:(function None -> "None" | Some l -> IO.to_string Ast.print_literal l)
+  (Some (Ast.Int 16)) (parse_literal "0x10")
+  (Some (Ast.Float (-1.5))) (parse_literal "-1.5")
   None (parse_literal "1.2.3.4 x")
   None (parse_literal "")
-  (Some (Crafty_ast.Ip (Ip.Addr.of_string "2001:db8::1"))) (parse_literal "2001:DB8::1")
-  (Some (Crafty_ast.Ip (Ip.Addr.of_string "::"))) (parse_literal "::")
-  (Some (Crafty_ast.Ip (Ip.Addr.of_string "::ffff:1.2.3.4"))) (parse_literal "::ffff:1.2.3.4")
-  (Some (Crafty_ast.Ip (Ip.Addr.of_string "1:2:3:4:5:6:7:8"))) (parse_literal "1:2:3:4:5:6:7:8")
-  (Some (Crafty_ast.Cidr (Ip.Cidr.of_string "2001:db8::/32"))) (parse_literal "2001:db8::/32")
-  (Some (Crafty_ast.Mac (Eth.Addr.of_string "02:00:00:00:00:01"))) (parse_literal "02:00:00:00:00:01")
+  (Some (Ast.Ip (Ip.Addr.of_string "2001:db8::1"))) (parse_literal "2001:DB8::1")
+  (Some (Ast.Ip (Ip.Addr.of_string "::"))) (parse_literal "::")
+  (Some (Ast.Ip (Ip.Addr.of_string "::ffff:1.2.3.4"))) (parse_literal "::ffff:1.2.3.4")
+  (Some (Ast.Ip (Ip.Addr.of_string "1:2:3:4:5:6:7:8"))) (parse_literal "1:2:3:4:5:6:7:8")
+  (Some (Ast.Cidr (Ip.Cidr.of_string "2001:db8::/32"))) (parse_literal "2001:db8::/32")
+  (Some (Ast.Mac (Eth.Addr.of_string "02:00:00:00:00:01"))) (parse_literal "02:00:00:00:00:01")
   None (parse_literal "dead:beef")
   None (parse_literal "1::2::3")
 *)
@@ -1101,7 +1103,7 @@ let message_of what =
 let ambiguity readings =
     let rec diff = function
         | s1 :: p1, s2 :: p2 ->
-            let print s = IO.to_string (Crafty_ast.print_stmt ~all:true 0) s in
+            let print s = IO.to_string (Ast.print_stmt ~all:true 0) s in
             let t1 = print s1 and t2 = print s2 in
             if t1 = t2 then diff (p1, p2) else (
                 let l1 = String.split_on_char '\n' t1
@@ -1131,7 +1133,7 @@ let ambiguity readings =
   { where = { line = 2 ; column = 1 } ; \
     message = "This statement can be read in 2 ways, such as:\n  y = [a, b]\nand:\n  y = [a: b]" ; \
     kind = None ; packet = None } \
-    (let open Crafty_ast in \
+    (let open Ast in \
      let reading m = \
          let p = Result.get_ok (parse ("x = 1\ny = [a, b]")) in \
          if m then List.map (fun s -> match s.stmt with \
@@ -1180,11 +1182,11 @@ let parse_patterns text =
 (*$inject
   let reads text =
       match parse text with
-      | Ok p -> Crafty_ast.string_of_program p
+      | Ok p -> Ast.string_of_program p
       | Error e -> IO.to_string print_error e
   let formats text =
       match parse text with
-      | Ok p -> Crafty_ast.string_of_program ~all:false p
+      | Ok p -> Ast.string_of_program ~all:false p
       | Error e -> IO.to_string print_error e
 *)
 

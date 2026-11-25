@@ -983,7 +983,7 @@ let new_simulation ?topology ?(paused=false) ?(start=true) name =
       sim
 
   let says (sim : Simulation.t) path name =
-      match Topology.find_within sim.root path with
+      match find_within sim.root path with
       | None -> `String ("no such widget: "^ path)
       | Some w ->
           (match List.find_opt (fun (p : Widget.property) -> p.name = name)

@@ -42,10 +42,11 @@
    runs while the tree is being walked. *)
 open Batteries
 open Crafty_value
-module A = Crafty_ast
-module L = Crafty_layers
+module Ast = Crafty_ast
+module Lay = Crafty_layers
+module Val = Crafty_value
 
-(* The discriminants of [L.key_fields], with their values in the packets a
+(* The discriminants of [Lay.key_fields], with their values in the packets a
  * node sends: *)
 module Key =
 struct
@@ -57,23 +58,23 @@ struct
 
     (* Keys hold ints and addresses only: *)
     let hash k =
-        Hashtbl.hash (List.map (fun (i, v) -> i, to_string A.Type.Void v) k)
+        Hashtbl.hash (List.map (fun (i, v) -> i, to_string Ast.Type.Void v) k)
 end
 
 module Siblings = Hashtbl.Make (Key)
 
 (** A received packet as decoded: its layers, the top first. *)
-type packet = (L.layer * L.unpacked) list
+type packet = (Lay.layer * Lay.unpacked) list
 
 type node =
-    { layer : L.layer ;
+    { layer : Lay.layer ;
       (* Without the keys that are told (see {!tell}) until they are: *)
       mutable key : Key.t ;
       parent : node option ;
       (* By layer name, then by key, as a received packet is looked up at
        * every layer, among possibly many streams. A layer with no node
        * left has no entry: *)
-      children : (L.N.t, node Siblings.t) Hashtbl.t ;
+      children : (Lay.N.t, node Siblings.t) Hashtbl.t ;
       (* How many stacks and patterns hold it: *)
       mutable users : int ;
       (* How many received packets went through it, and the bytes of their
@@ -91,18 +92,18 @@ type node =
       (* The ranges of local ports to pick from, by layer name: *)
       ports : string -> (int * int) list ;
       (* Told of each local port used, given or picked, by the layer: *)
-      local_port : A.location -> L.layer -> int -> unit ;
+      local_port : Ast.location -> Lay.layer -> int -> unit ;
       (* Whether a layer of that name used that local port: *)
       uses_port : string -> int -> bool ;
       (* The local ports of the children of a node for a layer that went away
        * less than the time wait ago, which are not picked again: *)
-      waiting : node -> L.layer -> int list ;
+      waiting : node -> Lay.layer -> int list ;
       (* Told the nodes of streams that go away, messages aside: *)
       removed : node -> unit ;
       (* The kernel's routes, if they are to be followed: *)
-      router : L.router option ;
-      ops : L.ops ;
-      (* The packet that made it fail (see [L.ops.failure]), if one did: *)
+      router : Lay.router option ;
+      ops : Lay.ops ;
+      (* The packet that made it fail (see [Lay.ops.failure]), if one did: *)
       mutable failed_by : packet option ;
       (* Registered on it, by order of registration: *)
       mutable patterns : pattern list }
@@ -114,36 +115,36 @@ and pattern =
       layers : pattern_layer list ;
       (* The modes of the layers of its stack below its node, the top first,
        * which a packet must have been seen in: *)
-      below : L.mode list ;
+      below : Lay.mode list ;
       (* Holds a node made for it, for as long as it is registered: *)
       hold : node -> unit ;
       (* Told a packet that completed it: *)
       matched : packet -> unit ;
       (* Told an error of one of its conditions: *)
-      failed : A.Error_name.t option -> A.location -> string -> unit ;
+      failed : Ast.Error_name.t option -> Ast.location -> string -> unit ;
       (* Told the layer of a node never self-driven that a packet would have
        * passed, had the layer of the pattern been manual: *)
-      missed : L.layer -> unit }
+      missed : Lay.layer -> unit }
 
 (* Matches a layer of a packet seen in that mode, if its condition, given
  * the packet up to that layer, holds (raising [Runtime_error] if it
  * fails): *)
 and pattern_layer =
-    { player : L.layer ;
-      pmode : L.mode ;
+    { player : Lay.layer ;
+      pmode : Lay.mode ;
       test : (packet -> bool) option }
 
 (** A layer of a stack: a node used in a mode, with the options given. *)
-type entry = { node : node ; mode : L.mode ; options : (int * value) list }
+type entry = { node : node ; mode : Lay.mode ; options : (int * value) list }
 
 
 (* The children of [n] for layer [l]: *)
-let siblings n (l : L.layer) = Hashtbl.find_option n.children l.name
+let siblings n (l : Lay.layer) = Hashtbl.find_option n.children l.name
 
 (* A value of field [i] of [l] within one of the [ranges] (inclusive and
  * disjoint) that no sibling has nor [waiting] holds, else an error of kind
  * [kind]: *)
-let pick_random ?kind ?(waiting=[]) loc parent (l : L.layer) i ranges =
+let pick_random ?kind ?(waiting=[]) loc parent (l : Lay.layer) i ranges =
     let within v = List.exists (fun (lo, hi) -> v >= lo && v <= hi) ranges in
     let taken =
         Option.map_default (fun s ->
@@ -156,7 +157,7 @@ let pick_random ?kind ?(waiting=[]) loc parent (l : L.layer) i ranges =
     let n = List.fold_left (fun n (lo, hi) -> n + hi - lo + 1) 0 ranges in
     if Set.Int.cardinal taken >= n then
         raise (Runtime_error (kind, loc, Printf.sprintf "No %s left for another %s%s"
-            l.fields.(i).name (L.N.to_string l.name)
+            l.fields.(i).name (Lay.N.to_string l.name)
             (match List.length held with
             | 0 -> ""
             | h -> Printf.sprintf " (%d in time wait)" h))) ;
@@ -172,8 +173,8 @@ let pick_random ?kind ?(waiting=[]) loc parent (l : L.layer) i ranges =
     Int (loop (Random.int n))
 
 (* The fields of key [key] of layer [l], by name: *)
-let key_fields (l : L.layer) key name =
-    Option.bind (L.find_field l name) (fun i -> List.assoc_opt i key)
+let key_fields (l : Lay.layer) key name =
+    Option.bind (Lay.find_field l name) (fun i -> List.assoc_opt i key)
 
 let count_sent n bits =
     n.sent <- n.sent + 1 ;
@@ -182,7 +183,7 @@ let count_sent n bits =
 (* A new child of [parent], with no user. Its operations read the keys as
  * they are, which a told one completes, and what they send through
  * [parent] counts as sent by it: *)
-let make_child parent (l : L.layer) key =
+let make_child parent (l : Lay.layer) key =
     let self = ref None in
     let current () = match !self with Some c -> c.key | None -> key in
     let c = { layer = l ; key ; parent = Some parent ;
@@ -214,26 +215,26 @@ let make_child parent (l : L.layer) key =
 
 (** The child of [parent] for [l] given these [options]: an existing one if
  * they give all of its key, or else a new one, with what is missing picked
- * as {!L.pick} says; but for what is told, which it is left without. *)
-let child loc parent (l : L.layer) (options : (int * value) list) =
+ * as {!Lay.pick} says; but for what is told, which it is left without. *)
+let child loc parent (l : Lay.layer) (options : (int * value) list) =
     let random = ref false in
     let key =
         List.filter_map (fun i ->
             match List.assoc_opt i options with
             | Some v ->
                 (match l.fields.(i).pick, v with
-                | Some L.Local_port, Int p -> parent.local_port loc l p
+                | Some Lay.Local_port, Int p -> parent.local_port loc l p
                 | _ -> ()) ;
                 Some (i, v)
             | None ->
                 Option.map (fun v -> i, v) @@
                 (match l.fields.(i).pick with
-                | Some L.Told -> None
-                | Some L.Local_address ->
+                | Some Lay.Told -> None
+                | Some Local_address ->
                     (* The one that reaches the destination, if given: *)
-                    let v6 = l.name = L.N.IP6 in
+                    let v6 = l.name = Lay.N.IP6 in
                     let dst =
-                        match Option.bind (L.find_field l "dst")
+                        match Option.bind (Lay.find_field l "dst")
                                           (fun j -> List.assoc_opt j options) with
                         | Some (Ip d) when Ip.Addr.is_v6 d = v6 -> d
                         | _ -> if v6 then Ip.Addr.zero6 else Ip.Addr.zero in
@@ -241,20 +242,20 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
                     | Some ip -> Some (Ip ip)
                     | None ->
                         error loc "No IPv%c address to send %s from"
-                            (if v6 then '6' else '4') (L.N.to_string l.name))
-                | Some (L.Random_in (lo, hi)) ->
+                            (if v6 then '6' else '4') (Lay.N.to_string l.name))
+                | Some (Random_in (lo, hi)) ->
                     random := true ;
                     Some (pick_random loc parent l i [ lo, hi ])
-                | Some L.Local_port ->
+                | Some Local_port ->
                     random := true ;
-                    let v = pick_random ~kind:A.Error_name.NoPort
+                    let v = pick_random ~kind:Ast.Error_name.NoPort
                                         ~waiting:(parent.waiting parent l) loc parent l i
-                                        (parent.ports (L.N.to_string l.name)) in
+                                        (parent.ports (Lay.N.to_string l.name)) in
                     (match v with Int p -> parent.local_port loc l p | _ -> ()) ;
                     Some v
-                | Some L.Required | None ->
-                    error loc "%s needs a %s" (L.N.to_string l.name) l.fields.(i).name)
-        ) (L.key_fields l) in
+                | Some Required | None ->
+                    error loc "%s needs a %s" (Lay.N.to_string l.name) l.fields.(i).name)
+        ) (Lay.key_fields l) in
     let existing =
         if !random then None
         else Option.bind (siblings parent l) (fun s -> Siblings.find_option s key) in
@@ -305,7 +306,7 @@ let key_string n =
  * stack left out, so that a stream is that of its first message. Raises
  * [Failed]. *)
 let tell n hints =
-    let keys = L.key_fields n.layer in
+    let keys = Lay.key_fields n.layer in
     if List.length n.key < List.length keys then
         let key =
             List.map (fun i ->
@@ -315,12 +316,12 @@ let tell n hints =
                     let name = n.layer.fields.(i).name in
                     (match List.assoc_opt name hints with
                     | Some v -> i, v
-                    | None -> fail "%s needs a %s" (L.to_string n.layer) name)
+                    | None -> fail "%s needs a %s" (Lay.to_string n.layer) name)
             ) keys in
         Option.may (fun p ->
             Option.may (fun s ->
                 if Siblings.mem s key then
-                    fail "There is already a %s with %s" (L.to_string n.layer)
+                    fail "There is already a %s with %s" (Lay.to_string n.layer)
                         (key_string { n with key }) ;
                 Siblings.remove s n.key ;
                 Siblings.add s key n) (siblings p n.layer)) n.parent ;
@@ -328,8 +329,8 @@ let tell n hints =
 
 (* The fields of the node of [e] by name: its key, then the options: *)
 let fields_of e name =
-    match L.find_field e.node.layer name with
-    | None -> invalid_arg ("Crafty_tree: no field "^ name ^" in "^ L.N.to_string e.node.layer.name)
+    match Lay.find_field e.node.layer name with
+    | None -> invalid_arg ("Crafty_tree: no field "^ name ^" in "^ Lay.N.to_string e.node.layer.name)
     | Some i ->
         (match List.assoc_opt i e.node.key with
         | Some _ as v -> v
@@ -340,7 +341,7 @@ let fields_of e name =
 let assumed e hints =
     let values =
         Array.to_list e.node.layer.fields |>
-        List.filter_map (fun (f : L.field) ->
+        List.filter_map (fun (f : Lay.field) ->
             if f.read_in = [] then None else
             Some (f.name,
                   match fields_of e f.name with
@@ -350,8 +351,8 @@ let assumed e hints =
                       | Some v -> v
                       | None -> f.driven_default |? Void))) in
     e.node.layer,
-    L.{ values ; upper = Nothing ; payload = Bitstring.empty_bitstring ;
-        up_hints = [] ; bits = Bitstring.empty_bitstring }
+    Lay.{ values ; upper = Nothing ; payload = Bitstring.empty_bitstring ;
+          up_hints = [] ; bits = Bitstring.empty_bitstring }
 
 (** What the interface will emit of a packet sent: the whole frame, or what
  * a self-driven root frames. *)
@@ -392,7 +393,7 @@ let encode n stack =
         ) (Bitstring.empty_bitstring, []) written in
     prune_top stack ;
     match below with
-    | e :: _ when e.node.layer == L.ip || e.node.layer == L.ip6 ->
+    | e :: _ when e.node.layer == Lay.ip || e.node.layer == Lay.ip6 ->
         let fields = function
             | "id" -> Some (Int 0)
             | "tot_len" | "more_frags" | "frag_offset" | "frag_id" -> None
@@ -413,13 +414,13 @@ let send ?(mark=false) stack =
     (* The destination of what the self-driven layers [driven] send: that of
      * their IP layer, or else one that is manual and already in [bits]: *)
     let routed_dst hints bits driven =
-        match List.find_opt (fun e -> e.node.layer == L.ip || e.node.layer == L.ip6) driven,
+        match List.find_opt (fun e -> e.node.layer == Lay.ip || e.node.layer == Lay.ip6) driven,
               List.assoc_opt "proto" hints with
         | Some e, _ ->
             (match fields_of e "dst" with
-            | Some (Ip a) when L.follows_route a -> Some a
+            | Some (Ip a) when Lay.follows_route a -> Some a
             | _ -> None)
-        | None, Some (Int p) -> L.routed_dst p bits
+        | None, Some (Int p) -> Lay.routed_dst p bits
         | None, _ -> None in
     (* What the first self-driven layer is given, with the hints of the layer
      * above it, and the layers from it down: *)
@@ -428,14 +429,14 @@ let send ?(mark=false) stack =
             invalid_arg "Crafty_tree.send: empty stack"
         | e :: rest as driven ->
             (* Before any layer acts on it, as TCP would start a connection: *)
-            if e.mode = L.Driven then
+            if e.mode = Lay.Driven then
                 Option.may (fun route ->
-                    Option.may (L.check_route route) (routed_dst hints bits driven)
+                    Option.may (Lay.check_route route) (routed_dst hints bits driven)
                 ) e.node.router ;
             tell e.node hints ;
             count_sent e.node bits ;
             (match e.mode with
-            | L.Driven ->
+            | Lay.Driven ->
                 e.node.driven <- true ;
                 let emitted =
                     if mark then (
@@ -448,7 +449,7 @@ let send ?(mark=false) stack =
                 (try e.node.ops.send (fields_of e) hints bits
                 with exn -> Option.may forget emitted ; raise exn) ;
                 bits, hints, driven, emitted
-            | L.Manual ->
+            | Manual ->
                 let bits, hints = e.node.ops.pack (fields_of e) hints bits in
                 (match rest with
                 | [] ->
@@ -487,7 +488,7 @@ let send ?(mark=false) stack =
  * first self-driven one that keeps it, or all of them: *)
 let rec senders = function
     | [] -> []
-    | e :: _ when e.mode = L.Driven && e.node.ops.buffered -> [ e ]
+    | e :: _ when e.mode = Lay.Driven && e.node.ops.buffered -> [ e ]
     | e :: rest -> e :: senders rest
 
 (** How long what is sent down that stack now would wait before it is
@@ -505,7 +506,7 @@ let on_ready stack k =
  * once one knows, and the packet that told it so, if one did: *)
 let failure stack =
     List.fold_left (fun f e ->
-        if f <> None || e.mode <> L.Driven then f else
+        if f <> None || e.mode <> Lay.Driven then f else
         Option.map (fun why -> why, e.node.failed_by) (e.node.ops.failure ()))
         None (senders stack)
 
@@ -519,9 +520,9 @@ let failing_by n packet f =
 (** Whether a node of that stack still holds some of what it was sent, that
  * it may yet send: *)
 let holding stack =
-    List.exists (fun e -> e.mode = L.Driven && e.node.ops.holding ()) stack
+    List.exists (fun e -> e.mode = Lay.Driven && e.node.ops.holding ()) stack
 
-(** What [n] tells of its stream: {!L.stream_stats}, then the [stats] of its
+(** What [n] tells of its stream: {!Lay.stream_stats}, then the [stats] of its
  * layer, zero for those it does not tell yet. *)
 let stats n =
     let own = n.ops.stats () in
@@ -533,14 +534,14 @@ let stats n =
         match List.assoc_opt name own with
         | Some v -> v
         | None -> List.assoc_opt name counts |? zero typ
-    ) (L.stream_stats @ n.layer.stats)
+    ) (Lay.stream_stats @ n.layer.stats)
 
-(** What the streams of the stack of [n] tell (see {!L.stack_stats}). *)
+(** What the streams of the stack of [n] tell (see {!Lay.stack_stats}). *)
 let stack_stats n =
     let rec down acc n =
         let acc = stats n :: acc in
         match n.parent with None -> acc | Some p -> down acc p in
-    L.stack_stats (down [] n)
+    Lay.stack_stats (down [] n)
 
 (** The stack of [n], from the root up, with the keys of its nodes, as
  * [/IP(src=..., dst=..., proto=6)/TCP(src=..., dst=...)]. *)
@@ -548,7 +549,7 @@ let rec stream_name n =
     match n.parent with
     | None -> ""
     | Some p ->
-        stream_name p ^"/"^ L.to_string n.layer ^
+        stream_name p ^"/"^ Lay.to_string n.layer ^
         if n.key = [] then "" else "("^ key_string n ^")"
 
 (** The nodes of streams of the tree of [root], parents first. *)
@@ -565,7 +566,7 @@ let reset_streams root =
 
 (** {!stats} with the type of each value. *)
 let typed_stats n =
-    let types = L.stream_stats @ n.layer.stats in
+    let types = Lay.stream_stats @ n.layer.stats in
     List.map (fun (name, v) -> name, List.assoc name types, v) (stats n)
 
 (** What {!stats} tells of [n], after its name, as [name=value]s. *)
@@ -591,7 +592,7 @@ let register cases ~hold ~failed ~missed =
                 let p = { seq ; layers ; below ; hold ; matched ; failed ; missed } in
                 acquire node ;
                 (match layers with
-                | { pmode = L.Driven ; _ } :: _ -> node.driven <- true ; node.ops.drive ()
+                | { pmode = Lay.Driven ; _ } :: _ -> node.driven <- true ; node.ops.drive ()
                 | _ -> ()) ;
                 node.patterns <- node.patterns @ [ p ] ;
                 node, p) alternatives) cases in
@@ -606,68 +607,68 @@ let register cases ~hold ~failed ~missed =
 (** {2 Receiving} *)
 
 (* The key of the node of [l] that a packet with this layer belongs to: *)
-let incoming_key (l : L.layer) (u : L.unpacked) =
-    List.map (fun i -> i, List.assoc l.fields.(i).peer u.values) (L.key_fields l)
+let incoming_key (l : Lay.layer) (u : Lay.unpacked) =
+    List.map (fun i -> i, List.assoc l.fields.(i).peer u.values) (Lay.key_fields l)
 
 (* Of an ICMP error carried by [u], of layer [l], the key of the node of [l]
  * that sent the packet it quotes (a quote of [l] a few layers up): *)
-let quoted_key (l : L.layer) (u : L.unpacked) =
-    let rec up depth (below : L.layer) (u : L.unpacked) =
+let quoted_key (l : Lay.layer) (u : Lay.unpacked) =
+    let rec up depth (below : Lay.layer) (u : Lay.unpacked) =
         if depth = 0 then None else
-        List.find_map_opt (fun (ul : L.layer) ->
+        List.find_map_opt (fun (ul : Lay.layer) ->
             Option.bind (ul.unpack u.up_hints u.payload) (fun uu ->
                 if ul.quoted && ul.name = l.name then
                     List.fold_right (fun i key ->
                         Option.bind key (fun key ->
                             Option.map (fun v -> (i, v) :: key)
                                 (List.assoc_opt l.fields.(i).name uu.values))
-                    ) (L.key_fields l) (Some [])
-                else up (depth - 1) ul uu)) (L.on_top below u.upper) in
+                    ) (Lay.key_fields l) (Some [])
+                else up (depth - 1) ul uu)) (Lay.on_top below u.upper) in
     (* Such as IP, ICMP, TimeExceeded, then the quoted IP: *)
     up 3 l u
 
 (* The layers on top of [u], of layer [l], as far as [depth] of them decode,
  * the bottom first: *)
-let rec layers_on_top depth (l : L.layer) (u : L.unpacked) =
+let rec layers_on_top depth (l : Lay.layer) (u : Lay.unpacked) =
     if depth = 0 then [] else
-    match List.find_map_opt (fun (ul : L.layer) ->
+    match List.find_map_opt (fun (ul : Lay.layer) ->
               Option.map (fun uu -> ul, uu) (ul.unpack u.up_hints u.payload))
-              (L.on_top l u.upper) with
+              (Lay.on_top l u.upper) with
     | Some (ul, uu) -> (ul, uu) :: layers_on_top (depth - 1) ul uu
     | None -> []
 
 (* What an ICMP error says, as the constant of its code ("port unreachable"),
  * but for those about the MTU, which do not refuse anything: *)
-let icmp_error_reason (icmp : L.layer) (err : L.layer) (u : L.unpacked) =
+let icmp_error_reason (icmp : Lay.layer) (err : Lay.layer) (u : Lay.unpacked) =
     match List.assoc_opt "code" u.values with
     | Some (Int code) when
-            err.name <> L.N.PacketTooBig &&
-            not (icmp.name = L.N.ICMP && err.name = L.N.DestUnreachable &&
+            err.name <> Lay.N.PacketTooBig &&
+            not (icmp.name = Lay.N.ICMP && err.name = Lay.N.DestUnreachable &&
                  code = Icmp.Unreachable.fragmentation_needed) ->
-        Some (match List.find_opt (fun (_, c) -> c = A.Int code) err.constants with
+        Some (match List.find_opt (fun (_, c) -> c = Ast.Int code) err.constants with
               | Some (name, _) ->
                   String.lowercase_ascii (String.rchop ~n:(if String.ends_with name "6" then 1 else 0) name) |>
                   String.map (fun c -> if c = '_' then ' ' else c)
-              | None -> Printf.sprintf "%s code %d" (L.N.to_string err.name) code)
+              | None -> Printf.sprintf "%s code %d" (Lay.N.to_string err.name) code)
     | _ -> None
 
 (* Of an ICMP error carried by [u], about the stream of [n], below which are
  * the layers of [below] (the top first), tells the node on top of [n] that
  * sent the segment it quotes. Only TCP acts on it; a UDP stream the program
  * opened, as a connected socket, could fail its next write likewise. *)
-let tell_icmp_error n below (u : L.unpacked) =
+let tell_icmp_error n below (u : Lay.unpacked) =
     let above = layers_on_top 4 n.layer u in
     let packet = List.rev above @ ((n.layer, u) :: below) in
     match above with
-    | [ icmp, _ ; err, eu ; _ ; ql, qu ] when ql.L.quoted ->
-        (match icmp_error_reason icmp err eu, L.find ~below:n.layer ql.name,
+    | [ icmp, _ ; err, eu ; _ ; ql, qu ] when ql.Lay.quoted ->
+        (match icmp_error_reason icmp err eu, Lay.find ~below:n.layer ql.name,
                Hashtbl.find_option n.children ql.name with
         | Some why, Some l, Some s ->
             List.fold_right (fun i key ->
                 Option.bind key (fun key ->
                     Option.map (fun v -> (i, v) :: key)
                         (List.assoc_opt l.fields.(i).name qu.values))
-            ) (L.key_fields l) (Some []) |>
+            ) (Lay.key_fields l) (Some []) |>
             Option.may (fun key ->
                 Option.may (fun c ->
                     failing_by c packet (fun () -> c.ops.icmp_error qu why))
@@ -677,14 +678,14 @@ let tell_icmp_error n below (u : L.unpacked) =
 
 (** Whether a received layer, of that of [n], is of the stream of [n], or an
  * ICMP error about it: of the root, any is. *)
-let of_stream n (u : L.unpacked) =
+let of_stream n (u : Lay.unpacked) =
     let has key =
         List.for_all (fun (i, v) -> List.exists (fun (j, w) -> i = j && equal v w) key) n.key in
     List.for_all (fun (i, v) ->
         equal v (List.assoc n.layer.fields.(i).peer u.values)) n.key ||
     Option.map_default has false (quoted_key n.layer u)
 
-type event = Match of packet | Condition_error of A.Error_name.t option * A.location * string
+type event = Match of packet | Condition_error of Ast.Error_name.t option * Ast.location * string
 
 (* What a packet did to the patterns it met, the last first, each in its
  * round: at most one thing to each per round, alternatives counting as
@@ -725,11 +726,11 @@ let check w packet modes (pending : pending list) =
  * top of [packet], seen in [modes] but not self-driven, would have passed it
  * as a manual one: *)
 let note_missed w packet modes (pending : pending list) =
-    if not (List.mem L.Driven modes) then
+    if not (List.mem Lay.Driven modes) then
         List.iter (fun (p, pls) ->
             match pls with
-            | ({ pmode = L.Driven ; _ } as pl) :: _ when not (met w p) ->
-                if (try passes packet modes { pl with pmode = L.Manual }
+            | ({ pmode = Lay.Driven ; _ } as pl) :: _ when not (met w p) ->
+                if (try passes packet modes { pl with pmode = Lay.Manual }
                     with Runtime_error _ -> false) then p.missed pl.player
             | _ -> ()) pending
 
@@ -737,12 +738,12 @@ let note_missed w packet modes (pending : pending list) =
  * if it names one), those with nodes on [node], the node of its top if any,
  * or that a pending pattern goes on with: *)
 let wanted node packet pending =
-    let l, (u : L.unpacked) = List.hd packet in
-    let wants (ul : L.layer) =
+    let l, (u : Lay.unpacked) = List.hd packet in
+    let wants (ul : Lay.layer) =
         Option.is_some (Option.bind node (fun n -> siblings n ul)) ||
         List.exists (fun (_, pls) ->
             match pls with pl :: _ -> pl.player == ul | [] -> false) pending in
-    List.filter wants (L.on_top l u.upper)
+    List.filter wants (Lay.on_top l u.upper)
 
 (* Decodes each layer wanted on top of [packet], whose layers were [seen] in
  * these modes (the top first), and goes on along the nodes of that stream,
@@ -750,10 +751,10 @@ let wanted node packet pending =
 let rec up w node seen packet pending =
     List.iter (up_to w node seen packet pending) (wanted node packet pending)
 
-and up_to w node seen packet pending (ul : L.layer) =
+and up_to w node seen packet pending (ul : Lay.layer) =
     let u = snd (List.hd packet) in
     let streams = Option.bind node (fun n -> siblings n ul) in
-    match ul.unpack u.L.up_hints u.payload with
+    match ul.unpack u.Lay.up_hints u.payload with
     | None -> ()
     | Some uu ->
         let key = incoming_key ul uu in
@@ -762,7 +763,7 @@ and up_to w node seen packet pending (ul : L.layer) =
         let find s =
             let about = lazy (Option.bind (quoted_key ul uu) (Siblings.find_option s)) in
             (match uu.upper with
-            | L.Only (L.N.ICMP | L.N.ICMP6) ->
+            | Lay.Only (Lay.N.ICMP | Lay.N.ICMP6) ->
                 Option.may (fun c -> tell_icmp_error c packet uu) (Lazy.force about)
             | _ -> ()) ;
             match Siblings.find_option s key with
@@ -779,27 +780,27 @@ and up_to w node seen packet pending (ul : L.layer) =
                 List.filter (fun (p, pls) ->
                     not (met w p) &&
                     match pls with
-                    | pl :: _ -> (try passes above L.both pl with Runtime_error _ -> false)
+                    | pl :: _ -> (try passes above Lay.both pl with Runtime_error _ -> false)
                     | [] -> false) pending in
             match node, makers with
             | Some n, _ :: _ ->
                 let c = make_child n ul key in
                 List.iter (fun ((p : pattern), _) -> p.hold c) makers ;
                 if List.exists (fun (_, pls) ->
-                       match pls with pl :: _ -> pl.pmode = L.Driven | [] -> false) makers
+                       match pls with pl :: _ -> pl.pmode = Lay.Driven | [] -> false) makers
                 then (c.driven <- true ; c.ops.listen ()) ;
                 enter w c seen packet uu pending
             | _ ->
-                let pending = check w above L.both pending in
-                if not (List.is_empty pending) then up w None (L.both :: seen) above pending
+                let pending = check w above Lay.both pending in
+                if not (List.is_empty pending) then up w None (Lay.both :: seen) above pending
 
 (* What goes on from that layer of a packet, received by its node, with the
  * patterns registered there whose stack the layers below were seen as. It
  * counts what is seen self-driven, and not the start of a packet (a first
  * fragment): *)
 and enter w node seen packet u pending =
-    let modes = match seen with m :: _ -> m | [] -> L.both in
-    if List.mem L.Driven modes then (
+    let modes = match seen with m :: _ -> m | [] -> Lay.both in
+    if List.mem Lay.Driven modes then (
         node.received <- node.received + 1 ;
         node.received_bytes <- node.received_bytes + Tools.bytelength u.payload) ;
     let rec seen_as below seen =
@@ -841,27 +842,27 @@ and unpack_root root frame =
         match Pcap.captured frame with
         | Some ts -> Simulation.date_of sim (Simulation.of_wall_clock sim ts)
         | None -> Simulation.date_of sim (Simulation.now sim) in
-    L.root.unpack [] frame |>
-    Option.map (fun (u : L.unpacked) ->
+    Lay.root.unpack [] frame |>
+    Option.map (fun (u : Lay.unpacked) ->
         { u with values = ("ts", Time ts) :: List.remove_assoc "ts" u.values })
 
 (** [packet] with the layers on top of it, as decoded without any node: of
  * those that could be, the one named, else [Raw]. It always ends with a
  * terminal layer, the payload left undecoded (if any) in a [Raw]. *)
 let rec complete (packet : packet) =
-    let l, (u : L.unpacked) = List.hd packet in
+    let l, (u : Lay.unpacked) = List.hd packet in
     let names =
         match u.upper with
-        | L.Nothing -> []
-        | L.Only name -> [ name ]
-        | L.Any name | L.Partial name -> [ name ; L.N.Raw ] in
+        | Lay.Nothing -> []
+        | Only name -> [ name ]
+        | Any name | Partial name -> [ name ; Lay.N.Raw ] in
     let rec first = function
         | [] ->
-            (match L.raw.unpack [] u.payload with
-            | Some b when not l.terminal -> (L.raw, b) :: packet
+            (match Lay.raw.unpack [] u.payload with
+            | Some b when not l.terminal -> (Lay.raw, b) :: packet
             | _ -> packet)
         | name :: names ->
-            (match Option.bind (L.find ~below:l name) (fun ul ->
+            (match Option.bind (Lay.find ~below:l name) (fun ul ->
                        Option.map (fun uu -> ul, uu) (ul.unpack u.up_hints u.payload)) with
             | Some top -> complete (top :: packet)
             | None -> first names) in
@@ -869,9 +870,9 @@ let rec complete (packet : packet) =
 
 (** The layers of a frame, as decoded without any node. *)
 let decode frame : packet =
-    match L.root.unpack [] frame with
+    match Lay.root.unpack [] frame with
     | None -> []
-    | Some u -> complete [ L.root, u ]
+    | Some u -> complete [ Lay.root, u ]
 
 (** A frame the interface sent, as captured on its way out, with its [ts]:
  * decoded [along] the layers of the stack it was sent through, as far as
@@ -879,14 +880,14 @@ let decode frame : packet =
 let captured ?(along=[]) root frame : packet =
     let rec loop packet = function
         | [] -> complete packet
-        | (l : L.layer) :: rest ->
-            let _, (u : L.unpacked) = List.hd packet in
+        | (l : Lay.layer) :: rest ->
+            let _, (u : Lay.unpacked) = List.hd packet in
             (match l.unpack u.up_hints u.payload with
             | Some uu -> loop ((l, uu) :: packet) rest
             | None -> complete packet) in
     match unpack_root root frame with
     | None -> []
-    | Some u -> loop [ L.root, u ] along
+    | Some u -> loop [ Lay.root, u ] along
 
 (** The layers above the root that a packet sent down [stack] goes through,
  * the bottom first: *)
@@ -901,8 +902,8 @@ let matches root layers frame =
     let rec loop packet = function
         | [] -> true
         | pl :: rest ->
-            let l, (u : L.unpacked) = List.hd packet in
-            List.memq pl.player (L.on_top l u.upper) &&
+            let l, (u : Lay.unpacked) = List.hd packet in
+            List.memq pl.player (Lay.on_top l u.upper) &&
             match pl.player.unpack u.up_hints u.payload with
             | None -> false
             | Some uu -> on_top ((pl.player, uu) :: packet) pl rest
@@ -912,7 +913,7 @@ let matches root layers frame =
         | Some test -> (try test packet with Runtime_error _ -> false)) &&
         loop packet rest in
     match layers, unpack_root root frame with
-    | pl :: rest, Some u when pl.player == L.root -> on_top [ L.root, u ] pl rest
+    | pl :: rest, Some u when pl.player == Lay.root -> on_top [ Lay.root, u ] pl rest
     | _ -> false
 
 (** The local ports picked by default, those that IANA leaves to dynamic
@@ -933,8 +934,8 @@ let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?time_wait
         | Some (_ :: _ as ranges) -> Some ranges
         | _ -> None in
     let used = Hashtbl.create 7 in
-    let local_port loc (l : L.layer) p =
-        let name = L.N.to_string l.name in
+    let local_port loc (l : Lay.layer) p =
+        let name = Lay.N.to_string l.name in
         Hashtbl.replace used (String.uppercase_ascii name, p) () ;
         restricted name |>
         Option.may (fun ranges ->
@@ -947,8 +948,8 @@ let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?time_wait
     let rec path n =
         match n.parent with
         | None -> ""
-        | Some p -> path p ^"/"^ L.N.to_string n.layer.name ^"("^ key_string n ^")" in
-    let waiting parent (l : L.layer) =
+        | Some p -> path p ^"/"^ Lay.N.to_string n.layer.name ^"("^ key_string n ^")" in
+    let waiting parent (l : Lay.layer) =
         match Hashtbl.find_option freed (path parent, l.name) with
         | Some ports -> Hashtbl.keys ports |> List.of_enum
         | None -> [] in
@@ -959,7 +960,7 @@ let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?time_wait
             let now = Simulation.now power.sim in
             List.iter (fun (i, v) ->
                 match n.layer.fields.(i).pick, v with
-                | Some L.Local_port, Int port ->
+                | Some Lay.Local_port, Int port ->
                     let k = path p, n.layer.name in
                     let ports =
                         match Hashtbl.find_option freed k with
@@ -975,13 +976,13 @@ let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?time_wait
         | _ -> ()) ;
         on_removed n in
     let root =
-        { layer = L.root ; key = [] ; parent = None ;
+        { layer = Lay.root ; key = [] ; parent = None ;
           children = Hashtbl.create 10 ; users = 0 ; received = 0 ; failed_by = None ;
           received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
           closing = false ; driven = false ; eth ; ports ; local_port ; uses_port ;
           waiting ; removed ; router ;
-          ops = L.eth_node ?router { eth ; key = (fun _ -> None) ;
-                              below_key = (fun _ -> None) ; below = None } ;
+          ops = Lay.eth_node ?router { eth ; key = (fun _ -> None) ;
+                                below_key = (fun _ -> None) ; below = None } ;
           patterns = [] } in
     eth.iface.recv <- receive root ;
     root
@@ -990,16 +991,16 @@ let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?time_wait
 
 (** As [Layer(field=value, ...)/...], the bottom first. *)
 let print_packet oc (p : packet) =
-    List.print ~first:"" ~last:"" ~sep:"/" (fun oc ((l : L.layer), (u : L.unpacked)) ->
-        String.print oc (L.to_string l) ;
+    List.print ~first:"" ~last:"" ~sep:"/" (fun oc ((l : Lay.layer), (u : Lay.unpacked)) ->
+        String.print oc (Lay.to_string l) ;
         (* But the virtual length, which no capture tool prints: *)
         let virtual_length n =
-            n = L.length_field.name && Array.exists ((==) L.length_field) l.fields in
+            n = Lay.length_field.name && Array.exists ((==) Lay.length_field) l.fields in
         List.print ~first:"(" ~last:")" ~sep:", " (fun oc (n, v) ->
             let typ =
-                match L.find_field l n with
+                match Lay.find_field l n with
                 | Some i -> l.fields.(i).typ
-                | None -> A.Type.Void in
+                | None -> Ast.Type.Void in
             Printf.fprintf oc "%s=%s" n (to_string typ v)) oc
             (List.filter (fun (n, _) -> not (virtual_length n)) u.values)
     ) oc (List.rev p)
@@ -1008,14 +1009,14 @@ let rec size n = List.fold_left (fun s c -> s + size c) 1 (children n)
 
 (** As [Layer(key)*users#received{children}], children by layer then key. *)
 let rec print oc n =
-    String.print oc (L.to_string n.layer) ;
+    String.print oc (Lay.to_string n.layer) ;
     if n.key <> [] then Printf.fprintf oc "(%s)" (key_string n) ;
     if n.users > 0 then Printf.fprintf oc "*%d" n.users ;
     if n.received > 0 then Printf.fprintf oc "#%d" n.received ;
     match children n with
     | [] -> ()
     | cs ->
-        List.map (fun c -> (L.to_string c.layer, key_string c), c) cs |>
+        List.map (fun c -> (Lay.to_string c.layer, key_string c), c) cs |>
         List.sort (fun (a, _) (b, _) -> compare a b) |>
         List.map snd |>
         List.print ~first:"{" ~last:"}" ~sep:", " print oc
@@ -1029,23 +1030,23 @@ let to_string n = IO.to_string print n
           ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
           ~my_addresses:[ Eth.State.make_my_ip_address
                               (Ip.Addr.of_string "10.0.0.1") ] ()
-  let loc = Crafty_ast.{ line = 1 ; column = 1 }
-  let ip_to s = [ 1, Crafty_value.Ip (Ip.Addr.of_string s) ]
-  let port n = Crafty_value.Int n
+  let loc = Ast.{ line = 1 ; column = 1 }
+  let ip_to s = [ 1, Val.Ip (Ip.Addr.of_string s) ]
+  let port n = Val.Int n
 *)
 (*$R child
   let root = make_root eth in
-  let ip = child loc root Crafty_layers.ip (ip_to "1.2.3.4") in
+  let ip = child loc root Lay.ip (ip_to "1.2.3.4") in
   acquire ip ;
-  assert_bool "found again" (child loc root Crafty_layers.ip (ip_to "1.2.3.4") == ip) ;
-  let udp = child loc ip Crafty_layers.udp [ 1, port 53 ] in
+  assert_bool "found again" (child loc root Lay.ip (ip_to "1.2.3.4") == ip) ;
+  let udp = child loc ip Lay.udp [ 1, port 53 ] in
   acquire udp ;
-  let udp' = child loc ip Crafty_layers.udp [ 1, port 53 ] in
+  let udp' = child loc ip Lay.udp [ 1, port 53 ] in
   acquire udp' ;
   assert_bool "a new source port for each" (udp != udp') ;
   assert_bool "in the range" (match List.assoc 0 udp.key with
-      | Crafty_value.Int p -> p >= 49152 && p <= 65535 | _ -> false) ;
-  let fixed = child loc ip Crafty_layers.udp [ 0, port 1 ; 1, port 53 ] in
+      | Val.Int p -> p >= 49152 && p <= 65535 | _ -> false) ;
+  let fixed = child loc ip Lay.udp [ 0, port 1 ; 1, port 53 ] in
   acquire fixed ;
   assert_equal ~printer:identity
       "Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}"
@@ -1058,33 +1059,33 @@ let to_string n = IO.to_string print n
 *)
 (*$R child
   let root = make_root eth in
-  let ip = child loc root Crafty_layers.ip (ip_to "1.2.3.4") in
-  let icmp = child loc ip Crafty_layers.icmp [] in
-  let echo = child loc icmp Crafty_layers.echo [] in
-  assert_bool "a new id for each" (child loc icmp Crafty_layers.echo [] != echo) ;
-  let given = child loc icmp Crafty_layers.echo [ 0, port 7 ] in
-  assert_bool "a given id" (child loc icmp Crafty_layers.echo [ 0, port 7 ] == given) ;
-  let request = Option.get (Crafty_layers.find ~below:Crafty_layers.echo Crafty_ast.Layer_name.Request) in
+  let ip = child loc root Lay.ip (ip_to "1.2.3.4") in
+  let icmp = child loc ip Lay.icmp [] in
+  let echo = child loc icmp Lay.echo [] in
+  assert_bool "a new id for each" (child loc icmp Lay.echo [] != echo) ;
+  let given = child loc icmp Lay.echo [ 0, port 7 ] in
+  assert_bool "a given id" (child loc icmp Lay.echo [ 0, port 7 ] == given) ;
+  let request = Option.get (Lay.find ~below:Lay.echo Ast.Layer_name.Request) in
   assert_bool "one message node" (child loc echo request [] == child loc echo request []) ;
-  let l = Crafty_layers.layer Crafty_ast.Layer_name.Echo ~above:[ Crafty_layers.ip ]
-      [ Crafty_layers.field "id" Crafty_ast.Type.Int ~discriminant:true
-          ~pick:(Crafty_layers.Random_in (1, 2)) ] in
+  let l = Lay.layer Ast.Layer_name.Echo ~above:[ Lay.ip ]
+      [ Lay.field "id" Ast.Type.Int ~discriminant:true
+          ~pick:(Lay.Random_in (1, 2)) ] in
   ignore (child loc ip l []) ; ignore (child loc ip l []) ;
-  assert_raises (Crafty_value.Runtime_error (None, loc, "No id left for another Echo"))
+  assert_raises (Val.Runtime_error (None, loc, "No id left for another Echo"))
       (fun () -> child loc ip l [])
 *)
 (* Local ports are picked from the ranges of the tree, across them all: *)
 (*$R child
   let root = make_root ~ports:[ "UDP", [ 10, 11 ; 20, 20 ] ] eth in
-  let ip = child loc root Crafty_layers.ip (ip_to "1.2.3.4") in
-  let src n = match List.assoc_opt 0 n.key with Some (Crafty_value.Int p) -> p | _ -> -1 in
-  let udp () = src (child loc ip Crafty_layers.udp [ 1, port 53 ]) in
+  let ip = child loc root Lay.ip (ip_to "1.2.3.4") in
+  let src n = match List.assoc_opt 0 n.key with Some (Val.Int p) -> p | _ -> -1 in
+  let udp () = src (child loc ip Lay.udp [ 1, port 53 ]) in
   let picked = List.sort Int.compare [ udp () ; udp () ; udp () ] in
   assert_equal ~printer:dump [ 10 ; 11 ; 20 ] picked ;
-  assert_raises (Crafty_value.Runtime_error (Some Crafty_ast.Error_name.NoPort, loc,
-                                             "No src left for another UDP"))
+  assert_raises (Val.Runtime_error (Some Ast.Error_name.NoPort, loc,
+                                    "No src left for another UDP"))
       (fun () -> udp ()) ;
-  let tcp = child loc ip Crafty_layers.tcp [ 1, port 80 ] in
+  let tcp = child loc ip Lay.tcp [ 1, port 80 ] in
   assert_bool "other layers keep the dynamic ports" (src tcp >= 49152)
 *)
 (* A local port that went away is not picked again towards the same peer
@@ -1097,15 +1098,15 @@ let to_string n = IO.to_string print n
           ~my_addresses:[ Eth.State.make_my_ip_address
                               (Ip.Addr.of_string "10.0.0.1") ] () in
   let root = make_root ~ports:[ "UDP", [ 10, 11 ] ] ~time_wait:(Clock.Interval.sec 1.) eth in
-  let ip_of s = let ip = child loc root Crafty_layers.ip (ip_to s) in acquire ip ; ip in
+  let ip_of s = let ip = child loc root Lay.ip (ip_to s) in acquire ip ; ip in
   let ip = ip_of "1.2.3.4" in
-  let udp ip = let u = child loc ip Crafty_layers.udp [ 1, port 53 ] in acquire u ; u in
-  let src n = match List.assoc_opt 0 n.key with Some (Crafty_value.Int p) -> p | _ -> -1 in
+  let udp ip = let u = child loc ip Lay.udp [ 1, port 53 ] in acquire u ; u in
+  let src n = match List.assoc_opt 0 n.key with Some (Val.Int p) -> p | _ -> -1 in
   let a = udp ip in
   let b = udp ip in
   release a ;
-  assert_raises (Crafty_value.Runtime_error (Some Crafty_ast.Error_name.NoPort, loc,
-                                             "No src left for another UDP (1 in time wait)"))
+  assert_raises (Val.Runtime_error (Some Ast.Error_name.NoPort, loc,
+                                    "No src left for another UDP (1 in time wait)"))
       (fun () -> udp ip) ;
   ignore (udp (ip_of "5.6.7.8")) ;
   Simulation.delay sim.root.power (Clock.Interval.sec 2.) ignore () ;
@@ -1118,10 +1119,10 @@ let to_string n = IO.to_string print n
   let foreign = ref [] in
   let root = make_root ~ports:[ "UDP", [ 10, 11 ] ] eth
       ~on_foreign_port:(fun _ _ p _ -> foreign := p :: !foreign) in
-  let ip = child loc root Crafty_layers.ip (ip_to "1.2.3.4") in
-  let picked = child loc ip Crafty_layers.udp [ 1, port 53 ] in
-  let src = match List.assoc_opt 0 picked.key with Some (Crafty_value.Int p) -> p | _ -> -1 in
-  ignore (child loc ip Crafty_layers.udp [ 0, port 5000 ; 1, port 53 ]) ;
+  let ip = child loc root Lay.ip (ip_to "1.2.3.4") in
+  let picked = child loc ip Lay.udp [ 1, port 53 ] in
+  let src = match List.assoc_opt 0 picked.key with Some (Val.Int p) -> p | _ -> -1 in
+  ignore (child loc ip Lay.udp [ 0, port 5000 ; 1, port 53 ]) ;
   assert_bool "picked" (root.uses_port "udp" src) ;
   assert_bool "given" (root.uses_port "UDP" 5000) ;
   assert_bool "not used" (not (root.uses_port "UDP" (21 - src))) ;
@@ -1132,14 +1133,14 @@ let to_string n = IO.to_string print n
  * sent is told back: *)
 (*$R send
   let root = make_root eth in
-  let raw = child loc root Crafty_layers.raw [] in
+  let raw = child loc root Lay.raw [] in
   assert_equal ~printer:identity "Eth{Raw}" (to_string root) ;
   let sent, emitted =
-      send ~mark:true [ { node = raw ; mode = Crafty_layers.Manual ;
-               options = [ 0, Crafty_value.bytes_of_string "hi" ] } ;
-             { node = root ; mode = Crafty_layers.Manual ;
-               options = [ 1, Crafty_value.Mac Eth.Addr.broadcast ;
-                           2, Crafty_value.Int 0x88b5 ] } ] in
+      send ~mark:true [ { node = raw ; mode = Lay.Manual ;
+               options = [ 0, Val.bytes_of_string "hi" ] } ;
+             { node = root ; mode = Lay.Manual ;
+               options = [ 1, Val.Mac Eth.Addr.broadcast ;
+                           2, Val.Int 0x88b5 ] } ] in
   assert_equal ~printer:identity "Eth" (to_string root) ;
   assert_bool "nothing decoded yet" (not (Lazy.is_val sent)) ;
   assert_equal ~printer:identity

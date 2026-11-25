@@ -39,14 +39,26 @@
 *)
 open Batteries
 module EthSpeed = SimTypes.EthSpeed
+module Ast = Crafty_ast
+module Itp = Crafty_interp
+module Prs = Crafty_parser
+module Typ = Crafty_typing
 
 type error =
     (* The host is as it was, nothing or all of it undone: *)
     | Setup of string
     (* The program would send what its permissions deny: *)
-    | Denied of Crafty_parser.error list
+    | Denied of Prs.error list
     (* Changing the host failed, and what was changed is undone: *)
     | Configure of string
+
+let string_of_error = function
+    | Setup e ->
+        "Error during setup: "^ e
+    | Denied es ->
+        Printf.sprintf2 "Denied: %a" (List.print Prs.print_error) es
+    | Configure s ->
+        "Error during configuration: "^ s
 
 (** Privileged (setuid root, or given capabilities with setcap), a process
  * runs the commands that configure the host with an environment of its own,
@@ -66,7 +78,7 @@ let secure_env () =
         Unix.putenv "PATH" "/usr/sbin:/usr/bin:/sbin:/bin" ;
         Array.iter (fun var ->
             match String.split var ~by:"=" with
-            | name, v -> Unix.putenv (Crafty_interp.user_env_prefix ^ name) v
+            | name, v -> Unix.putenv (Itp.user_env_prefix ^ name) v
             | exception Not_found -> ()) user_env ;
         Ok ()
     with Failure e -> Error e
@@ -111,7 +123,7 @@ let suspicious n =
     ) (Crafty_tree.stats n)
 
 type warning =
-    | Program of Crafty_parser.error
+    | Program of Prs.error
     (* No route to that address, and why: *)
     | Unrouted of Ip.Addr.t * string
     (* The host reset that TCP port, or refused that UDP port, which the
@@ -143,7 +155,7 @@ type counters =
       wire_pkts : int ; wire_bytes : int }
 
 type outcome =
-    { status : Crafty_interp.status ;
+    { status : Itp.status ;
       (* The limit of the budget that stopped the program: *)
       limit : Policer.limit option ;
       (* The first frame sent that the permissions deny, which stopped the
@@ -163,7 +175,7 @@ type control =
       now : unit -> Clock.Time.t ;
       (* Whether a frame, sent or received, matches a filter; from the
        * callbacks only: *)
-      matches : Crafty_interp.filter -> Bitstring.bitstring -> bool ;
+      matches : Itp.filter -> Bitstring.bitstring -> bool ;
       (* As of now: *)
       counters : unit -> counters }
 
@@ -249,21 +261,21 @@ end
  * why it cannot run with them: the budget and ports that both allow, and the
  * permissions of {!Crafty_typing.resolve_permissions}, where the rules of
  * [extra_limits] go first and its flags win. *)
-let effective_limits ?(extra_limits=Crafty_typing.no_limits) (program : Crafty_interp.program) =
-    Crafty_typing.combine ~program:program.limits ~cli:extra_limits |>
-    Result.map (fun (l : Crafty_typing.limits) ->
+let effective_limits ?(extra_limits=Typ.no_limits) (program : Itp.program) =
+    Typ.combine ~program:program.limits ~cli:extra_limits |>
+    Result.map (fun (l : Typ.limits) ->
         { l with permissions =
-            Crafty_typing.resolve_permissions ~program:program.limits.permissions
-                                              ~cli:extra_limits.permissions })
+            Typ.resolve_permissions ~program:program.limits.permissions
+                                    ~cli:extra_limits.permissions })
 
 (** The interface through which the kernel routes the destinations [program]
  * sends to that are literals, as {!Crafty_interp.Partial.block} makes them,
  * if there are any; or which go through which interface, if not all through
  * the same. Link-local addresses, and those the kernel does not route away,
  * are not counted. *)
-let route_ifname (program : Crafty_interp.program) =
+let route_ifname (program : Itp.program) =
     let routes =
-        Crafty_typing.destinations program.body |>
+        Typ.destinations program.body |>
         List.filter_map (fun dst ->
             if Ip.Addr.is_v6 dst && Ip.Addr.is_link_local dst then None else
             match Kernel_route.lookup dst with
@@ -328,7 +340,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
         ?(on_warning=fun _ _ -> ()) ?(on_packet=fun _ _ _ -> ())
         ?(on_stream=fun _ _ _ -> ())
-        (program : Crafty_interp.program) =
+        (program : Itp.program) =
     let ( let* ) = Stdlib.Result.bind in
     let refuse cond e = if cond then Error (Setup e) else Ok () in
     let* limits =
@@ -336,7 +348,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
                          (effective_limits ?extra_limits program) in
     let ifname = iface.ifname and host = iface.host in
     let ports =
-        Option.map_default (fun (p : Crafty_typing.ports) ->
+        Option.map_default (fun (p : Typ.ports) ->
             let ranges proto = List.map (fun (lo, hi) -> Host_config.{ proto ; lo ; hi }) in
             ranges Host_config.Tcp p.tcp @ ranges Host_config.Udp p.udp) [] limits.ports in
     let permissions = limits.permissions in
@@ -345,7 +357,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     (* Unless allowed, nothing received is sent: *)
     let* () =
         if flag permissions.exfiltration then Ok () else
-        match Crafty_typing.exfiltrations ?public_env:permissions.public_env program.body with
+        match Typ.exfiltrations ?public_env:permissions.public_env program.body with
         | [] -> Ok ()
         | es -> Error (Denied es) in
     let* kernel_routing =
@@ -397,9 +409,9 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         | None -> Ok host.addresses in
     let rules =
         let own = List.map (fun c -> fst (c : Ip.Cidr.t :> Ip.Addr.t * int)) addresses in
-        Crafty_typing.address_rules ~own % Option.default [] in
+        Typ.address_rules ~own % Option.default [] in
     let* () =
-        match Crafty_typing.denied_literals ~local:(Some (rules permissions.local_ips))
+        match Typ.denied_literals ~local:(Some (rules permissions.local_ips))
                   ~remote:(Some (rules permissions.remote_ips))
                   ~mac:(if flag permissions.mac_spoofing then None else Some host.mac)
                   program.body with
@@ -414,7 +426,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         info (Printf.sprintf "Routing: %s." (if kernel_routing then "the kernel's" else "manual")) ;
         info (Printf.sprintf "Budget: %s." (if limits.budget = [] then "none" else
             String.concat ", " (List.map (fun (n, l) ->
-                n ^" "^ Crafty_value.(to_string (Crafty_typing.type_of_literal l) (of_literal l)))
+                n ^" "^ Crafty_value.(to_string (Typ.type_of_literal l) (of_literal l)))
                 limits.budget))) ;
         info (Printf.sprintf "Ports: %s%s." (if ports = [] then "any" else
             String.concat ", " (List.map (fun (r : Host_config.port_range) ->
@@ -493,11 +505,11 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     let sent = ref 0 and pkts_out = ref 0 and pkts_in = ref 0
     and bytes_out = ref 0 and bytes_in = ref 0
     and wire_pkts = ref 0 and wire_bytes = ref 0 in
-    let status = ref Crafty_interp.Running and limit = ref None in
+    let status = ref Itp.Running and limit = ref None in
     (* The handle, which the program is given no event before [run]
      * returns: *)
     let handle = ref None in
-    let idle () = Option.map_default (fun h -> h.Crafty_interp.idle ()) true !handle in
+    let idle () = Option.map_default (fun h -> h.Itp.idle ()) true !handle in
     (* Whether to be done with lingering, and whether the streams still open
      * were reset, which lifts the limits of the policer for the RSTs to go
      * out: *)
@@ -505,7 +517,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     let reset_streams () =
         reset := true ;
         !lift_limits () ;
-        Option.may (fun h -> h.Crafty_interp.reset_streams ()) !handle in
+        Option.may (fun h -> h.Itp.reset_streams ()) !handle in
     (* The interface given goes first: the kernel takes for on-link what has
      * no route through it. Otherwise it is free to tell of no route, or of
      * another interface. Link-local addresses mean nothing without one: *)
@@ -518,7 +530,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
                   ~on_unrouted:(fun dst reason -> warn (Unrouted (dst, reason)))
                   ~lookup:(fun dst -> Kernel_route.lookup ~oif:(oif_of dst) dst)) in
     let dev, h =
-        Crafty_interp.run ~parent:sim.root ~mac:host.mac ~addresses
+        Itp.run ~parent:sim.root ~mac:host.mac ~addresses
             ~speed ~full_duplex ~mtu ?router
             ~gateways:(List.map (fun gw -> Eth.Gateway.Ip gw) host.gateways)
             (* The kernel answers for its own address: *)
@@ -558,7 +570,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
                             if idle () || !reset then stop ()
                             else (reset_streams () ; check pkts' deadline))
                         else check pkts' deadline) () in
-                if s = Crafty_interp.Stopped then reset_streams () ;
+                if s = Itp.Stopped then reset_streams () ;
                 check (!pkts_out + !pkts_in) (secs () +. linger))
             program in
     handle := Some h ;
@@ -572,13 +584,13 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             while not !finished && not (h.over_ram ()) do Thread.delay 1. done ;
             if not !finished then Simulation.asap sim.root.power h.stop ()) ()) in
     let budget_int n =
-        match List.assoc_opt n limits.budget with Some (Crafty_ast.Int i) -> Some i | _ -> None
+        match List.assoc_opt n limits.budget with Some (Ast.Int i) -> Some i | _ -> None
     and budget_float n =
-        match List.assoc_opt n limits.budget with Some (Crafty_ast.Float x) -> Some x | _ -> None in
+        match List.assoc_opt n limits.budget with Some (Ast.Float x) -> Some x | _ -> None in
     let policer =
         Policer.make ~parent:sim.root
             ?max_duration:(match List.assoc_opt "max_duration" limits.budget with
-                           | Some (Crafty_ast.Interval d) -> Some d | _ -> None)
+                           | Some (Ast.Interval d) -> Some d | _ -> None)
             ?max_packets:(budget_int "max_packets")
             ?max_volume:(budget_int "max_bytes")
             ?max_packet_rate:(budget_float "max_packets_per_secs")
@@ -604,7 +616,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             ~on_drop:(fun dir cause bits ->
                 match dir with
                 | Firewall.In -> incr denied_in
-                | Firewall.Out ->
+                | Out ->
                     incr denied_out ;
                     if !denied = None then (
                         denied := Some (cause, bits) ;

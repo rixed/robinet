@@ -488,7 +488,7 @@ struct
     (*$R make_ack
         let ip = Ip.Addr.of_dotted_string in
         let options =
-            Dhcp.Option.[
+            Option.[
                 subnet_mask, Ip.Addr.to_bitstring (ip "255.255.255.0") ;
                 domain_name_servers, Ip.Addr.to_bitstring (ip "192.168.0.53") ;
                 domain_name, bitstring_of_string "example.com" ] in

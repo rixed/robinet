@@ -746,7 +746,7 @@ module Cidr = struct
         Addr.of_bitstring
 
     (*$= to_netmask
-      "255.255.255.0" (Ip.Addr.to_string (to_netmask (of_string "192.168.0.0/24")))
+      "255.255.255.0" (Addr.to_string (to_netmask (of_string "192.168.0.0/24")))
      *)
 
     (* Returns the smallest CIDR encompassing all passed IP addresses *)
@@ -1402,7 +1402,7 @@ module Pdu = struct
                 Ok (ip, src_port, dst_port)))
     (*$= unpack_with_ports & ~printer:dump
         (Ok (42, 12)) ( \
-            pack (make Proto.udp (Ip.Addr.random ()) (Ip.Addr.random ()) \
+            pack (make Proto.udp (Addr.random ()) (Addr.random ()) \
                         (Udp.Pdu.make ~src_port:(Udp.Port.o 42) \
                                       ~dst_port:(Udp.Port.o 12) \
                                       (randbs 10) |> \
