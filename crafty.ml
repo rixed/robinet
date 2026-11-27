@@ -86,7 +86,7 @@ let () = Out_channel.set_buffered Stdlib.stdout false
 let default_max_duration = Clock.Interval.min 10.
 
 let () =
-    let ifname = ref "" and own_ip = ref None and ports = ref []
+    let ifname = ref "" and own_ip = ref None and ports = ref [] and pools = ref []
     and routing = ref None
     and fw = ref false and print_packets = ref false
     and print_only = ref None and stats = ref false and cleanup = ref false
@@ -126,8 +126,8 @@ let () =
                 with Widget.Bad_value e -> die "%s" e in
             r := Some ((!r |? []) @ [ v, c ]))
     and some_bool r = Arg.Bool (fun b -> r := Some b) in
-    let port_range proto = Arg.String (fun s ->
-        try ports := !ports @ [ Host_config.port_range_of_string proto s ]
+    let port_range ?(into=ports) proto = Arg.String (fun s ->
+        try into := !into @ [ Host_config.port_range_of_string proto s ]
         with Invalid_argument e -> die "%s" e) in
     (* The options, which [--help] lists: *)
     let specs = ref [] in
@@ -178,7 +178,11 @@ let () =
             "LO[-HI] TCP ports the program uses (repeatable)" ;
         "--udp", port_range Host_config.Udp,
             "LO[-HI] UDP ports the program uses (repeatable)" ;
-        "--fw", Arg.Set fw, " keep the kernel off the ports of --tcp and --udp" ;
+        "--tcp-ephemeral", port_range ~into:pools Host_config.Tcp,
+            "LO[-HI] TCP ports to pick source ports from (repeatable)" ;
+        "--udp-ephemeral", port_range ~into:pools Host_config.Udp,
+            "LO[-HI] UDP ports to pick source ports from (repeatable)" ;
+        "--fw", Arg.Set fw, " keep the kernel off the program's ports" ;
         "--speed",
             Arg.Symbol (Array.to_list EthSpeed.names, fun s ->
                 speed := Array.find_opt (fun x -> EthSpeed.to_string x = s) EthSpeed.all),
@@ -300,21 +304,25 @@ let () =
             if List.mem_assoc "max_duration" budget ||
                List.mem_assoc "max_duration" program.limits.budget then budget
             else ("max_duration", Ast.Interval default_max_duration) :: budget in
-        let ranges proto =
+        let ranges rs proto =
             List.filter_map (fun (r : Host_config.port_range) ->
-                if r.proto = proto then Some (r.lo, r.hi) else None) !ports |>
+                if r.proto = proto then Some (r.lo, r.hi) else None) rs |>
             Typ.merge_ranges in
+        let pool proto =
+            match ranges !pools proto with [] -> None | r -> Some r in
         Typ.{
             budget ;
-            ports = if !ports = [] then None
-                    else Some { tcp = ranges Host_config.Tcp ;
-                                udp = ranges Host_config.Udp } ;
+            ports = { no_ports with
+                      fixed = if !ports = [] then None
+                              else Some { tcp = ranges !ports Host_config.Tcp ;
+                                          udp = ranges !ports Host_config.Udp } ;
+                      pool = { tcp = pool Host_config.Tcp ; udp = pool Host_config.Udp } } ;
             permissions = cli_permissions } in
     (* What both allow, which the run computes as well: *)
     let limits =
         match Run.effective_limits ~extra_limits program with
         | Ok l -> l
-        | Error e -> die "%s: %s its PORTS and --tcp/--udp." prog_name e in
+        | Error e -> die "%s: its PORTS and the command line: %s." prog_name e in
     let format = !format in
     (* What crafty tells of how it goes, on stderr unless as text, out of the
      * way of the records: *)
@@ -375,7 +383,7 @@ let () =
         match if routed = None then Host_config.default_ifname () else routed with
         | Some i -> ifname := i
         | None -> die "No default route: give the interface (-i).") ;
-    if !fw && limits.ports = None then die "--fw needs ports (--tcp, --udp, or PORTS)." ;
+    if !fw && limits.ports.fixed = None then die "--fw needs ports (--tcp, --udp, or PORTS)." ;
     if !fw && !own_ip <> None then
         die "--fw and --ip do not go together: an address of the program's \
              own shares no port with the kernel." ;

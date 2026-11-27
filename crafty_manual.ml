@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 5765f85b21e82f10ebebeda4aad641f0) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 159d9abdebbbb3888223586dce6f7eb0) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -45,9 +45,8 @@ the same line, by a block of further instructions. A few layers can be both
 a block or a layer. So `X/Y { Z }` is not `X/Y` then `{ Z }` on the next line:
 that sends `X/Y` (or fails, if `Y` cannot end a message), then runs `Z` apart.
 
-The layers of a stack are streams: `UDP` picks its source port once (from
-`--udp`), and every message sent and every pattern on top of it belong to that
-stream.
+The layers of a stack are streams: `UDP` picks its source port once, and every
+message sent and every pattern on top of it belong to that stream.
 
 ### Errors
 
@@ -186,12 +185,13 @@ Options:
     default route). Crafty needs root, or `setcap cap_net_raw,cap_net_admin=ep`.
 -   `--routing kernel|manual`: `kernel` (default) uses kernel routes. `manual`
     takes gateway from the interface and then does ARP etc.
--   `--tcp LO-HI`, `--udp LO-HI` (repeatable): the ranges to pick source ports
-    from (see also [Budget, ports and
-    permissions](#budget-ports-and-permissions)).
+-   `--tcp LO-HI`, `--udp LO-HI` (repeatable): the fixed ports.
+-   `--tcp-ephemeral LO-HI`, `--udp-ephemeral LO-HI` (repeatable): the pool to
+    pick source ports from. See also [Budget, ports and
+    permissions](#budget-ports-and-permissions).
 -   `--fw`: crafty shares the interface's address with the host, whose kernel
     would answer what crafty receives with TCP resets and ICMP port
-    unreachables. `--fw` keeps the kernel off the ports of `--tcp` and `--udp`.
+    unreachables. `--fw` keeps the kernel off the fixed and ephemeral ports.
 -   `--ip ADDR`: an address of crafty's own instead, on the interface's network,
     for which crafty answers ARP. Then `--fw` is not needed.
 -   `-p [/PATTERN]` (or `--print-packets`): prints the packets à la tcpdump.
@@ -315,13 +315,16 @@ with the constructors of all, which `case` tells apart:
 A program may declare them, once each, at its top level, with literals only:
 
     BUDGET = {max_duration: 30s, max_syns: 30}
-    PORTS = {tcp: [[40000, 40100]], udp: [[5000, 5000]]}
+    PORTS = {tcp: {fixed: [80, [8000, 8010]], ephemeral: 20}, udp: {ephemeral: 4}}
     PERMISSIONS = {local_ips: [Accept(10.20.4.1)],  # spoofs 10.20.4.1
                    remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
 
 -   `BUDGET`'s fields are the budget options of crafty, named alike.
 -   `max_ram`, in bytes.
--   `PORTS` has ranges `[first, last]` by protocol; default to no port.
+-   `PORTS` has, by protocol, `fixed` ports and ranges `[first, last]`, used by
+    number (default: none), and how many `ephemeral` ones to pick source ports
+    from: a pool from `--tcp-ephemeral`/`--udp-ephemeral`, or else a random
+    block of 49152-65535. Without it, source ports come from `fixed`.
 -   crafty runs with what both the program and the command line allow.
 -   `PERMISSIONS`:
     -   `local_ips`, `remote_ips`: rules `Accept(x)` or `Deny(x)`, `x` being a
@@ -578,7 +581,7 @@ Self-driven IP6 fragments to the MTU and reassembles, as `IP`.
 
 #### `TCP`
 
--   `src` (key): int; set M, S; read M, S. Default: a port of `--tcp`.
+-   `src` (key): int; set M, S; read M, S. Default: an ephemeral port.
 -   `dst` (key): int; set M, S; read M, S. Required.
 -   `seq_num`: int; set M; read M.
 -   `ack_num`: int; set M; read M.
@@ -608,7 +611,7 @@ flags of the stream's connection when not given, and update them.
 
 #### `UDP`
 
--   `src` (key): int; set M; read M. Default: a port of `--udp`.
+-   `src` (key): int; set M; read M. Default: an ephemeral port.
 -   `dst` (key): int; set M; read M. Required, unless told by the layer on top.
 -   `length`: int; set M; read M. Default: computed.
 -   `checksum`: int; set M; read M. Default: computed, as when 0, but in a

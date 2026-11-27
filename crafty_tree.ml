@@ -921,19 +921,17 @@ let matches root layers frame =
 let dynamic_ports = [ 49152, 65535 ]
 
 (** The tree of an interface, which then receives through it. Local ports
- * that a stack leaves out are picked from [ports] for each layer that has
- * some (inclusive and disjoint ranges, by layer name), and else from
- * {!dynamic_ports}; those it gives out of its layer's [ports] are told to
+ * that a stack leaves out are picked from [pools] for each layer that has
+ * one, else from [ports] for each layer that has some, and else from
+ * {!dynamic_ports} (inclusive and disjoint ranges, by layer name); those
+ * it gives out of its layer's [ports] are told to
  * [on_foreign_port], with these ranges, which may raise to refuse them. The
  * root tells which were used.
  * A local port is not picked again for [time_wait] (default: 0) after
  * its stream went away, towards the same peer. *)
-let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?(time_wait=Clock.Interval.zero)
+let make_root ?(ports=[]) ?(pools=[]) ?(on_removed=ignore) ?router ?(time_wait=Clock.Interval.zero)
               ?(on_foreign_port=fun _ _ _ _ -> ()) (eth : Eth.State.t) =
-    let restricted name =
-        match List.assoc_opt (String.uppercase_ascii name) ports with
-        | Some (_ :: _ as ranges) -> Some ranges
-        | _ -> None in
+    let restricted name = List.assoc_opt (String.uppercase_ascii name) ports in
     let used = Hashtbl.create 7 in
     let local_port loc (l : Lay.layer) p =
         let name = Lay.N.to_string l.name in
@@ -943,7 +941,10 @@ let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?(time_wait=Clock.Interva
                 on_foreign_port loc l p ranges) ;
         Hashtbl.replace used (String.uppercase_ascii name, p) () in
     let uses_port name p = Hashtbl.mem used (String.uppercase_ascii name, p) in
-    let ports name = restricted name |? dynamic_ports in
+    let ports name =
+        match List.assoc_opt (String.uppercase_ascii name) pools with
+        | Some pool -> pool
+        | None -> restricted name |? dynamic_ports in
     (* By path of the parent and layer name, when each port went away: *)
     let freed = Hashtbl.create 7 in
     let rec path n =
@@ -1088,6 +1089,26 @@ let to_string n = IO.to_string print n
       (fun () -> udp ()) ;
   let tcp = child loc ip Lay.tcp [ 1, port 80 ] in
   assert_bool "other layers keep the dynamic ports" (src tcp >= 49152)
+*)
+(* A layer given no range has no port to pick: *)
+(*$R child
+  let root = make_root ~ports:[ "UDP", [] ] eth in
+  let ip = child loc root Lay.ip (ip_to "1.2.3.4") in
+  assert_raises (Val.Runtime_error (Some Ast.Error_name.NoPort, loc,
+                                    "No src left for another UDP"))
+      (fun () -> child loc ip Lay.udp [ 1, port 53 ])
+*)
+(* With a pool, local ports are picked from it only: *)
+(*$R child
+  let root = make_root ~ports:[ "UDP", [ 7, 7 ; 30, 31 ] ] ~pools:[ "UDP", [ 30, 31 ] ] eth in
+  let ip = child loc root Lay.ip (ip_to "1.2.3.4") in
+  let src n = match List.assoc_opt 0 n.key with Some (Val.Int p) -> p | _ -> -1 in
+  let udp () = src (child loc ip Lay.udp [ 1, port 53 ]) in
+  let picked = List.sort Int.compare [ udp () ; udp () ] in
+  assert_equal ~printer:dump [ 30 ; 31 ] picked ;
+  assert_raises (Val.Runtime_error (Some Ast.Error_name.NoPort, loc,
+                                    "No src left for another UDP"))
+      (fun () -> udp ())
 *)
 (* A local port that went away is not picked again towards the same peer
  * for the time wait, which fails as NoPort meanwhile: *)

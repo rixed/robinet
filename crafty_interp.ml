@@ -689,7 +689,7 @@ let rec eval output (env : env) (e : Typ.expr) =
             | Void, (n, _) when Typ.is_summary rt ->
                 error e.loc "No %s in the summary of no values" n
             | Void, (n, t) when t <> Ast.Type.Void ->
-                if rt = Typ.budget_type || rt = Typ.ports_type ||
+                if rt = Typ.budget_type || rt = Typ.proto_ports_type ||
                    rt = Typ.permissions_type then
                     error e.loc "%s is not set, by the program or the command line" n ;
                 let l = List.find (fun l -> Typ.packet_record l = rt) Lay.all in
@@ -1526,10 +1526,13 @@ let self_values ~own (l : Typ.limits) =
         Array (Array.of_list (List.map (fun (lo, hi) -> Array [| Int lo ; Int hi |]) rs)) in
     record Typ.budget_type (fun n ->
         Option.map_default of_literal Void (List.assoc_opt n l.budget)),
-    record Typ.ports_type (fun n ->
-        match l.ports with
-        | None -> Void
-        | Some p -> ranges (if n = "tcp" then p.tcp else p.udp)),
+    record Typ.ports_type (fun proto ->
+        let of_proto (b : _ Typ.by_proto) = if proto = "tcp" then b.tcp else b.udp in
+        record Typ.proto_ports_type (fun n ->
+            if n = "fixed" then
+                Option.map_default (ranges % of_proto) Void l.ports.fixed
+            else
+                Option.map_default (fun c -> Int c) Void (of_proto l.ports.ephemeral))),
     record Typ.permissions_type (fun n ->
         let p = l.permissions in
         let rules =
@@ -2035,8 +2038,8 @@ let print_status oc = function
  * MAC one for both), or wherever [router] says if given, answering ARP and neighbor solicitations for its
  * addresses unless [answer_requests] is false,
  * taking the frames for other addresses too if [promisc],
- * picking the local ports it is not given from the ports of [limits], not
- * one that went away less than [time_wait] ago (as
+ * picking the local ports it is not given from the pool of [limits], else
+ * from its fixed ports, not one that went away less than [time_wait] ago (as
  * {!Tre.make_root} does), and failing on a given one out of them if
  * [strict_ports] (else warning of it), [limits] (default: the program's) being
  * what [BUDGET] and [PORTS] are, printing with [print] and [print_err],
@@ -2056,9 +2059,15 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         ?(on_warning=ignore) ?(on_closed=ignore) ?(rx_wire=true) ?on_exception
         (program : program) =
     let limits = limits |? program.limits in
+    let p = limits.ports in
+    let pools =
+        List.filter_map (fun (n, pool) -> Option.map (fun r -> n, r) pool)
+                        [ "TCP", p.pool.tcp ; "UDP", p.pool.udp ] in
     let ports =
-        Option.map (fun (p : Typ.ports) -> [ "TCP", p.tcp ; "UDP", p.udp ])
-                   limits.ports in
+        Option.map (fun (f : _ Typ.by_proto) ->
+            List.map (fun (n, r) ->
+                n, Typ.merge_ranges (r @ (List.assoc_opt n pools |? [])))
+                [ "TCP", f.tcp ; "UDP", f.udp ]) p.fixed in
     let gateways =
         List.concat_map (fun gw ->
             let sel v6 = Eth.State.gw_selector ~v6 (), Some gw in
@@ -2092,7 +2101,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
                 Printf.sprintf "%s source port %d is outside the ports allowed (%s): \
                                 replies to it are not captured" name p ranges }) in
     let tree =
-        Tre.make_root ?ports ?router ?time_wait eth
+        Tre.make_root ?ports ~pools ?router ?time_wait eth
             ~on_removed:on_closed ~on_foreign_port in
     let started = ref None and stopped = ref false in
     Simulation.asap power (fun () ->
@@ -3524,10 +3533,13 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
  * [stop] as soon as it is run. *)
 (*$inject
   let policed ?max_packets ?max_packet_rate ?max_syns ?max_syn_rate ?stop_at ?raise_at ?(stop=false)
-              ?(addresses=[ "10.0.0.1/24" ]) ?on_exception text =
+              ?(addresses=[ "10.0.0.1/24" ]) ?on_exception ?udp_pool text =
       match compile text with
       | Error es -> String.concat "\n" (List.map (IO.to_string Prs.print_error) es)
       | Ok p ->
+          let ports = p.limits.ports in
+          let p = { p with limits = { p.limits with ports = { ports with
+                        pool = { ports.pool with udp = udp_pool } } } } in
           let sim = Simulation.make ~realtime:false "crafty-api" in
           let out = ref [] and frames = ref 0 in
           let line s =
@@ -3569,29 +3581,39 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "0.100s: stopped\n100 frames" (policed ~stop_at:0.1 pings)
   "0.000s: stopped\n0 frames" (policed ~stop:true pings)
   "0.000s: warning line 2, column 35: UDP source port 5000 is outside the ports allowed (53, 40000-40100): replies to it are not captured\n0.000s: done\n4 frames" \
-    (policed "PORTS = {udp: [[40000, 40100], 53]}\nrepeat count=2 { /IP(dst=1.2.3.4)/UDP(src=5000, dst=7)/Raw(\"x\") }\n\
+    (policed "PORTS = {udp: {fixed: [[40000, 40100], 53]}}\nrepeat count=2 { /IP(dst=1.2.3.4)/UDP(src=5000, dst=7)/Raw(\"x\") }\n\
               /IP(dst=1.2.3.4)/UDP(src=53, dst=7)/Raw(\"y\")\n/IP(dst=1.2.3.4)/UDP(dst=7)/Raw(\"z\")")
-  "0.000s: 3 10s [[40000, 40200]] []\n0.000s: done\n0 frames" \
-    (policed "print(\"${BUDGET.max_syns} ${BUDGET.max_duration} ${PORTS.tcp} ${PORTS.udp}\")\n\
+  "0.000s: 3 10s [[40000, 40200]] [] 20\n0.000s: done\n0 frames" \
+    (policed "print(\"${BUDGET.max_syns} ${BUDGET.max_duration} ${PORTS.tcp.fixed} ${PORTS.udp.fixed} ${PORTS.tcp.ephemeral}\")\n\
               BUDGET = {max_syns: 3, max_duration: 10s}\n\
-              PORTS = {tcp: [[40000, 40100], [40050, 40200]]}")
+              PORTS = {tcp: {fixed: [[40000, 40100], [40050, 40200]], ephemeral: 20}}")
   "0.000s: [[53, 53], [40000, 40100]]\n0.000s: done\n0 frames" \
-    (policed "print(PORTS.udp)\nPORTS = {udp: [[40000, 40100], 53]}")
+    (policed "print(PORTS.udp.fixed)\nPORTS = {udp: {fixed: [[40000, 40100], 53]}}")
   "0.000s: failed: line 1, column 7: max_bytes is not set, by the program or the command line\n0 frames" \
     (policed "print(BUDGET.max_bytes)")
-  "0.000s: failed: line 1, column 7: tcp is not set, by the program or the command line\n0 frames" \
-    (policed "print(PORTS.tcp)")
+  "0.000s: failed: line 1, column 7: fixed is not set, by the program or the command line\n0 frames" \
+    (policed "print(PORTS.tcp.fixed)")
+  "0.000s: failed: line 2, column 7: ephemeral is not set, by the program or the command line\n0 frames" \
+    (policed "PORTS = {tcp: {fixed: [80]}}\nprint(PORTS.tcp.ephemeral)")
   (String.concat "\n" [ \
     "line 1, column 11: BUDGET can only be declared at the top level of the program" ; \
     "line 2, column 9: PORTS gives no port" ; \
     "line 3, column 1: PORTS is already declared" ]) \
-    (policed "if true { BUDGET = {max_syns: 3} }\nPORTS = {tcp: []}\nPORTS = {udp: [[1, 2]]}")
+    (policed "if true { BUDGET = {max_syns: 3} }\nPORTS = {tcp: {fixed: []}}\nPORTS = {udp: {fixed: [[1, 2]]}}")
+  "line 1, column 15: PORTS.tcp is a record {fixed: [ports and ranges [first, last]], ephemeral: count}" \
+    (policed "PORTS = {tcp: [[1, 2]]}")
+  "0.000s: 6000 7\n0.000s: done\n2 frames" \
+    (policed ~udp_pool:[ 6000, 6000 ] "PORTS = {udp: {fixed: [7], ephemeral: 1}}\n\
+       /IP(dst=1.2.3.4)/UDP(dst=9)/Raw(\"x\")\nsrc = LAST[UDP].src\n\
+       /IP(dst=1.2.3.4)/UDP(src=7, dst=9)/Raw(\"y\")\nprint(\"${src} ${LAST[UDP].src}\")")
+  "line 1, column 27: PORTS.udp.ephemeral must be a literal int, from 0 to 65535" \
+    (policed "PORTS = {udp: {ephemeral: -1}}")
   "line 1, column 1: BUDGET cannot be changed" (policed "BUDGET := {max_syns: 3}")
   "5.995s: done\n1000 frames" \
     (policed ~max_syns:1000 ~max_syn_rate:200. "\
       BUDGET = {max_syns: 1000, max_syns_per_secs: 200}\n\
-      PORTS = {tcp: [[40000, 40000]]}\n\
-      sport = PORTS.tcp[0][0]\n\
+      PORTS = {tcp: {fixed: [[40000, 40000]]}}\n\
+      sport = PORTS.tcp.fixed[0][0]\n\
       {\n\
         on linger=1s /IP(src == 192.0.2.10)/TCP!(dst == sport, flags == SYN | ACK) {}\n\
         repeat var=i count=BUDGET.max_syns every=1s / BUDGET.max_syns_per_secs {\n\
@@ -3695,7 +3717,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   let arp ?(from="02:00:00:00:00:fe") pdu =
       Eth.Pdu.(pack (make Eth.Proto.arp (mac from) (mac "02:00:00:00:00:01") (Arp.Pdu.pack pdu))) in
   let p = Result.get_ok (compile
-              "PORTS = {udp: [[5000, 5000]]}\n\
+              "PORTS = {udp: {fixed: [[5000, 5000]]}}\n\
                wait dur=1s\n/IP(dst=1.2.3.4)/UDP(dst=7)/Raw(\"x\")") in
   let dev, h =
       run ~parent:sim.SimTypes.root ~mac:(mac "02:00:00:00:00:01")
@@ -3752,7 +3774,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       Lay.make_router ~ifname:"a" ~lookup
           ~on_unrouted:(fun dst e -> unrouted := (Ip.Addr.to_string dst, e) :: !unrouted) in
   let p = Result.get_ok (compile
-      "PORTS = {udp: [[5000, 5000]]}\n\
+      "PORTS = {udp: {fixed: [[5000, 5000]]}}\n\
        wait dur=1s\n\
        /IP(dst=10.0.0.2)/UDP(dst=7)/Raw(\"on-subnet\")\n\
        /IP(dst=10.1.0.1)/UDP(dst=7)/Raw(\"specific\")\n\
@@ -3829,7 +3851,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   let no_route = "No route: Network is unreachable"
 *)
 (*$R routed_run
-  let ports = "PORTS = {udp: [[5000, 5000]], tcp: [[5000, 5000]]}\n" in
+  let ports = "PORTS = {udp: {fixed: [[5000, 5000]]}, tcp: {fixed: [[5000, 5000]]}}\n" in
   let refused text =
       let status, told, frames =
           routed_run (ports ^ text) ~lookup:(fun _ _ -> Error no_route) in
@@ -3879,7 +3901,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (*$R routed_run
   let run text =
       let status, _, _ =
-          routed_run ("PORTS = {udp: [[5000, 5000]]}\n\
+          routed_run ("PORTS = {udp: {fixed: [[5000, 5000]]}}\n\
                        /IP(dst=10.9.9.9)/UDP(dst=7) {\n"^ text ^"\n}")
                      ~lookup:(fun _ _ -> via ()) in
       status in
@@ -3895,7 +3917,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   let run ?strict_ports () =
       let status, _, frames =
           routed_run ?strict_ports
-              "PORTS = {udp: [[5000, 5000]]}\n\
+              "PORTS = {udp: {fixed: [[5000, 5000]]}}\n\
                /IP(dst=10.9.9.9)/UDP(src=6000, dst=7)/Raw(\"x\")"
               ~lookup:(fun _ _ -> via ()) in
       status, frames in

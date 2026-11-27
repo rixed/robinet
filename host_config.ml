@@ -398,19 +398,18 @@ let string_of_range r =
     if r.lo = r.hi then string_of_int r.lo else Printf.sprintf "%d-%d" r.lo r.hi
 
 (** A pcap filter for what a program may receive and send: ARP and neighbor
- * discovery, and IP to and from [ip] if given, of which ICMP, fragments but
- * the first (IPv4) or all of them (IPv6, where the ports follow the fragment
- * header), and the TCP and UDP ports of [ports], if any, as destination and
- * as source respectively. IPv6 fragments are told by a fragment header
+ * discovery, and IP to and from [ip] if given, of which, unless [ports] is
+ * None, only ICMP, fragments but the first (IPv4) or all of them (IPv6,
+ * where the ports follow the fragment header), and the TCP and UDP ports of
+ * [ports], as destination and as source respectively. IPv6 fragments are told by a fragment header
  * right after the fixed one. *)
 let pcap_filter ?ip ports =
     let l4 dirs =
-        if ports = [] then None
-        else Some (String.concat " or " (
+        Option.map (fun ports -> String.concat " or " (
             "icmp" :: "icmp6" :: "(ip[6:2] & 0x1fff != 0)" :: "(ip6[6] = 44)" ::
             List.concat_map (fun dir -> List.map (fun r ->
                 Printf.sprintf "(%s %s portrange %d-%d)"
-                    (string_of_proto r.proto) dir r.lo r.hi) ports) dirs)) in
+                    (string_of_proto r.proto) dir r.lo r.hi) ports) dirs)) ports in
     (* Neighbor solicitations go to a multicast group, not to [ip]: *)
     let link = "arp or (icmp6 and ip6[40] >= 133 and ip6[40] <= 137)" in
     match ip with
@@ -424,13 +423,14 @@ let pcap_filter ?ip ports =
         Printf.sprintf "%s or %s or %s" link (one "dst") (one "src")
 
 (*$= pcap_filter & ~printer:identity
-  "" (pcap_filter [])
+  "" (pcap_filter None)
   "arp or (icmp6 and ip6[40] >= 133 and ip6[40] <= 137) or dst host 10.0.0.1 or src host 10.0.0.1" \
-    (pcap_filter ~ip:(Ip.Addr.of_string "10.0.0.1") [])
+    (pcap_filter ~ip:(Ip.Addr.of_string "10.0.0.1") None)
+  "arp or icmp or icmp6 or (ip[6:2] & 0x1fff != 0) or (ip6[6] = 44)" (pcap_filter (Some []))
   "arp or icmp or icmp6 or (ip[6:2] & 0x1fff != 0) or (ip6[6] = 44) or (tcp dst portrange 14000-14099) or (udp dst portrange 53-53) or (tcp src portrange 14000-14099) or (udp src portrange 53-53)" \
-    (pcap_filter [ port_range_of_string Tcp "14000-14099" ; port_range_of_string Udp "53" ])
+    (pcap_filter (Some [ port_range_of_string Tcp "14000-14099" ; port_range_of_string Udp "53" ]))
   "arp or (icmp6 and ip6[40] >= 133 and ip6[40] <= 137) or (dst host 2001:db8::1 and (icmp or icmp6 or (ip[6:2] & 0x1fff != 0) or (ip6[6] = 44) or (udp dst portrange 1-2))) or (src host 2001:db8::1 and (icmp or icmp6 or (ip[6:2] & 0x1fff != 0) or (ip6[6] = 44) or (udp src portrange 1-2)))" \
-    (pcap_filter ~ip:(Ip.Addr.of_string "2001:db8::1") [ port_range_of_string Udp "1-2" ])
+    (pcap_filter ~ip:(Ip.Addr.of_string "2001:db8::1") (Some [ port_range_of_string Udp "1-2" ]))
  *)
 
 (** The local port that the host refuses with [frame], if it is a frame of
