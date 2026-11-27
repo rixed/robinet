@@ -3600,6 +3600,10 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     "line 2, column 9: PORTS gives no port" ; \
     "line 3, column 1: PORTS is already declared" ]) \
     (policed "if true { BUDGET = {max_syns: 3} }\nPORTS = {tcp: {fixed: []}}\nPORTS = {udp: {fixed: [[1, 2]]}}")
+  "line 1, column 24: A port is a literal int, from 1 to 65535" \
+    (policed "PORTS = {tcp: {fixed: [int(getenv(\"P\"))]}}")
+  "line 1, column 24: A range of ports is [first, last]" \
+    (policed "PORTS = {tcp: {fixed: [[1, 2, 3]]}}")
   "line 1, column 15: PORTS.tcp is a record {fixed: [ports and ranges [first, last]], ephemeral: count}" \
     (policed "PORTS = {tcp: [[1, 2]]}")
   "0.000s: 6000 7\n0.000s: done\n2 frames" \

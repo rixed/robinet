@@ -828,8 +828,8 @@ let port_ranges name _typ (e : Ast.expr) =
                 let lo = port lo and hi = port hi in
                 if lo > hi then error r.loc "Empty range of ports: [%d, %d]" lo hi ;
                 lo, hi
-            | Lit _ -> let p = port r in p, p
-            | _ -> error r.loc "A range of ports is [first, last], or a port") rs |>
+            | Ast.Array _ -> error r.loc "A range of ports is [first, last]"
+            | _ -> let p = port r in p, p) rs |>
         merge_ranges
     | _ -> error e.loc "PORTS.%s is an array of ports and ranges [first, last]" name
 
