@@ -925,9 +925,9 @@ let dynamic_ports = [ 49152, 65535 ]
  * some (inclusive and disjoint ranges, by layer name), and else from
  * {!dynamic_ports}; those it gives out of its layer's [ports] are told to
  * [on_foreign_port], with these ranges. The root tells which were used.
- * A local port is not picked again for [time_wait] (default: none) after
+ * A local port is not picked again for [time_wait] (default: 0) after
  * its stream went away, towards the same peer. *)
-let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?time_wait
+let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?(time_wait=Clock.Interval.zero)
               ?(on_foreign_port=fun _ _ _ _ -> ()) (eth : Eth.State.t) =
     let restricted name =
         match List.assoc_opt (String.uppercase_ascii name) ports with
@@ -954,8 +954,8 @@ let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?time_wait
         | Some ports -> Hashtbl.keys ports |> List.of_enum
         | None -> [] in
     let removed n =
-        (match time_wait, n.parent with
-        | Some d, Some p when Clock.Interval.compare d Clock.Interval.zero > 0 ->
+        (match n.parent with
+        | Some p when Clock.Interval.compare time_wait Clock.Interval.zero > 0 ->
             let power = eth.iface.widget.power in
             let now = Simulation.now power.sim in
             List.iter (fun (i, v) ->
@@ -968,7 +968,7 @@ let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?time_wait
                         | None -> let ports = Hashtbl.create 7 in Hashtbl.add freed k ports ; ports in
                     Hashtbl.replace ports port now ;
                     (* Unless it went away again meanwhile: *)
-                    Simulation.delay ~background:true power d (fun () ->
+                    Simulation.delay ~background:true power time_wait (fun () ->
                         if Hashtbl.find_option ports port = Some now then (
                             Hashtbl.remove ports port ;
                             if Hashtbl.length ports = 0 then Hashtbl.remove freed k)) ()

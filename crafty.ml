@@ -92,7 +92,7 @@ let () =
     and print_only = ref None and stats = ref false and cleanup = ref false
     and check = ref false and normalize = ref false and format = ref Human
     and warn_error = ref false and no_warning = ref false
-    and linger = ref (Clock.Interval.sec 2.) and time_wait = ref None
+    and linger = ref (Clock.Interval.sec 2.) and time_wait = ref Clock.Interval.zero
     (* What the errors name it after, and its text: *)
     and prog = ref None and prog_args = ref []
     and max_duration = ref None and max_packets = ref None
@@ -213,7 +213,7 @@ let () =
             "BOOL receive the frames for other addresses too, whatever the program says" ;
         "--linger", interval linger,
             "DURATION once done, stop after that long without traffic (default 2s)" ;
-        "--time-wait", some_interval time_wait,
+        "--time-wait", interval time_wait,
             "DURATION pick no source port again until that long after its stream closed \
              (default 0)" ;
         "-p", print_packets_spec,
@@ -482,7 +482,7 @@ let () =
                     Option.may (fun c -> c.Run.stop ()) !control)
                 (fun () ->
                     Run.run iface ?own_ip:!own_ip ~fw:!fw ~kernel_routing ~any_iface
-                        ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger ?time_wait:!time_wait
+                        ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger ~time_wait:!time_wait
                         ~format ~args ~resolver
                         ~getenv:Itp.getenv
                         ~extra_limits
