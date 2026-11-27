@@ -783,7 +783,24 @@ let merge_ranges rs =
         | _ -> (lo, hi) :: acc) [] |>
     List.rev
 
-(*$= merge_ranges & ~printer:(IO.to_string (List.print (Tuple2.print Int.print Int.print)))
+let print_ranges oc = function
+    | [ p1, p2 ] when p1 = p2 -> Int.print oc p1
+    | ps -> List.print (Tuple2.print Int.print Int.print) oc ps
+
+let print_fixed oc = function
+    | None ->
+        String.print oc "<none>"
+    | Some { tcp ; udp } ->
+        Printf.fprintf oc "{tcp: %a; udp: %a }"
+            print_ranges tcp
+            print_ranges udp
+
+let print_pool oc pool =
+    Printf.fprintf oc "{tcp: %a; udp: %a }"
+        (Option.print print_ranges) pool.tcp
+        (Option.print print_ranges) pool.udp
+
+(*$= merge_ranges & ~printer:(IO.to_string print_ranges)
   [ 1, 5 ; 7, 9 ] (merge_ranges [ 7, 8 ; 3, 5 ; 1, 3 ; 9, 9 ])
   [] (merge_ranges [])
 *)
