@@ -314,6 +314,9 @@ let route_ifname (program : Itp.program) =
  *   traffic.
  * - [time_wait]: how long a local port is not picked again once its stream
  *   went away (default: 0).
+ * - [strict_ports]: fail on a source port given out of the program's ports,
+ *   rather than warn of it; which runs that share an address need, lest one
+ *   takes the port of another.
  * - [format]: what [format()] writes.
  * - [args], [resolver], [getenv]: for [arg()], [resolve()] and [hostname()],
  *   and [getenv()].
@@ -334,7 +337,7 @@ let route_ifname (program : Itp.program) =
  *   arriving, what is for the program, before the firewall and the policer.
  * - [on_stream]: each stream as it closes, then those still open at the end. *)
 let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
-        ?speed ?full_duplex ?mtu ?(linger=Clock.Interval.sec 2.) ?(time_wait=Clock.Interval.zero) ?format ?args
+        ?speed ?full_duplex ?mtu ?(linger=Clock.Interval.sec 2.) ?(time_wait=Clock.Interval.zero) ?strict_ports ?format ?args
         ~resolver ~getenv ?extra_limits
         ?(on_start=ignore) ?(info=ignore)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
@@ -535,7 +538,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             ~speed ~full_duplex ~mtu ?router
             ~gateways:(List.map (fun gw -> Eth.Gateway.Ip gw) host.gateways)
             (* The kernel answers for its own address: *)
-            ~answer_requests:(own_ip <> None) ~promisc ~time_wait
+            ~answer_requests:(own_ip <> None) ~promisc ~time_wait ?strict_ports
             ~limits ?format ?args ~resolver ~getenv
             ?report:on_report
             ~print:(fun s -> on_print (instant ()) s)

@@ -2037,7 +2037,8 @@ let print_status oc = function
  * taking the frames for other addresses too if [promisc],
  * picking the local ports it is not given from the ports of [limits], not
  * one that went away less than [time_wait] ago (as
- * {!Tre.make_root} does), [limits] (default: the program's) being
+ * {!Tre.make_root} does), and failing on a given one out of them if
+ * [strict_ports] (else warning of it), [limits] (default: the program's) being
  * what [BUDGET] and [PORTS] are, printing with [print] and [print_err],
  * telling [on_warning] of what is likely not what was meant (once each),
  * [format()] writing in [format] (default {!Crafty_value.Human}),
@@ -2049,7 +2050,7 @@ let print_status oc = function
  * Told what an event handler of the simulation raised, [on_exception] says
  * whether the program fails of it, which by default it does. *)
 let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
-        ?(promisc=false) ?time_wait
+        ?(promisc=false) ?time_wait ?(strict_ports=false)
         ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu ?router
         ?limits ?format ?report ?args ?resolver ?getenv ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
         ?(on_warning=ignore) ?(on_closed=ignore) ?(rx_wire=true) ?on_exception
@@ -2078,14 +2079,18 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     let told = Hashtbl.create 3 in
     let on_foreign_port where (l : Lay.layer) p ranges =
         let name = Lay.N.to_string l.name in
-        if not (Hashtbl.mem told (name, p)) then (
+        let ranges =
+            String.concat ", " (List.map (fun (lo, hi) ->
+                if lo = hi then string_of_int lo
+                else Printf.sprintf "%d-%d" lo hi) ranges) in
+        if strict_ports then
+            raise (Runtime_error (None, where, Printf.sprintf
+                "%s source port %d is outside the ports allowed (%s)" name p ranges))
+        else if not (Hashtbl.mem told (name, p)) then (
             Hashtbl.add told (name, p) () ;
             on_warning { Prs.where ; kind = None ; packet = None ; message =
                 Printf.sprintf "%s source port %d is outside the ports allowed (%s): \
-                                replies to it are not captured" name p
-                    (String.concat ", " (List.map (fun (lo, hi) ->
-                        if lo = hi then string_of_int lo
-                        else Printf.sprintf "%d-%d" lo hi) ranges)) }) in
+                                replies to it are not captured" name p ranges }) in
     let tree =
         Tre.make_root ?ports ?router ?time_wait eth
             ~on_removed:on_closed ~on_foreign_port in
@@ -3802,7 +3807,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
  * its layers, and nothing leaves; what a layer sends on its own is dropped,
  * which is told each time the route goes away, not at each packet: *)
 (*$inject
-  let routed_run text ~lookup =
+  let routed_run ?strict_ports text ~lookup =
       let sim = Simulation.make ~realtime:false "crafty-unrouted" in
       let unrouted = ref [] and frames = ref 0 in
       let router =
@@ -3811,7 +3816,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       let dev, h =
           run ~parent:sim.SimTypes.root ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
               ~addresses:[ Ip.Cidr.of_string "10.0.0.1/24" ]
-              ~gateways:[] ~answer_requests:false ~router
+              ~gateways:[] ~answer_requests:false ~router ?strict_ports
               (Result.get_ok (compile text)) in
       Tools.(dev --> sink (fun _ -> incr frames)) ;
       Simulation.run sim false ;
@@ -3883,6 +3888,21 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       (run "/IP(dst=10.9.9.9)/UDP(dst=8)/Raw(\"x\")") ;
   assert_equal ~printer:identity "done"
       (run "try { /IP(dst=10.9.9.9)/UDP(dst=8)/Raw(\"x\") } NoPort {}")
+*)
+(* A source port given out of the ports fails with [strict_ports], before
+ * anything is sent: *)
+(*$R routed_run
+  let run ?strict_ports () =
+      let status, _, frames =
+          routed_run ?strict_ports
+              "PORTS = {udp: [[5000, 5000]]}\n\
+               /IP(dst=10.9.9.9)/UDP(src=6000, dst=7)/Raw(\"x\")"
+              ~lookup:(fun _ _ -> via ()) in
+      status, frames in
+  assert_equal ~printer:identity "done" (fst (run ())) ;
+  assert_equal ~printer:(fun (s, n) -> Printf.sprintf "%s, %d frames" s n)
+      ("line 2, column 19: UDP source port 6000 is outside the ports allowed (5000)", 0)
+      (run ~strict_ports:true ())
 *)
 
 (* [filters text frame] is whether that frame matches the filter of that

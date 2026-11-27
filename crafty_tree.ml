@@ -924,7 +924,8 @@ let dynamic_ports = [ 49152, 65535 ]
  * that a stack leaves out are picked from [ports] for each layer that has
  * some (inclusive and disjoint ranges, by layer name), and else from
  * {!dynamic_ports}; those it gives out of its layer's [ports] are told to
- * [on_foreign_port], with these ranges. The root tells which were used.
+ * [on_foreign_port], with these ranges, which may raise to refuse them. The
+ * root tells which were used.
  * A local port is not picked again for [time_wait] (default: 0) after
  * its stream went away, towards the same peer. *)
 let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?(time_wait=Clock.Interval.zero)
@@ -936,11 +937,11 @@ let make_root ?(ports=[]) ?(on_removed=ignore) ?router ?(time_wait=Clock.Interva
     let used = Hashtbl.create 7 in
     let local_port loc (l : Lay.layer) p =
         let name = Lay.N.to_string l.name in
-        Hashtbl.replace used (String.uppercase_ascii name, p) () ;
         restricted name |>
         Option.may (fun ranges ->
             if not (List.exists (fun (lo, hi) -> p >= lo && p <= hi) ranges) then
-                on_foreign_port loc l p ranges) in
+                on_foreign_port loc l p ranges) ;
+        Hashtbl.replace used (String.uppercase_ascii name, p) () in
     let uses_port name p = Hashtbl.mem used (String.uppercase_ascii name, p) in
     let ports name = restricted name |? dynamic_ports in
     (* By path of the parent and layer name, when each port went away: *)
