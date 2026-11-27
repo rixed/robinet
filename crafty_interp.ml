@@ -3924,7 +3924,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   let ea = crafty_peer sim 1 in
   let h = Host.make ~parent:sim.SimTypes.root ~static_ip:(address 2) ~netmask "host" in
   let now () = Clock.Time.to_secs (Simulation.now sim) in
-  let rst_at = ref None and last_data = ref 0. in
+  let rst_at = ref None and last_data = ref 0. and after_rst = ref 0 in
   let tcp_of bits =
       match Eth.Pdu.unpack bits with
       | Ok e when e.proto = Arp.HwProto.ip4 ->
@@ -3936,7 +3936,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   plug sim ~log:(fun dir bits ->
       Option.may (fun (tcp : Tcp.Pdu.t) ->
           if dir = ">" && tcp.flags.rst && !rst_at = None then rst_at := Some (now ())
-          else if dir = "<" && Payload.length tcp.payload > 0 then last_data := now ()
+          else if dir = "<" && Payload.length tcp.payload > 0 then (
+              last_data := now () ;
+              if !rst_at <> None then after_rst := !after_rst + Payload.length tcp.payload)
       ) (tcp_of bits)) ea.Eth.State.iface.widget h.Host.trx.Host.widget ;
   Simulation.run_startup sim ;
   let power = h.Host.trx.Host.widget.power in
@@ -3956,7 +3958,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   match !rst_at with
   | None -> assert_failure "no RST"
   | Some t ->
-      (* What the host's interface had queued still goes: *)
-      assert_bool (Printf.sprintf "RST at %.4fs, data until %.4fs" t !last_data)
-          (!last_data > 0.4 && !last_data < t +. 0.005)
+      assert_bool (Printf.sprintf "No data before the RST at %.4fs" t) (!last_data > 0.4) ;
+      (* What the server had written still goes, no more than one chunk: *)
+      assert_bool (Printf.sprintf "%d bytes after the RST" !after_rst) (!after_rst <= 65536)
 *)
