@@ -350,7 +350,8 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     let ports =
         Option.map_default (fun (p : Typ.ports) ->
             let ranges proto = List.map (fun (lo, hi) -> Host_config.{ proto ; lo ; hi }) in
-            ranges Host_config.Tcp p.tcp @ ranges Host_config.Udp p.udp) [] limits.ports in
+            ranges Host_config.Tcp p.tcp @ ranges Host_config.Udp p.udp
+        ) [] limits.ports in
     let permissions = limits.permissions in
     let flag = Option.default false in
     let promisc = flag permissions.promiscuous in

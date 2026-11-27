@@ -94,8 +94,7 @@ type env =
       last : value Lazy.t ref }
 
 (* With what it declares of itself: *)
-type program =
-    { body : Typ.block ; limits : Typ.limits }
+type program = { body : Typ.block ; limits : Typ.limits }
 
 exception No_tree
 
