@@ -46,7 +46,8 @@ install: $(ARCHIVE)
 uninstall:
 	ocamlfind remove $(PKG_NAME)
 
-reinstall: uninstall install
+reinstall:
+	$(MAKE) uninstall && $(MAKE) install
 endif
 
 # Common rules
