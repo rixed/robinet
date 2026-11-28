@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 99fdb10127fd41f2122a0296240e4fb8) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 24a126e9091099ec5b4590a038aaca67) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -186,11 +186,10 @@ Options:
     default route). Crafty needs root, or `setcap cap_net_raw,cap_net_admin=ep`.
 -   `--routing kernel|manual`: `kernel` (default) uses kernel routes. `manual`
     takes gateway from the interface and then does ARP etc.
--   `--tcp LO-HI`, `--udp LO-HI` (repeatable): restrict the program's fixed
-    ports to those.
--   `--tcp-ephemeral LO-HI`, `--udp-ephemeral LO-HI` (repeatable): the pool to
-    pick source ports from. See also [Budget, ports and
-    permissions](#budget-ports-and-permissions).
+-   `--tcp LO-HI`, `--udp LO-HI` (repeatable): the fixed ports.
+-   `--tcp-ephemeral N|LO-HI`, `--udp-ephemeral N|LO-HI`: how many ephemeral
+    ports to draw, or (repeatable) the ports to pick them from. See also
+    [Budget, ports and permissions](#budget-ports-and-permissions).
 -   `--no-fw`: crafty shares the interface's address with the host, whose kernel
     would answer what crafty receives with TCP resets and ICMP port
     unreachables, so crafty keeps the kernel off its ports, and refuses those
@@ -204,7 +203,7 @@ Options:
 -   `--check`: check the program and quit.
 -   `--max-duration` (default: 10m), `--max-packets`, `--max-bytes`,
     `--max-packets-per-secs`, `--max-bytes-per-secs`, `--max-syns`,
-    `--max-syns-per-secs`, `--max-ram`: self-imposed budget.
+    `--max-syns-per-secs`, `--max-ram`: the budget.
 -   `--local-ip accept|deny:CIDR`, `--remote-ip accept|deny:CIDR` (repeatable),
     `--mac-spoofing BOOL`, `--exfiltration BOOL`, `--promiscuous BOOL`,
     `--public-env NAME` (repeatable): permissions (see [Budget, ports and
@@ -327,10 +326,10 @@ A program may declare them, once each, at its top level, with literals only:
 -   `PORTS` has, by protocol, `fixed` ports and ranges `[first, last]`, sent
     from or listened on by number (default: none), and how many `ephemeral` ones
     to pick source ports from (default: 64 if the program sends over that
-    protocol, else 0): a pool from `--tcp-ephemeral`/`--udp-ephemeral`, or else
-    a random block of 49152-65535. With `ephemeral: 0`, source ports come from
-    `fixed`. Only these ports are captured.
--   crafty runs with what both the program and the command line allow.
+    protocol, else 0), drawn from 49152-65535. With `ephemeral: 0`, source ports
+    come from `fixed`. Only these ports are captured.
+-   crafty's options replace what the program declares, but for the rules of
+    `--local-ip` and `--remote-ip`, which go before the program's.
 -   `PERMISSIONS`:
     -   `local_ips`, `remote_ips`: rules `Accept(x)` or `Deny(x)`, `x` being a
         CIDR or `OWN_IP(S)`; the first that matches an address decides, and none
@@ -341,8 +340,8 @@ A program may declare them, once each, at its top level, with literals only:
     -   `exfiltration`: allows sending a payload made of the payload of a
         received packet, but back to the literal address of the stack it came
         in, or made of `getenv`, or sent under a condition on it.
-    -   `public_env`: names of variables of the environment `exfiltration` need
-        not allow.
+    -   `public_env`: names of variables of the environment which can influence
+        generated traffic (see `exfiltration`).
     -   `promiscuous`: receives the frames for other addresses too, unless
         `local_ips` denies them.
     -   A sent packet denied by the above rules stops the program. A received

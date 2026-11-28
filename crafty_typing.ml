@@ -737,6 +737,9 @@ and ports =
       (* What ephemeral ones are drawn from, if given: *)
       pool : (int * int) list option by_proto }
 
+(* Ephemeral ports, as how many to draw or what to pick them from: *)
+and ephemeral = Count of int | Pool of (int * int) list
+
 (* The fields of [PERMISSIONS], if set: *)
 and permissions =
     { local_ips : rule list option ;
@@ -772,11 +775,18 @@ let no_ports =
 
 let no_limits = { budget = [] ; ports = no_ports ; permissions = no_permissions }
 
-let all_ports = [ 0, 65535 ]
+(** What replaces the declarations of a program, for each field given: *)
+type overrides =
+    { budget_overrides : (string * Ast.literal) list ;
+      fixed_overrides : (int * int) list option by_proto ;
+      ephemeral_overrides : ephemeral option by_proto ;
+      (* Which {!resolve_permissions} combines with the program's: *)
+      permission_overrides : permissions }
 
-(** Limits that restrict nothing, as extra limits: *)
-let unrestricted =
-    { no_limits with ports = { no_ports with fixed = { tcp = all_ports ; udp = all_ports } } }
+let no_overrides =
+    { budget_overrides = [] ; fixed_overrides = { tcp = None ; udp = None } ;
+      ephemeral_overrides = { tcp = None ; udp = None } ;
+      permission_overrides = no_permissions }
 
 (** How many ephemeral ports a program that sends over a protocol wants,
  * unless it says: *)
@@ -960,85 +970,46 @@ let limits_of ?(sends={ tcp = false ; udp = false }) errors decls =
         | _ -> declared, limits) ([], { no_limits with ports = { no_ports with
             ephemeral = both ephemeral sends { tcp = None ; udp = None } } }) decls |> snd
 
-let least a b =
-    match a, b with
-    | Ast.Int a, Ast.Int b -> Ast.Int (min a b)
-    | Float a, Float b -> Ast.Float (Float.min a b)
-    | Interval a, Interval b ->
-        Ast.Interval (if Clock.Interval.compare a b <= 0 then a else b)
-    | _ -> invalid_arg "Crafty_typing.least"
-
-(** What both the [program] and the [cli] allow, or why nothing is: the
- * fixed ports of both, as many ephemeral ones as the [program] wants and the
- * pool of the [cli] over the [program]'s, which must hold that many. The
- * permissions are the [program]'s, which {!resolve_permissions} combines
- * with the [cli]'s. *)
-let combine ~program:a ~cli:b =
-    let permissions = a.permissions in
+(** The limits of the [program] with the [cli]'s overrides. A pool for
+ * ephemeral ports is all of them. The permissions are the [program]'s, which
+ * {!resolve_permissions} combines with the [cli]'s. *)
+let combine ~program:a ~(cli : overrides) =
     let budget =
         List.filter_map (fun (n, _) ->
-            match List.assoc_opt n a.budget, List.assoc_opt n b.budget with
-            | Some x, Some y -> Some (n, least x y)
-            | Some x, None | None, Some x -> Some (n, x)
-            | None, None -> None) budget_fields in
-    let inter ra rb =
-        List.concat_map (fun (lo, hi) ->
-            List.filter_map (fun (lo', hi') ->
-                let lo = max lo lo' and hi = min hi hi' in
-                if lo <= hi then Some (lo, hi) else None) rb) ra |>
-        merge_ranges in
-    let fixed = both inter a.ports.fixed b.ports.fixed in
-    let lost name wanted f =
-        if wanted <> [] && f = [] then
-            Some (Printf.sprintf "no fixed %s port is allowed by both" name)
-        else None in
-    let ephemeral = a.ports.ephemeral
-    and pool = both (fun x y -> if y = None then x else y) a.ports.pool b.ports.pool in
-    let short name n r =
-        match r with
-        | Some r ->
-            let m = List.fold_left (fun m (lo, hi) -> m + hi - lo + 1) 0 r in
-            if m < n then
-                Some (Printf.sprintf "%d %s ephemeral ports are wanted, the pool has %d"
-                                     n name m)
-            else None
-        | _ -> None in
-    match List.find_map_opt identity
-            [ lost "TCP" a.ports.fixed.tcp fixed.tcp ; lost "UDP" a.ports.fixed.udp fixed.udp ;
-              short "TCP" ephemeral.tcp pool.tcp ; short "UDP" ephemeral.udp pool.udp ] with
-    | Some e -> Stdlib.Error e
-    | None -> Ok { budget ; ports = { fixed ; ephemeral ; pool } ; permissions }
+            match List.assoc_opt n cli.budget_overrides with
+            | Some x -> Some (n, x)
+            | None -> Option.map (fun x -> n, x) (List.assoc_opt n a.budget)) budget_fields in
+    let fixed = both (fun f o -> o |? f) a.ports.fixed cli.fixed_overrides in
+    let ephemeral =
+        both (fun n -> function
+            | None -> n
+            | Some (Count n) -> n
+            | Some (Pool r) -> List.fold_left (fun m (lo, hi) -> m + hi - lo + 1) 0 r)
+            a.ports.ephemeral cli.ephemeral_overrides
+    and pool =
+        both (fun p -> function Some (Pool r) -> Some r | _ -> p)
+             a.ports.pool cli.ephemeral_overrides in
+    { budget ; ports = { fixed ; ephemeral ; pool } ; permissions = a.permissions }
 
 (*$inject
   let fixed tcp udp = { no_ports with fixed = { tcp ; udp } }
 *)
-(*$T combine
-  combine ~program:{ no_limits with budget = [ "max_syns", Ast.Int 3 ; "max_bytes", Ast.Int 10 ] } \
-          ~cli:{ unrestricted with \
-                 budget = [ "max_syns", Ast.Int 2 ; "max_duration", Ast.Interval (Clock.Interval.sec 1.) ] } = \
-    Ok { no_limits with \
-         budget = [ "max_duration", Ast.Interval (Clock.Interval.sec 1.) ; \
-                    "max_bytes", Ast.Int 10 ; "max_syns", Ast.Int 2 ] }
-  combine ~program:{ no_limits with ports = fixed [ 5, 25 ] [ 1, 2 ] } \
-          ~cli:{ no_limits with ports = fixed [ 1, 10 ; 20, 30 ] all_ports } = \
-    Ok { no_limits with ports = fixed [ 5, 10 ; 20, 25 ] [ 1, 2 ] }
-  combine ~program:{ no_limits with ports = fixed [ 1, 2 ] [] } \
-          ~cli:{ no_limits with ports = fixed [] [ 1, 2 ] } = \
-    Error "no fixed TCP port is allowed by both"
-  combine ~program:{ no_limits with ports = fixed [] [] } ~cli:{ no_limits with ports = fixed [ 1, 2 ] [] } = \
-    Ok { no_limits with ports = fixed [] [] }
-*)
-(* A program wanting ephemeral ports gets the pool given, which must hold
- * that many, along with its fixed ones: *)
-(*$T combine
-  let wants = { (fixed [ 80, 80 ] []) with ephemeral = { tcp = 3 ; udp = 0 } } in \
-  let pool r = { unrestricted.ports with pool = { tcp = Some r ; udp = None } } in \
-  combine ~program:{ no_limits with ports = wants } ~cli:{ no_limits with ports = pool [ 5000, 5002 ] } = \
-    Ok { no_limits with ports = { wants with pool = { tcp = Some [ 5000, 5002 ] ; udp = None } } }
-  let wants = { (fixed [ 80, 80 ] []) with ephemeral = { tcp = 3 ; udp = 0 } } in \
-  let pool r = { unrestricted.ports with pool = { tcp = Some r ; udp = None } } in \
-  combine ~program:{ no_limits with ports = wants } ~cli:{ no_limits with ports = pool [ 5000, 5001 ] } = \
-    Error "3 TCP ephemeral ports are wanted, the pool has 2"
+(*$= combine & ~printer:dump
+  { no_limits with \
+    budget = [ "max_duration", Ast.Interval (Clock.Interval.sec 1.) ; \
+               "max_bytes", Ast.Int 10 ; "max_syns", Ast.Int 4 ] } \
+    (combine ~program:{ no_limits with budget = [ "max_syns", Ast.Int 3 ; "max_bytes", Ast.Int 10 ] } \
+             ~cli:{ no_overrides with \
+                    budget_overrides = [ "max_syns", Ast.Int 4 ; \
+                                         "max_duration", Ast.Interval (Clock.Interval.sec 1.) ] })
+  { no_limits with ports = fixed [ 1, 10 ] [ 1, 2 ] } \
+    (combine ~program:{ no_limits with ports = fixed [ 5, 25 ] [ 1, 2 ] } \
+             ~cli:{ no_overrides with fixed_overrides = { tcp = Some [ 1, 10 ] ; udp = None } })
+  { no_limits with ports = { no_ports with ephemeral = { tcp = 3 ; udp = 2 } ; \
+                                           pool = { tcp = Some [ 5000, 5002 ] ; udp = None } } } \
+    (combine ~program:{ no_limits with ports = { no_ports with ephemeral = { tcp = 64 ; udp = 64 } } } \
+             ~cli:{ no_overrides with \
+                    ephemeral_overrides = { tcp = Some (Pool [ 5000, 5002 ]) ; udp = Some (Count 2) } })
 *)
 
 (** The permissions a program runs with, all set: the [cli]'s rules before the

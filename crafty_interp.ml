@@ -2011,16 +2011,13 @@ end
 
 (** The program, or all the errors found in it, in the order of the source;
  * and in [warnings], what is likely not what was meant. *)
-let compile ?(warnings=ref []) text : (program, error list) result =
+let compile ?warnings text : (program, error list) result =
     match Prs.parse text with
     | Error e -> Error [ e ]
     | Ok p ->
-        Result.bind (Typ.check ~warnings p) (fun body ->
-            Result.map (fun (limits : Typ.limits) ->
-                warnings :=
-                    List.sort (fun (a : error) b -> compare a.where b.where)
-                        (!warnings @ Typ.uncaptured_ports ~fixed:limits.ports.fixed body) ;
-                { body ; limits }) (Typ.limits ~sends:(Typ.sent_protocols body) p))
+        Result.bind (Typ.check ?warnings p) (fun body ->
+            Result.map (fun limits -> { body ; limits })
+                       (Typ.limits ~sends:(Typ.sent_protocols body) p))
 
 (** The filter of that text, alternative absolute patterns, or what is wrong
  * with it. *)

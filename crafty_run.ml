@@ -259,17 +259,14 @@ end
 
 (** {2 Running} *)
 
-(** The limits [program] runs with, given [extra_limits] (default: none, which
- * restricts nothing), or why it cannot run with them: the budget and ports
- * that both allow, and the permissions of
- * {!Crafty_typing.resolve_permissions}, where the rules of [extra_limits] go
+(** The limits [program] runs with, given the [overrides] of its declarations
+ * (default: none), and the permissions of
+ * {!Crafty_typing.resolve_permissions}, where the rules of [overrides] go
  * first and its flags win. *)
-let effective_limits ?(extra_limits=Typ.unrestricted) (program : Itp.program) =
-    Typ.combine ~program:program.limits ~cli:extra_limits |>
-    Result.map (fun (l : Typ.limits) ->
-        { l with permissions =
-            Typ.resolve_permissions ~program:program.limits.permissions
-                                    ~cli:extra_limits.permissions })
+let effective_limits ?(overrides=Typ.no_overrides) (program : Itp.program) =
+    { (Typ.combine ~program:program.limits ~cli:overrides) with
+      permissions = Typ.resolve_permissions ~program:program.limits.permissions
+                                            ~cli:overrides.permission_overrides }
 
 (** [limits] with a pool for each protocol that wants ephemeral ports and
  * was given none: a block of {!Crafty_tree.dynamic_ports} at random, clear
@@ -355,13 +352,13 @@ let route_ifname (program : Itp.program) =
                 Ip.Addr.to_dotted_string d ^" through "^ i) routes)))
 
 (** Run [program], as {!Crafty_interp.Partial.block} may have made it, on
- * [iface], with its {!effective_limits} given [extra_limits] (as
+ * [iface], with its {!effective_limits} given [overrides] (as
  * {!draw_pools} completes them), and return how it went, once it is over and what it changed on the host undone;
  * or why it did not run.
  *
  * Runs on the same interface at once must not capture each other's frames:
  * with addresses of their own, or else ports of their own, which pools
- * given in [extra_limits] keep apart.
+ * given in [overrides] keep apart.
  *
  * - [own_ip]: an address of its own, on the network of the interface's first
  *   one of its family (else on no network), rather than the interface's.
@@ -401,7 +398,7 @@ let route_ifname (program : Itp.program) =
  * - [on_stream]: each stream as it closes, then those still open at the end. *)
 let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         ?speed ?full_duplex ?mtu ?(linger=Clock.Interval.sec 2.) ?(time_wait=Clock.Interval.zero) ?strict_ports ?format ?args
-        ~resolver ~getenv ?extra_limits
+        ~resolver ~getenv ?overrides
         ?(on_start=ignore) ?(info=ignore)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
         ?(on_warning=fun _ _ -> ()) ?(on_packet=fun _ _ _ -> ())
@@ -416,9 +413,8 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         List.map (fun (proto, p) -> Host_config.{ proto ; lo = p ; hi = p })
                  (Host_config.ports_in_use ()) in
     let* limits =
-        Result.map_error (fun e -> Setup ("The program's PORTS and the extra ports: "^ e ^"."))
-                         (Result.bind (effective_limits ?extra_limits program)
-                                      (fun l -> draw_pools ~busy:(busy ()) l)) in
+        Result.map_error (fun e -> Setup ("The program's ports: "^ e ^"."))
+                         (draw_pools ~busy:(busy ()) (effective_limits ?overrides program)) in
     let ifname = iface.ifname and host = iface.host in
     (* The fixed ports and the pools: *)
     let ports =

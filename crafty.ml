@@ -23,10 +23,9 @@
   The program sends and receives through the interface, behind a firewall
   that enforces its permissions, then a policer that enforces the budgets,
   which limit what the program sends. It uses only its ports, and of TCP
-  and UDP, only what the interface receives for them is captured. Budgets
-  and ports are those that both the command line and the program (its
-  [BUDGET] and [PORTS]) allow; permissions are the program's
-  [PERMISSIONS], which the command line overrides. Unless [--no-fw], the
+  and UDP, only what the interface receives for them is captured. The
+  options of the command line replace what the program declares of them
+  ([BUDGET], [PORTS] and [PERMISSIONS]). Unless [--no-fw], the
   kernel is kept off those ports. With [--ip], it uses an address of its
   own, not added to the interface, and only what is for that address is
   captured. What
@@ -88,6 +87,7 @@ let default_max_duration = Clock.Interval.min 10.
 
 let () =
     let ifname = ref "" and own_ip = ref None and ports = ref [] and pools = ref []
+    and tcp_count = ref None and udp_count = ref None
     and routing = ref None
     and no_fw = ref false and print_packets = ref false
     and print_only = ref None and stats = ref false and cleanup = ref false
@@ -127,9 +127,18 @@ let () =
                 with Widget.Bad_value e -> die "%s" e in
             r := Some ((!r |? []) @ [ v, c ]))
     and some_bool r = Arg.Bool (fun b -> r := Some b) in
-    let port_range ?(into=ports) proto = Arg.String (fun s ->
+    let add_range into proto s =
         try into := !into @ [ Host_config.port_range_of_string proto s ]
-        with Invalid_argument e -> die "%s" e) in
+        with Invalid_argument e -> die "%s" e in
+    let port_range proto = Arg.String (add_range ports proto) in
+    (* How many ephemeral ports to draw, or ports to pick them from: *)
+    let ephemeral proto count = Arg.String (fun s ->
+        match int_of_string_opt s with
+        | Some n when not (String.contains s '-') ->
+            if n < 0 || n > 65535 then die "Not a count of ports: %d" n ;
+            count := Some n
+        | _ ->
+            add_range pools proto s) in
     (* The options, which [--help] lists: *)
     let specs = ref [] in
     (* With the next argument if it is an absolute pattern rather than a
@@ -176,13 +185,15 @@ let () =
         "--ip", Arg.String (fun s -> own_ip := Some (Ip.Addr.of_dotted_string s)),
             "ADDR use this address, rather than the interface's" ;
         "--tcp", port_range Host_config.Tcp,
-            "LO[-HI] TCP ports the program may use of its fixed ones (repeatable)" ;
+            "LO[-HI] TCP ports the program uses by number, rather than PORTS.tcp.fixed (repeatable)" ;
         "--udp", port_range Host_config.Udp,
-            "LO[-HI] UDP ports the program may use of its fixed ones (repeatable)" ;
-        "--tcp-ephemeral", port_range ~into:pools Host_config.Tcp,
-            "LO[-HI] TCP ports to pick source ports from (repeatable)" ;
-        "--udp-ephemeral", port_range ~into:pools Host_config.Udp,
-            "LO[-HI] UDP ports to pick source ports from (repeatable)" ;
+            "LO[-HI] UDP ports the program uses by number, rather than PORTS.udp.fixed (repeatable)" ;
+        "--tcp-ephemeral", ephemeral Host_config.Tcp tcp_count,
+            "N|LO-HI how many TCP source ports to draw, or ports to pick them from \
+             (repeatable), rather than PORTS.tcp.ephemeral" ;
+        "--udp-ephemeral", ephemeral Host_config.Udp udp_count,
+            "N|LO-HI how many UDP source ports to draw, or ports to pick them from \
+             (repeatable), rather than PORTS.udp.ephemeral" ;
         "--no-fw", Arg.Set no_fw,
             " leave the program's ports to the kernel as well, which then answers too" ;
         "--speed",
@@ -265,18 +276,20 @@ let () =
             Printf.eprintf "%s: %s\n" prog_name
                 (IO.to_string Prs.print_error e)) es ;
         exit 2 in
+    let warn ws =
+        if not !no_warning then
+            List.iter (fun e ->
+                Printf.eprintf "%s: %a: Warning: %s\n%!" prog_name
+                    Ast.print_location e.Prs.where e.message) ws in
+    let stop_if_warned ws = if !warn_error && not !no_warning && ws <> [] then exit 2 in
     (* A typo in the program changes nothing on the host: *)
     let compile () =
         let warnings = ref [] in
         let res = Itp.compile ~warnings text in
-        if !no_warning then warnings := [] ;
-        List.iter (fun e ->
-            Printf.eprintf "%s: %a: Warning: %s\n%!" prog_name
-                Ast.print_location e.Prs.where e.message) !warnings ;
+        warn !warnings ;
         match res with
         | Error es -> fail es
-        | Ok _ when !warn_error && !warnings <> [] -> exit 2
-        | Ok p -> p in
+        | Ok p -> stop_if_warned !warnings ; p in
     if !normalize then (
         if !check then ignore (compile ()) ;
         (match Prs.parse text with
@@ -289,9 +302,9 @@ let () =
         Typ.{ local_ips = rules !local_ips ; remote_ips = rules !remote_ips ;
               mac_spoofing = !mac_spoofing ; exfiltration = !exfiltration ;
               promiscuous = !promiscuous ; public_env = !public_env } in
-    (* What the command line allows, with a default duration if neither it
+    (* What the command line replaces, with a default duration if neither it
      * nor the program sets one: *)
-    let extra_limits =
+    let overrides =
         let budget =
             List.filter_map identity Ast.[
                 Option.map (fun d -> "max_duration", Interval d) !max_duration ;
@@ -309,30 +322,26 @@ let () =
         let ranges rs proto =
             List.filter_map (fun (r : Host_config.port_range) ->
                 if r.proto = proto then Some (r.lo, r.hi) else None) rs |>
-            Typ.merge_ranges in
-        let opt rs proto =
-            match ranges rs proto with [] -> None | r -> Some r in
-        (* Those of a protocol that the command line does not restrict: *)
-        let fixed proto = opt !ports proto |? Typ.all_ports in
-        Typ.{
-            budget ;
-            ports = { no_ports with
-                      fixed = { tcp = fixed Host_config.Tcp ; udp = fixed Host_config.Udp } ;
-                      pool = { tcp = opt !pools Host_config.Tcp ; udp = opt !pools Host_config.Udp } } ;
-            permissions = cli_permissions } in
-    (* --tcp and --udp restrict what the program declares: *)
-    List.iter (fun (proto, fixed) ->
-        if fixed = [] && List.exists (fun (r : Host_config.port_range) -> r.proto = proto) !ports then
-            let name = Host_config.string_of_proto proto in
-            die "%s: --%s restricts its fixed %s ports, but it declares none \
-                 (PORTS.%s.fixed)." prog_name name (String.uppercase_ascii name) name)
-        [ Host_config.Tcp, program.limits.ports.fixed.tcp ;
-          Udp, program.limits.ports.fixed.udp ] ;
-    (* What both allow, which the run computes as well: *)
-    let limits =
-        match Run.effective_limits ~extra_limits program with
-        | Ok l -> l
-        | Error e -> die "%s: its PORTS and the command line: %s." prog_name e in
+            Typ.merge_ranges |>
+            function [] -> None | r -> Some r in
+        let ephemeral proto count =
+            match !count, ranges !pools proto with
+            | Some _, Some _ ->
+                die "--%s-ephemeral is a count or ports, not both."
+                    (Host_config.string_of_proto proto)
+            | Some n, None -> Some (Typ.Count n)
+            | None, r -> Option.map (fun r -> Typ.Pool r) r in
+        Typ.{ budget_overrides = budget ;
+              fixed_overrides = { tcp = ranges !ports Host_config.Tcp ;
+                                  udp = ranges !ports Host_config.Udp } ;
+              ephemeral_overrides = { tcp = ephemeral Host_config.Tcp tcp_count ;
+                                      udp = ephemeral Host_config.Udp udp_count } ;
+              permission_overrides = cli_permissions } in
+    let limits = Run.effective_limits ~overrides program in
+    (* What is captured, now that the ports are known: *)
+    let uncaptured = Typ.uncaptured_ports ~fixed:limits.ports.fixed program.body in
+    warn uncaptured ;
+    stop_if_warned uncaptured ;
     let format = !format in
     (* What crafty tells of how it goes, on stderr unless as text, out of the
      * way of the records: *)
@@ -501,7 +510,7 @@ let () =
                         ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger ~time_wait:!time_wait
                         ~format ~args ~resolver
                         ~getenv:Itp.getenv
-                        ~extra_limits
+                        ~overrides
                         ~on_start ~info:(info "%s") ~on_report:report
                         ~on_print:(fun t s ->
                             if format = Human then print_endline s

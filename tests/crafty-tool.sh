@@ -342,15 +342,15 @@ check "cleaned up after being killed" 0 $? "Cleaned up after crafty_"
 
 # Two at once, keeping the kernel off ports of their own: the first to
 # start ends first, and frees its ports, and only those:
-"$CRAFTY" -i $HOST_IF --udp-ephemeral 40000-40063 --max-duration 2s "$DIR/flood.cfty" > /dev/null 2>&1 &
+"$CRAFTY" -i $HOST_IF --udp-ephemeral 40000-40010 --max-duration 2s "$DIR/flood.cfty" > /dev/null 2>&1 &
 FIRST=$!
 sleep 1
-"$CRAFTY" -i $HOST_IF --udp-ephemeral 40100-40163 --max-duration 3s "$DIR/flood.cfty" > "$DIR/out" 2>&1 &
+"$CRAFTY" -i $HOST_IF --udp-ephemeral 40020-40030 --max-duration 3s "$DIR/flood.cfty" > "$DIR/out" 2>&1 &
 SECOND=$!
 wait $FIRST
 code=$?
 reserved=$(cat /proc/sys/net/ipv4/ip_local_reserved_ports)
-if [ $code = 3 ] && echo "$reserved" | grep -q '40100-40163' &&
+if [ $code = 3 ] && echo "$reserved" | grep -q '40020-40030' &&
    ! echo "$reserved" | grep -q '40000' ; then
     echo "ok   two at once, the first over"
 else
@@ -374,8 +374,18 @@ if grep -q '/nft \|/ethtool ' "$DIR/out" ; then
     echo "FAIL the host was changed without ports:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 
-"$CRAFTY" -i $HOST_IF --udp 40000 "$DIR/udp.cfty" > "$DIR/out" 2>&1
-check "--udp restricts the program's fixed ports only" 2 $? "declares none (PORTS.udp.fixed)"
+# The command line replaces the program's ports, for --check too:
+"$CRAFTY" --verbose -i $HOST_IF --udp 40600 --udp-ephemeral 0 "$DIR/udp.cfty" > "$DIR/out" 2>&1
+check "--udp replaces the fixed ports" 0 $? "^Ports: UDP 40600;"
+if ! grep -q "echo 2" "$DIR/out" ; then
+    echo "FAIL no echo from the fixed port:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
+fi
+"$CRAFTY" --check -e 'on for=1s /IP/TCP(dst == 80) {}' > "$DIR/out" 2>&1
+check "--check warns of a port not captured" 0 $? "TCP port 80 is not among PORTS.tcp.fixed"
+"$CRAFTY" --check --tcp 80 -e 'on for=1s /IP/TCP(dst == 80) {}' > "$DIR/out" 2>&1
+code=$?
+if grep -q Warning "$DIR/out" ; then code=99 ; fi
+check "--check with the port given" 0 $code
 
 # A fixed port the host listens on is refused, unless left to the host:
 socat -u UDP4-RECV:40500,bind=10.77.0.1 /dev/null >/dev/null 2>&1 &
