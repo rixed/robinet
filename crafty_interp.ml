@@ -3541,9 +3541,8 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       match compile text with
       | Error es -> String.concat "\n" (List.map (IO.to_string Prs.print_error) es)
       | Ok p ->
-          let ports = p.limits.ports in
-          let p = { p with limits = { p.limits with ports = { ports with
-                        pool = { ports.pool with udp = udp_pool } } } } in
+          let p = { p with limits = Typ.with_pool { p.limits.ports.pool with udp = udp_pool }
+                                                  p.limits } in
           let sim = Simulation.make ~realtime:false "crafty-api" in
           let out = ref [] and frames = ref 0 in
           let line s =

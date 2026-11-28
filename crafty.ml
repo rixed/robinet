@@ -501,6 +501,7 @@ let () =
         if !signalled then c.Run.stop () in
     let res =
         Fun.protect ~finally:(fun () -> Run.Iface.release iface) (fun () ->
+            let limits = match Run.draw_pools iface limits with Ok l -> l | Error e -> failed e in
             Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ]
                 ~on_signal:(fun () ->
                     signalled := true ;
@@ -510,7 +511,7 @@ let () =
                         ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger ~time_wait:!time_wait
                         ~format ~args ~resolver
                         ~getenv:Itp.getenv
-                        ~overrides
+                        ~limits
                         ~on_start ~info:(info "%s") ~on_report:report
                         ~on_print:(fun t s ->
                             if format = Human then print_endline s
@@ -523,7 +524,7 @@ let () =
                             List.iter (fun (name, c) ->
                                 Hashtbl.modify_def 0 name ((+) c) suspicious)
                                 (Run.suspicious n))
-                        program)) in
+                        program.body)) in
     let o = match res with Ok o -> o | Error e -> failed e in
     let c = o.counters in
     let end_ = Clock.Time.of_interval o.duration in

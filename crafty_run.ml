@@ -42,7 +42,9 @@ module EthSpeed = SimTypes.EthSpeed
 module Ast = Crafty_ast
 module Itp = Crafty_interp
 module Prs = Crafty_parser
+module Tre = Crafty_tree
 module Typ = Crafty_typing
+module Val = Crafty_value
 
 type error =
     (* The host is as it was, nothing or all of it undone: *)
@@ -116,11 +118,11 @@ let suspicious_stats =
 let suspicious n =
     List.filter_map (fun (name, v) ->
         match v with
-        | Crafty_value.Int c
+        | Val.Int c
           when c <> 0 && List.exists (List.mem name % snd) suspicious_stats ->
             Some (name, c)
         | _ -> None
-    ) (Crafty_tree.stats n)
+    ) (Tre.stats n)
 
 type warning =
     | Program of Prs.error
@@ -269,9 +271,9 @@ let effective_limits ?(overrides=Typ.no_overrides) (program : Itp.program) =
                                             ~cli:overrides.permission_overrides }
 
 (** [limits] with a pool for each protocol that wants ephemeral ports and
- * was given none: a block of {!Crafty_tree.dynamic_ports} at random, clear
+ * was given none: a block of {!Tre.dynamic_ports} at random, clear
  * of its fixed ports and of those [busy]; or why there is none. *)
-let draw_pools ?(busy=[]) (limits : Typ.limits) =
+let pools_clear_of ?(busy=[]) (limits : Typ.limits) =
     let p = limits.ports in
     let draw proto fixed n pool =
         if n = 0 || pool <> None then Ok pool else
@@ -279,7 +281,7 @@ let draw_pools ?(busy=[]) (limits : Typ.limits) =
         let taken =
             fixed @ List.filter_map (fun (r : Host_config.port_range) ->
                         if r.proto = proto then Some (r.lo, r.hi) else None) busy in
-        let lo, hi = List.hd Crafty_tree.dynamic_ports in
+        let lo, hi = List.hd Tre.dynamic_ports in
         let starts = hi - lo + 2 - n in
         let clear s = not (List.exists (fun (a, b) -> s <= b && a < s + n) taken) in
         let rec find first i =
@@ -294,7 +296,7 @@ let draw_pools ?(busy=[]) (limits : Typ.limits) =
     let ( let* ) = Stdlib.Result.bind in
     let* tcp = draw Host_config.Tcp p.fixed.tcp p.ephemeral.tcp p.pool.tcp in
     let* udp = draw Host_config.Udp p.fixed.udp p.ephemeral.udp p.pool.udp in
-    Ok { limits with ports = { p with pool = { tcp ; udp } } }
+    Ok (Typ.with_pool { tcp ; udp } limits)
 
 (*$inject
   let wanting ?(fixed=[]) n =
@@ -303,21 +305,31 @@ let draw_pools ?(busy=[]) (limits : Typ.limits) =
                   fixed = { tcp = fixed ; udp = [] } ;
                   ephemeral = { tcp = n ; udp = 0 } } }
 *)
-(*$T draw_pools
-  match draw_pools (wanting ~fixed:[ 49152, 65000 ] 20) with \
+(*$T pools_clear_of
+  match pools_clear_of (wanting ~fixed:[ 49152, 65000 ] 20) with \
   | Ok l -> (match l.ports.pool.tcp with \
              | Some [ lo, hi ] -> hi - lo = 19 && lo > 65000 && hi <= 65535 \
              | _ -> false) && l.ports.pool.udp = None \
   | Error _ -> false
-  match draw_pools ~busy:[ Host_config.port_range_of_string Tcp "65001-65010" ] \
+  match pools_clear_of ~busy:[ Host_config.port_range_of_string Tcp "65001-65010" ] \
                    (wanting ~fixed:[ 49152, 65000 ] 20) with \
   | Ok l -> (match l.ports.pool.tcp with \
              | Some [ lo, hi ] -> hi - lo = 19 && lo > 65010 && hi <= 65535 \
              | _ -> false) \
   | Error _ -> false
-  Result.is_error (draw_pools (wanting ~fixed:[ 49152, 65530 ] 20))
-  (Result.get_ok (draw_pools (wanting 0))).ports.pool.tcp = None
+  Result.is_error (pools_clear_of (wanting ~fixed:[ 49152, 65530 ] 20))
+  (Result.get_ok (pools_clear_of (wanting 0))).ports.pool.tcp = None
 *)
+
+(** [limits] with {!pools_clear_of} the ports the host and the runs on
+ * [iface] use, which {!run} needs; or why there are none. *)
+let draw_pools (iface : Iface.t) limits =
+    let busy =
+        Iface.ports_in_use iface @
+        List.map (fun (proto, p) -> Host_config.{ proto ; lo = p ; hi = p })
+                 (Host_config.ports_in_use ()) in
+    Result.map_error (fun e -> Setup ("The program's ports: "^ e ^"."))
+                     (pools_clear_of ~busy limits)
 
 (** Whether a run with [limits] has ports, which [fw] keeps the kernel off. *)
 let has_ports (limits : Typ.limits) =
@@ -351,14 +363,14 @@ let route_ifname (program : Itp.program) =
             (String.concat ", " (List.map (fun (i, d) ->
                 Ip.Addr.to_dotted_string d ^" through "^ i) routes)))
 
-(** Run [program], as {!Crafty_interp.Partial.block} may have made it, on
- * [iface], with its {!effective_limits} given [overrides] (as
- * {!draw_pools} completes them), and return how it went, once it is over and what it changed on the host undone;
- * or why it did not run.
+(** Run [body], as {!Crafty_interp.Partial.block} may have made it, on
+ * [iface] with [limits], and return how it went, once it is over and what it
+ * changed on the host undone; or why it did not run. [limits] has a pool for
+ * each protocol that wants ephemeral ports, as {!draw_pools} gives.
  *
  * Runs on the same interface at once must not capture each other's frames:
  * with addresses of their own, or else ports of their own, which pools
- * given in [overrides] keep apart.
+ * keep apart.
  *
  * - [own_ip]: an address of its own, on the network of the interface's first
  *   one of its family (else on no network), rather than the interface's.
@@ -398,23 +410,19 @@ let route_ifname (program : Itp.program) =
  * - [on_stream]: each stream as it closes, then those still open at the end. *)
 let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         ?speed ?full_duplex ?mtu ?(linger=Clock.Interval.sec 2.) ?(time_wait=Clock.Interval.zero) ?strict_ports ?format ?args
-        ~resolver ~getenv ?overrides
+        ~resolver ~getenv ~(limits : Typ.limits)
         ?(on_start=ignore) ?(info=ignore)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
         ?(on_warning=fun _ _ -> ()) ?(on_packet=fun _ _ _ -> ())
         ?(on_stream=fun _ _ _ -> ())
-        (program : Itp.program) =
+        (body : Typ.block) =
     let ( let* ) = Stdlib.Result.bind in
     let refuse cond e = if cond then Error (Setup e) else Ok () in
-    (* Ephemeral ports are drawn clear of those the host and the other runs
-     * use: *)
-    let busy () =
-        Iface.ports_in_use iface @
-        List.map (fun (proto, p) -> Host_config.{ proto ; lo = p ; hi = p })
-                 (Host_config.ports_in_use ()) in
-    let* limits =
-        Result.map_error (fun e -> Setup ("The program's ports: "^ e ^"."))
-                         (draw_pools ~busy:(busy ()) (effective_limits ?overrides program)) in
+    let* () =
+        let p = limits.ports in
+        refuse ((p.ephemeral.tcp > 0 && p.pool.tcp = None) ||
+                (p.ephemeral.udp > 0 && p.pool.udp = None))
+            "The program wants ephemeral ports and was given no pool of them." in
     let ifname = iface.ifname and host = iface.host in
     (* The fixed ports and the pools: *)
     let ports =
@@ -431,7 +439,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     (* Unless allowed, nothing received is sent: *)
     let* () =
         if flag permissions.exfiltration then Ok () else
-        match Typ.exfiltrations ?public_env:permissions.public_env program.body with
+        match Typ.exfiltrations ?public_env:permissions.public_env body with
         | [] -> Ok ()
         | es -> Error (Denied es) in
     let* kernel_routing =
@@ -488,7 +496,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         match Typ.denied_literals ~local:(Some (rules permissions.local_ips))
                   ~remote:(Some (rules permissions.remote_ips))
                   ~mac:(if flag permissions.mac_spoofing then None else Some host.mac)
-                  program.body with
+                  body with
         | [] -> Ok ()
         | es -> Error (Denied es) in
     let speed = speed |? (iface.speed |? EthSpeed.Eth1Gbps)
@@ -500,7 +508,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         info (Printf.sprintf "Routing: %s." (if kernel_routing then "the kernel's" else "manual")) ;
         info (Printf.sprintf "Budget: %s." (if limits.budget = [] then "none" else
             String.concat ", " (List.map (fun (n, l) ->
-                n ^" "^ Crafty_value.(to_string (Typ.type_of_literal l) (of_literal l)))
+                n ^" "^ Val.(to_string (Typ.type_of_literal l) (of_literal l)))
                 limits.budget))) ;
         info (Printf.sprintf "Ports: %s; time wait %s."
             (if ports = [] then "none" else
@@ -647,7 +655,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
                         else check pkts' deadline) () in
                 if s = Itp.Stopped then reset_streams () ;
                 check (!pkts_out + !pkts_in) (secs () +. linger))
-            program in
+            { Itp.body ; limits } in
     handle := Some h ;
     let finished = ref false in
     (* For a program that waits, which the interpreter does not look at. From a
@@ -720,7 +728,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     let unseen = ref 0 and pcap_dropped = ref 0 in
     let not_captured () = !unseen + !pcap_dropped in
     let was_injected frame =
-        let is_it bits = Crafty_tree.(is_emitted (Frame bits) frame) in
+        let is_it bits = Tre.(is_emitted (Frame bits) frame) in
         if Queue.fold (fun found bits -> found || is_it bits) false injected then (
             let rec pop () =
                 let bits = Queue.pop injected in

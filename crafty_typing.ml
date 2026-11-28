@@ -775,6 +775,8 @@ let no_ports =
 
 let no_limits = { budget = [] ; ports = no_ports ; permissions = no_permissions }
 
+let with_pool pool l = { l with ports = { l.ports with pool } }
+
 (** What replaces the declarations of a program, for each field given: *)
 type overrides =
     { budget_overrides : (string * Ast.literal) list ;
@@ -812,8 +814,8 @@ let print_fixed oc { tcp ; udp } =
 
 let print_pool oc pool =
     Printf.fprintf oc "{tcp: %a; udp: %a }"
-        (Option.print print_ranges) pool.tcp
-        (Option.print print_ranges) pool.udp
+        print_ranges pool.tcp
+        print_ranges pool.udp
 
 (*$= merge_ranges & ~printer:(IO.to_string print_ranges)
   [ 1, 5 ; 7, 9 ] (merge_ranges [ 7, 8 ; 3, 5 ; 1, 3 ; 9, 9 ])
