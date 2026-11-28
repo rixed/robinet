@@ -424,6 +424,8 @@ let route_ifname (program : Itp.program) =
  *   rather than warn of it; which runs that share an address need, lest one
  *   takes the port of another.
  * - [format]: what [format()] writes.
+ * - [while_]: polled about twice a second from another thread; once false,
+ *   the run is stopped as with [control.stop].
  * - [args], [resolver], [getenv]: for [arg()], [resolve()] and [hostname()],
  *   and [getenv()].
  *
@@ -444,7 +446,7 @@ let route_ifname (program : Itp.program) =
  * - [on_stream]: each stream as it closes, then those still open at the end. *)
 let run (r : reservation) ?(fw=false) ?kernel_routing ?(any_iface=false)
         ?speed ?full_duplex ?mtu ?(linger=Clock.Interval.sec 2.) ?(time_wait=Clock.Interval.zero) ?strict_ports ?format ?args
-        ~resolver ~getenv
+        ?(while_=fun () -> true) ~resolver ~getenv
         ?(on_start=ignore) ?(info=ignore)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
         ?(on_warning=fun _ _ -> ()) ?(on_packet=fun _ _ _ -> ())
@@ -808,18 +810,25 @@ let run (r : reservation) ?(fw=false) ?kernel_routing ?(any_iface=false)
           not_injected = !not_injected ; not_captured = not_captured () ;
           wire_pkts = !wire_pkts ; wire_bytes = !wire_bytes } in
     let stops = Atomic.make 0 in
-    on_start
+    let control =
         { stop = (fun () ->
             if Atomic.fetch_and_add stops 1 = 0 then
                 Simulation.asap sim.root.power (fun () -> hurry := true ; h.stop ()) ()
             else ignore (Thread.create (Simulation.stop sim) ())) ;
           now = instant ;
           matches = h.matches ;
-          counters } ;
+          counters } in
+    on_start control ;
+    (* Stops once only, as a second stop is a hard one: *)
+    let asked_stop = ref false in
+    let while_ () =
+        if not !asked_stop && not (while_ ()) then (
+            asked_stop := true ; control.stop ()) ;
+        ask_dropped () ; not !finished in
     (* What leaves is what was injected, or else what the host sends, which
      * has the interface's address: *)
     let sniffer =
-        Pcap.sniffer pcap ~while_:(fun () -> ask_dropped () ; not !finished) (fun bits ->
+        Pcap.sniffer pcap ~while_ (fun bits ->
             let injected = was_injected bits in
             if injected ||
                (match Eth.Pdu.unpack bits with
