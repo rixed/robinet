@@ -814,8 +814,8 @@ let print_fixed oc { tcp ; udp } =
 
 let print_pool oc pool =
     Printf.fprintf oc "{tcp: %a; udp: %a }"
-        print_ranges pool.tcp
-        print_ranges pool.udp
+        (Option.print print_ranges) pool.tcp
+        (Option.print print_ranges) pool.udp
 
 (*$= merge_ranges & ~printer:(IO.to_string print_ranges)
   [ 1, 5 ; 7, 9 ] (merge_ranges [ 7, 8 ; 3, 5 ; 1, 3 ; 9, 9 ])
