@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 159d9abdebbbb3888223586dce6f7eb0) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 99fdb10127fd41f2122a0296240e4fb8) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -26,7 +26,7 @@ let introduction = {crafty_manual|### A first program
       print("${answers} answers out of 3: ${verdict}")
     }
 
-    % sudo crafty --udp 40000-40010 --fw intro.cfty
+    % sudo crafty intro.cfty
     ...
     ping 0
     ping 1
@@ -139,6 +139,7 @@ sequence number regardless of the state of the TCP connection. On reception,
 `IP!` sees each fragment and `TCP!` each segment, even without data.
 
     # A SYN of our own, and the SYN-ACK that answers it:
+    PORTS = {tcp: {fixed: [40000]}}   # the ports used by number
     target = 192.0.2.10
     {
       # "on" runs its block for each matching packet, while the enclosing
@@ -153,7 +154,7 @@ sequence number regardless of the state of the TCP connection. On reception,
       print("SYN of seq ${seg[TCP].seq_num} sent")
     }
 
-    % sudo crafty --tcp 40000 --fw syn.cfty
+    % sudo crafty syn.cfty
     SYN of seq 1000 sent
     SYN-ACK: seq 1969569245, ack 1001
 
@@ -185,15 +186,17 @@ Options:
     default route). Crafty needs root, or `setcap cap_net_raw,cap_net_admin=ep`.
 -   `--routing kernel|manual`: `kernel` (default) uses kernel routes. `manual`
     takes gateway from the interface and then does ARP etc.
--   `--tcp LO-HI`, `--udp LO-HI` (repeatable): the fixed ports.
+-   `--tcp LO-HI`, `--udp LO-HI` (repeatable): restrict the program's fixed
+    ports to those.
 -   `--tcp-ephemeral LO-HI`, `--udp-ephemeral LO-HI` (repeatable): the pool to
     pick source ports from. See also [Budget, ports and
     permissions](#budget-ports-and-permissions).
--   `--fw`: crafty shares the interface's address with the host, whose kernel
+-   `--no-fw`: crafty shares the interface's address with the host, whose kernel
     would answer what crafty receives with TCP resets and ICMP port
-    unreachables. `--fw` keeps the kernel off the fixed and ephemeral ports.
+    unreachables, so crafty keeps the kernel off its ports, and refuses those
+    the host listens on. `--no-fw` leaves them to the kernel as well.
 -   `--ip ADDR`: an address of crafty's own instead, on the interface's network,
-    for which crafty answers ARP. Then `--fw` is not needed.
+    for which crafty answers ARP. The kernel is then left alone.
 -   `-p [/PATTERN]` (or `--print-packets`): prints the packets à la tcpdump.
 -   `--format csv|json`: change the output format to csv or json (json makes -p
     print all available details of every packet).
@@ -321,10 +324,12 @@ A program may declare them, once each, at its top level, with literals only:
 
 -   `BUDGET`'s fields are the budget options of crafty, named alike.
 -   `max_ram`, in bytes.
--   `PORTS` has, by protocol, `fixed` ports and ranges `[first, last]`, used by
-    number (default: none), and how many `ephemeral` ones to pick source ports
-    from: a pool from `--tcp-ephemeral`/`--udp-ephemeral`, or else a random
-    block of 49152-65535. Without it, source ports come from `fixed`.
+-   `PORTS` has, by protocol, `fixed` ports and ranges `[first, last]`, sent
+    from or listened on by number (default: none), and how many `ephemeral` ones
+    to pick source ports from (default: 64 if the program sends over that
+    protocol, else 0): a pool from `--tcp-ephemeral`/`--udp-ephemeral`, or else
+    a random block of 49152-65535. With `ephemeral: 0`, source ports come from
+    `fixed`. Only these ports are captured.
 -   crafty runs with what both the program and the command line allow.
 -   `PERMISSIONS`:
     -   `local_ips`, `remote_ips`: rules `Accept(x)` or `Deny(x)`, `x` being a
@@ -694,6 +699,7 @@ is often cut 8 bytes after the IP header: absent fields will read 0. A quoted
 first fragment has its `UDP` or `TCP` on top; a later one, `Raw`. Sent, a quoted
 `IP` or `IP6` needs a `src` and a `dst`; lengths and checksums are managed.
 
+    PORTS = {udp: {fixed: [4000]}}
     /IP6(dst=2001:db8::2)/UDP(src=4000, dst=9)/Raw("anyone?")
     expect timeout=1s /IP6/ICMP6/DestUnreachable(code == PORT_UNREACHABLE6)/IP6/UDP(src == 4000) {
       print("closed, says ${MATCH[/IP6].src}")
@@ -853,7 +859,7 @@ With `--format json`, each report is a line such as
       for b in histogram(rtts, bucket=1ms) { print("${b.min} to ${b.max}: ${b.count}") }
     }
 
-    % sudo crafty --ip 192.0.2.5 --udp 40000-40010 rtt.cfty
+    % sudo crafty --ip 192.0.2.5 rtt.cfty
     100/100 echoed, rtt min 4.34351ms median 7.94053ms p99 10.2825ms max 10.6628ms
     4.34351ms to 4.77314ms: 8
     ...
@@ -865,6 +871,7 @@ the next.
 ### An HTTP server
 
     BUDGET = {max_duration: 61m}
+    PORTS = {tcp: {fixed: [80]}}
     on for=1h /IP/TCP(dst == 80)/HTTP/HttpRequest {
       /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/HTTP {
         if MATCH[HttpRequest].url == "/" { HttpAnswer(200)/Raw("hello\n") }
@@ -872,21 +879,23 @@ the next.
       }
     }
 
-    % sudo crafty --tcp 80 --fw server.cfty
+    % sudo crafty server.cfty
 
 ### A UDP echo server
 
     PERMISSIONS = {exfiltration: true}  # it sends what's sniffed
     BUDGET = {max_duration: 61m}
+    PORTS = {udp: {fixed: [7]}}
     on for=1h /IP/UDP(dst == 7)/Raw {
       /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Raw(MATCH[Raw].data)
     }
 
-    % sudo crafty --udp 7 --fw server.cfty
+    % sudo crafty server.cfty
 
 ### Losses per flow
 
     # 4 flows of 25 datagrams to the UDP echo server: how many get no echo?
+    PORTS = {udp: {fixed: [[40000, 40003]]}}
     target = ip_addr(arg(0))
     lost = array(init=25, len=4)
     {
@@ -899,7 +908,7 @@ the next.
     }
     repeat var=f count=4 { print("flow ${f}: ${lost[f]} lost") }
 
-    % sudo crafty --udp 40000-40003 --fw losses.cfty
+    % sudo crafty losses.cfty 192.0.2.10
     flow 0: 0 lost
     ...
 
@@ -908,7 +917,7 @@ last one.
 
 ### Is a port closed?
 
-    /IP(dst=192.0.2.10)/TCP(src=40001, dst=22) {
+    /IP(dst=192.0.2.10)/TCP(dst=22) {
       Raw("hello")
       expect timeout=1s ../TCP!(flags & RST) { print("reset by ${MATCH[IP].src}") }
     }
@@ -949,7 +958,7 @@ A write waits while TCP's send buffer is full, so the connection sets the rate;
 ### Raw frames
 
     /Eth!(dst=ff:ff:ff:ff:ff:ff, proto=0x88b5)/Raw("hello")
-    /IP!(dst=192.0.2.10, ttl=1, id=1234, dont_frag=true)/UDP(src=40000, dst=9)/Raw(#deadbeef)
+    /IP!(dst=192.0.2.10, ttl=1, id=1234, dont_frag=true)/UDP(dst=9)/Raw(#deadbeef)
 
 ### Utilities
 
@@ -994,8 +1003,8 @@ Whole programs
       }
     }
 
-    % sudo crafty --udp 40000 --fw lbtrace.cfty 10.2.1.3 8
-    to 10.2.1.3 from UDP port 40000 to 33434
+    % sudo crafty lbtrace.cfty 10.2.1.3 8
+    to 10.2.1.3 from UDP port 52817 to 33434
     1   10.1.1.1    8/8 min 0.04ms
     2   10.1.0.5    4/8 min 37.67ms
         10.1.0.6    4/8 min 34.92ms
@@ -1138,7 +1147,7 @@ probes without an answer.
       }
     }
 
-    % sudo crafty --udp 40000 --fw mtr.cfty 10.2.1.3 40 20 200ms
+    % sudo crafty mtr.cfty 10.2.1.3 40 20 200ms
     after 20 rounds:
     1   [10.1.1.1]  loss 0% avg 0.33ms  best 0.11ms worst 0.48ms
     2   [10.1.0.5]  loss 50%    avg 37.81ms best 37.6ms worst 38.1ms

@@ -21,11 +21,11 @@
   Running compiled crafty programs on a real interface.
 
   A program sends and receives through the interface, behind a firewall that
-  enforces its permissions, then a policer that enforces its budget. With
-  ports, it uses only those, and only what the interface receives for them is
-  captured. With an address of its own, not added to the interface, only what
-  is for that address is captured. With [fw], the kernel is kept off its
-  ports.
+  enforces its permissions, then a policer that enforces its budget. It
+  uses only its ports, and of TCP and UDP, only what the interface receives
+  for them is captured. With an address of its own, not added to the
+  interface, only what is for that address is captured. With [fw], the kernel
+  is kept off its ports.
 
   {!Iface.setup} prepares an interface for any number of runs, and {!run}
   runs one program on it, telling as it goes what the program prints,
@@ -193,7 +193,7 @@ struct
           changes : Host_config.changes option ;
           (* The runs in progress, by their own address (unless promiscuous)
            * and ports, which say what they capture: *)
-          mutable runs : (Ip.Addr.t option * Host_config.port_range list option) list ;
+          mutable runs : (Ip.Addr.t option * Host_config.port_range list) list ;
           lock : Mutex.t }
 
     (** Read interface [ifname], and with [rx_offloads_off] have it pass on
@@ -227,20 +227,20 @@ struct
         Mutex.lock t.lock ;
         Fun.protect ~finally:(fun () -> Mutex.unlock t.lock) f
 
-    (* Why a run capturing for address [ip] (or any) and [ports] (or any if None)
-     * cannot run alongside those in progress, if it cannot: none may capture
-     * what is for another, and two may not answer for the same address.
-     * Otherwise it is in progress until the function returned is called. *)
+    (** The ports of the runs in progress. *)
+    let ports_in_use t = locked t (fun () -> List.concat_map snd t.runs)
+
+    (* Why a run capturing for address [ip] (or any) and [ports] cannot run
+     * alongside those in progress, if it cannot: none may capture what is for
+     * another, and two may not answer for the same address. Otherwise it is
+     * in progress until the function returned is called. *)
     let enter t ip ports =
         let overlap (r : Host_config.port_range) (r' : Host_config.port_range) =
             r.proto = r'.proto && r.lo <= r'.hi && r'.lo <= r.hi in
         let conflicts (ip', ports') =
             (match ip, ip' with
              | Some a, Some b -> Ip.Addr.compare a b = 0
-             | _ ->
-                (match ports, ports' with
-                 | Some ps, Some ps' -> List.exists (fun r -> List.exists (overlap r) ps') ps
-                 | _ -> true)) in
+             | _ -> List.exists (fun r -> List.exists (overlap r) ports') ports) in
         let me = (ip, ports) in
         locked t (fun () ->
             match List.find_opt conflicts t.runs with
@@ -259,11 +259,12 @@ end
 
 (** {2 Running} *)
 
-(** The limits [program] runs with, given [extra_limits] (default: none), or
- * why it cannot run with them: the budget and ports that both allow, and the
- * permissions of {!Crafty_typing.resolve_permissions}, where the rules of
- * [extra_limits] go first and its flags win. *)
-let effective_limits ?(extra_limits=Typ.no_limits) (program : Itp.program) =
+(** The limits [program] runs with, given [extra_limits] (default: none, which
+ * restricts nothing), or why it cannot run with them: the budget and ports
+ * that both allow, and the permissions of
+ * {!Crafty_typing.resolve_permissions}, where the rules of [extra_limits] go
+ * first and its flags win. *)
+let effective_limits ?(extra_limits=Typ.unrestricted) (program : Itp.program) =
     Typ.combine ~program:program.limits ~cli:extra_limits |>
     Result.map (fun (l : Typ.limits) ->
         { l with permissions =
@@ -272,37 +273,38 @@ let effective_limits ?(extra_limits=Typ.no_limits) (program : Itp.program) =
 
 (** [limits] with a pool for each protocol that wants ephemeral ports and
  * was given none: a block of {!Crafty_tree.dynamic_ports} at random, clear
- * of its fixed ports; or why there is none. *)
-let draw_pools (limits : Typ.limits) =
+ * of its fixed ports and of those [busy]; or why there is none. *)
+let draw_pools ?(busy=[]) (limits : Typ.limits) =
     let p = limits.ports in
-    let draw name fixed wanted pool =
-        match wanted, pool with
-        | Some n, None ->
-            let lo, hi = List.hd Crafty_tree.dynamic_ports in
-            let starts = hi - lo + 2 - n in
-            let clear s = not (List.exists (fun (a, b) -> s <= b && a < s + n) fixed) in
-            let rec find first i =
-                if i >= starts then
-                    Error (Printf.sprintf "No block of %d %s ports from %d to %d is \
-                                           clear of the fixed ones" n name lo hi)
-                else
-                    let s = lo + (first + i) mod starts in
-                    if clear s then Ok (Some (if n = 0 then [] else [ s, s + n - 1 ]))
-                    else find first (i + 1) in
-            if starts <= 0 then find 0 0 else find (Random.int starts) 0
-        | _ -> Ok pool in
-    let fixed get = Option.map_default get [] p.fixed in
+    let draw proto fixed n pool =
+        if n = 0 || pool <> None then Ok pool else
+        let name = String.uppercase_ascii (Host_config.string_of_proto proto) in
+        let taken =
+            fixed @ List.filter_map (fun (r : Host_config.port_range) ->
+                        if r.proto = proto then Some (r.lo, r.hi) else None) busy in
+        let lo, hi = List.hd Crafty_tree.dynamic_ports in
+        let starts = hi - lo + 2 - n in
+        let clear s = not (List.exists (fun (a, b) -> s <= b && a < s + n) taken) in
+        let rec find first i =
+            if i >= starts then
+                Error (Printf.sprintf "No block of %d %s ports from %d to %d is \
+                                       clear of the fixed ones and those in use" n name lo hi)
+            else
+                let s = lo + (first + i) mod starts in
+                if clear s then Ok (Some [ s, s + n - 1 ])
+                else find first (i + 1) in
+        if starts <= 0 then find 0 0 else find (Random.int starts) 0 in
     let ( let* ) = Stdlib.Result.bind in
-    let* tcp = draw "TCP" (fixed (fun (f : _ Typ.by_proto) -> f.tcp)) p.ephemeral.tcp p.pool.tcp in
-    let* udp = draw "UDP" (fixed (fun (f : _ Typ.by_proto) -> f.udp)) p.ephemeral.udp p.pool.udp in
+    let* tcp = draw Host_config.Tcp p.fixed.tcp p.ephemeral.tcp p.pool.tcp in
+    let* udp = draw Host_config.Udp p.fixed.udp p.ephemeral.udp p.pool.udp in
     Ok { limits with ports = { p with pool = { tcp ; udp } } }
 
 (*$inject
   let wanting ?(fixed=[]) n =
       { Typ.no_limits with
         ports = { Typ.no_ports with
-                  fixed = Some { tcp = fixed ; udp = [] } ;
-                  ephemeral = { tcp = Some n ; udp = None } } }
+                  fixed = { tcp = fixed ; udp = [] } ;
+                  ephemeral = { tcp = n ; udp = 0 } } }
 *)
 (*$T draw_pools
   match draw_pools (wanting ~fixed:[ 49152, 65000 ] 20) with \
@@ -310,9 +312,22 @@ let draw_pools (limits : Typ.limits) =
              | Some [ lo, hi ] -> hi - lo = 19 && lo > 65000 && hi <= 65535 \
              | _ -> false) && l.ports.pool.udp = None \
   | Error _ -> false
+  match draw_pools ~busy:[ Host_config.port_range_of_string Tcp "65001-65010" ] \
+                   (wanting ~fixed:[ 49152, 65000 ] 20) with \
+  | Ok l -> (match l.ports.pool.tcp with \
+             | Some [ lo, hi ] -> hi - lo = 19 && lo > 65010 && hi <= 65535 \
+             | _ -> false) \
+  | Error _ -> false
   Result.is_error (draw_pools (wanting ~fixed:[ 49152, 65530 ] 20))
-  (Result.get_ok (draw_pools (wanting 0))).ports.pool.tcp = Some []
+  (Result.get_ok (draw_pools (wanting 0))).ports.pool.tcp = None
 *)
+
+(** Whether a run with [limits] has ports, which [fw] keeps the kernel off. *)
+let has_ports (limits : Typ.limits) =
+    let p = limits.ports in
+    let some fixed n pool =
+        fixed <> [] || (match pool with Some r -> r <> [] | None -> n > 0) in
+    some p.fixed.tcp p.ephemeral.tcp p.pool.tcp || some p.fixed.udp p.ephemeral.udp p.pool.udp
 
 (** The interface through which the kernel routes the destinations [program]
  * sends to that are literals, as {!Crafty_interp.Partial.block} makes them,
@@ -350,7 +365,8 @@ let route_ifname (program : Itp.program) =
  *
  * - [own_ip]: an address of its own, on the network of the interface's first
  *   one of its family (else on no network), rather than the interface's.
- * - [fw]: keep the kernel off the program's ports (not with [own_ip]).
+ * - [fw]: keep the kernel off the program's ports, if any (not with
+ *   [own_ip]).
  * - [kernel_routing]: ask the kernel for each packet's route (default, on
  *   Linux), rather than use the interface's subnets and gateways. With
  *   [any_iface], the kernel may tell of another interface (refused), as when
@@ -393,20 +409,26 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         (program : Itp.program) =
     let ( let* ) = Stdlib.Result.bind in
     let refuse cond e = if cond then Error (Setup e) else Ok () in
+    (* Ephemeral ports are drawn clear of those the host and the other runs
+     * use: *)
+    let busy () =
+        Iface.ports_in_use iface @
+        List.map (fun (proto, p) -> Host_config.{ proto ; lo = p ; hi = p })
+                 (Host_config.ports_in_use ()) in
     let* limits =
         Result.map_error (fun e -> Setup ("The program's PORTS and the extra ports: "^ e ^"."))
-                         (Result.bind (effective_limits ?extra_limits program) draw_pools) in
+                         (Result.bind (effective_limits ?extra_limits program)
+                                      (fun l -> draw_pools ~busy:(busy ()) l)) in
     let ifname = iface.ifname and host = iface.host in
-    (* The fixed ports and the pools, or None if any is allowed: *)
+    (* The fixed ports and the pools: *)
     let ports =
         let p = limits.ports in
-        Option.map (fun (f : _ Typ.by_proto) ->
-            let ranges proto fixed pool =
-                Typ.merge_ranges (fixed @ (pool |? [])) |>
-                List.map (fun (lo, hi) -> Host_config.{ proto ; lo ; hi }) in
-            ranges Host_config.Tcp f.tcp p.pool.tcp @ ranges Host_config.Udp f.udp p.pool.udp
-        ) p.fixed in
-    let some_ports = ports |? [] in
+        let ranges proto fixed pool =
+            Typ.merge_ranges (fixed @ (pool |? [])) |>
+            List.map (fun (lo, hi) -> Host_config.{ proto ; lo ; hi }) in
+        ranges Host_config.Tcp p.fixed.tcp p.pool.tcp @ ranges Host_config.Udp p.fixed.udp p.pool.udp in
+    (* Without ports, there is nothing to keep the kernel off: *)
+    let fw = fw && ports <> [] in
     let permissions = limits.permissions in
     let flag = Option.default false in
     let promisc = flag permissions.promiscuous in
@@ -422,7 +444,6 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             Error (Setup "Routing by the kernel works only on Linux.")
         | Some r -> Ok r
         | None -> Ok (Kernel_route.available ()) in
-    let* () = refuse (fw && ports = None) "Keeping the kernel off ports needs ports." in
     let* () =
         refuse (fw && own_ip <> None)
             "Keeping the kernel off ports and an address of the program's own do \
@@ -432,7 +453,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         let addresses =
             List.map (fun c -> (fst (c : Ip.Cidr.t :> Ip.Addr.t * int) :> Unix.inet_addr))
                      host.addresses in
-        match Host_config.fenced ~addresses some_ports (Host_config.listening ()) with
+        match Host_config.fenced ~addresses ports (Host_config.listening ()) with
         | [] -> Ok ()
         | sockets ->
             (* By port, with the addresses listened on: *)
@@ -441,7 +462,8 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
                 List.sort (fun (a, p) (b, q) -> compare (p, a) (q, b)) in
             Error (Setup (Printf.sprintf
                 "Keeping the kernel off the ports would keep the host off ports \
-                 it listens on: %s. Narrow the ports."
+                 it listens on: %s. Narrow the ports, or leave them to the host \
+                 as well (which then answers too)."
                 (String.concat ", " (List.map (fun (proto, p) ->
                     Printf.sprintf "%s %d (%s)"
                         (String.uppercase_ascii (Host_config.string_of_proto proto)) p
@@ -485,10 +507,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
                 n ^" "^ Crafty_value.(to_string (Typ.type_of_literal l) (of_literal l)))
                 limits.budget))) ;
         info (Printf.sprintf "Ports: %s; time wait %s."
-            (match ports with
-             | None -> "any"
-             | Some [] -> "none"
-             | Some ports ->
+            (if ports = [] then "none" else
                 String.concat ", " (List.map (fun (r : Host_config.port_range) ->
                     String.uppercase_ascii (Host_config.string_of_proto r.proto) ^" "^
                     Host_config.string_of_range r) ports))
@@ -523,8 +542,8 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
             let t = Host_config.changes "crafty" in
             try
                 if fw then (
-                    Host_config.firewall t ~ifname ~ports:some_ports () ;
-                    Host_config.reserve_ports t some_ports) ;
+                    Host_config.firewall t ~ifname ~ports () ;
+                    Host_config.reserve_ports t ports) ;
                 if forward_drop then
                     Option.may (fun ip ->
                         Host_config.firewall t ~ifname ~forward_drop:ip ()) own_ip ;
@@ -550,7 +569,7 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     Fun.protect ~finally:(fun () -> Pcap.close_iface injector) (fun () ->
     let* pcap =
         open_iface ~direction:Pcap.InOut
-            ~filter:(Host_config.pcap_filter ?ip:(if promisc then None else own_ip) ports) () in
+            ~filter:(Host_config.pcap_filter ?ip:(if promisc then None else own_ip) (Some ports)) () in
     Fun.protect ~finally:(fun () -> Pcap.close_iface pcap) (fun () ->
     let instant () = Simulation.now sim in
     let secs () = Clock.Time.to_secs (instant ()) in

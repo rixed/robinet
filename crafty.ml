@@ -22,13 +22,14 @@
 
   The program sends and receives through the interface, behind a firewall
   that enforces its permissions, then a policer that enforces the budgets,
-  which limit what the program sends. With ports, it
-  uses only those, and only what the interface receives for them is
-  captured. Budgets and ports are those that both the command line and the
-  program (its [BUDGET] and [PORTS]) allow; permissions are the program's
-  [PERMISSIONS], which the command line overrides. With [--ip], it uses an
-  address of its own, not added to the interface, and only what is for that
-  address is captured. With [--fw], the kernel is kept off those ports. What
+  which limit what the program sends. It uses only its ports, and of TCP
+  and UDP, only what the interface receives for them is captured. Budgets
+  and ports are those that both the command line and the program (its
+  [BUDGET] and [PORTS]) allow; permissions are the program's
+  [PERMISSIONS], which the command line overrides. Unless [--no-fw], the
+  kernel is kept off those ports. With [--ip], it uses an address of its
+  own, not added to the interface, and only what is for that address is
+  captured. What
   is changed on the host is undone at exit, or by [--cleanup] if crafty was
   killed.
 *)
@@ -88,7 +89,7 @@ let default_max_duration = Clock.Interval.min 10.
 let () =
     let ifname = ref "" and own_ip = ref None and ports = ref [] and pools = ref []
     and routing = ref None
-    and fw = ref false and print_packets = ref false
+    and no_fw = ref false and print_packets = ref false
     and print_only = ref None and stats = ref false and cleanup = ref false
     and check = ref false and normalize = ref false and format = ref Human
     and warn_error = ref false and no_warning = ref false
@@ -175,14 +176,15 @@ let () =
         "--ip", Arg.String (fun s -> own_ip := Some (Ip.Addr.of_dotted_string s)),
             "ADDR use this address, rather than the interface's" ;
         "--tcp", port_range Host_config.Tcp,
-            "LO[-HI] TCP ports the program uses (repeatable)" ;
+            "LO[-HI] TCP ports the program may use of its fixed ones (repeatable)" ;
         "--udp", port_range Host_config.Udp,
-            "LO[-HI] UDP ports the program uses (repeatable)" ;
+            "LO[-HI] UDP ports the program may use of its fixed ones (repeatable)" ;
         "--tcp-ephemeral", port_range ~into:pools Host_config.Tcp,
             "LO[-HI] TCP ports to pick source ports from (repeatable)" ;
         "--udp-ephemeral", port_range ~into:pools Host_config.Udp,
             "LO[-HI] UDP ports to pick source ports from (repeatable)" ;
-        "--fw", Arg.Set fw, " keep the kernel off the program's ports" ;
+        "--no-fw", Arg.Set no_fw,
+            " leave the program's ports to the kernel as well, which then answers too" ;
         "--speed",
             Arg.Symbol (Array.to_list EthSpeed.names, fun s ->
                 speed := Array.find_opt (fun x -> EthSpeed.to_string x = s) EthSpeed.all),
@@ -308,16 +310,24 @@ let () =
             List.filter_map (fun (r : Host_config.port_range) ->
                 if r.proto = proto then Some (r.lo, r.hi) else None) rs |>
             Typ.merge_ranges in
-        let pool proto =
-            match ranges !pools proto with [] -> None | r -> Some r in
+        let opt rs proto =
+            match ranges rs proto with [] -> None | r -> Some r in
+        (* Those of a protocol that the command line does not restrict: *)
+        let fixed proto = opt !ports proto |? Typ.all_ports in
         Typ.{
             budget ;
             ports = { no_ports with
-                      fixed = if !ports = [] then None
-                              else Some { tcp = ranges !ports Host_config.Tcp ;
-                                          udp = ranges !ports Host_config.Udp } ;
-                      pool = { tcp = pool Host_config.Tcp ; udp = pool Host_config.Udp } } ;
+                      fixed = { tcp = fixed Host_config.Tcp ; udp = fixed Host_config.Udp } ;
+                      pool = { tcp = opt !pools Host_config.Tcp ; udp = opt !pools Host_config.Udp } } ;
             permissions = cli_permissions } in
+    (* --tcp and --udp restrict what the program declares: *)
+    List.iter (fun (proto, fixed) ->
+        if fixed = [] && List.exists (fun (r : Host_config.port_range) -> r.proto = proto) !ports then
+            let name = Host_config.string_of_proto proto in
+            die "%s: --%s restricts its fixed %s ports, but it declares none \
+                 (PORTS.%s.fixed)." prog_name name (String.uppercase_ascii name) name)
+        [ Host_config.Tcp, program.limits.ports.fixed.tcp ;
+          Udp, program.limits.ports.fixed.udp ] ;
     (* What both allow, which the run computes as well: *)
     let limits =
         match Run.effective_limits ~extra_limits program with
@@ -383,16 +393,14 @@ let () =
         match if routed = None then Host_config.default_ifname () else routed with
         | Some i -> ifname := i
         | None -> die "No default route: give the interface (-i).") ;
-    if !fw && limits.ports.fixed = None then die "--fw needs ports (--tcp, --udp, or PORTS)." ;
-    if !fw && !own_ip <> None then
-        die "--fw and --ip do not go together: an address of the program's \
-             own shares no port with the kernel." ;
+    (* An address of the program's own shares no port with the kernel: *)
+    let fw = not !no_fw && !own_ip = None in
     let failed = function
         | Run.Setup e -> die "%s" e
         | Denied es -> fail es
         | Configure e -> prerr_endline e ; exit 1 in
     let iface =
-        match Run.Iface.setup ~rx_offloads_off:(!fw || !own_ip <> None)
+        match Run.Iface.setup ~rx_offloads_off:((fw && Run.has_ports limits) || !own_ip <> None)
                               ~ifname:!ifname () with
         | Ok i -> i
         | Error e -> failed e in
@@ -459,9 +467,9 @@ let () =
                 (if proto = Host_config.Tcp then "reset TCP port"
                  else "refused UDP port")
                 p
-                (if !fw then
-                    "it is outside the ports that --fw keeps the host off"
-                 else "keep the host off it with --fw, or give crafty \
+                (if fw then
+                    "it is outside the ports kept off the host: declare it in PORTS"
+                 else "keep the host off it without --no-fw, or give crafty \
                        an address of its own with --ip")) in
     (* A first signal stops the program, or its lingering, and a second one
      * crafty: *)
@@ -489,7 +497,7 @@ let () =
                     signalled := true ;
                     Option.may (fun c -> c.Run.stop ()) !control)
                 (fun () ->
-                    Run.run iface ?own_ip:!own_ip ~fw:!fw ~kernel_routing ~any_iface
+                    Run.run iface ?own_ip:!own_ip ~fw ~kernel_routing ~any_iface
                         ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger ~time_wait:!time_wait
                         ~format ~args ~resolver
                         ~getenv:Itp.getenv

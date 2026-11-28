@@ -181,10 +181,10 @@ setup
 trap teardown EXIT
 state > "$DIR/before"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 -p "$DIR/udp.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 -p "$DIR/udp.cfty" > "$DIR/out" 2>&1
 check "UDP with an address of its own" 0 $? "echo 2"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 -p '/IP/UDP(src == 7)' "$DIR/udp.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 -p '/IP/UDP(src == 7)' "$DIR/udp.cfty" > "$DIR/out" 2>&1
 check "printing the packets of a pattern" 0 $? "echo 2"
 if [ "$(grep -c '^< ' "$DIR/out")" = 3 ] && ! grep -q '^> ' "$DIR/out" ; then
     echo "ok   only the echoes are printed"
@@ -192,33 +192,33 @@ else
     echo "FAIL not only the echoes are printed:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/frags.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 "$DIR/frags.cfty" > "$DIR/out" 2>&1
 check "fragments are reassembled and warned of" 0 $? "^Warning: Detected IP fragmentation (fragmented=1, frags_in=[1-9]"
 if ! grep -q "echoed 3000" "$DIR/out" ; then
     echo "FAIL the fragmented echo did not come back:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --no-warning "$DIR/frags.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --no-warning "$DIR/frags.cfty" > "$DIR/out" 2>&1
 check "--no-warning" 0 $? "echoed 3000"
 if grep -q '^Warning' "$DIR/out" ; then
     echo "FAIL a warning despite --no-warning:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/udp.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 "$DIR/udp.cfty" > "$DIR/out" 2>&1
 if grep -q '^Warning' "$DIR/out" ; then
     echo "FAIL a warning without anything suspicious:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/ts.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 "$DIR/ts.cfty" > "$DIR/out" 2>&1
 check "frames are dated by their capture" 0 $? "captured "
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/sent.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 "$DIR/sent.cfty" > "$DIR/out" 2>&1
 check "a packet sent is seen leaving" 0 $? "round trip "
 
 ip netns exec $NS timeout 6 tcpdump -n -i $NS_IF -w "$DIR/tcp.pcap" tcp 2>/dev/null &
 TCPDUMP=$!
 sleep 1
-"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw "$DIR/tcp.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF "$DIR/tcp.cfty" > "$DIR/out" 2>&1
 check "TCP on the host's address" 0 $? "hello"
 wait $TCPDUMP
 if tcpdump -n -r "$DIR/tcp.pcap" 2>/dev/null | grep -q 'Flags \[R' ; then
@@ -228,7 +228,7 @@ else
 fi
 
 ip netns exec $NS tc qdisc add dev $NS_IF root netem loss 10%
-"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw "$DIR/lossy.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF "$DIR/lossy.cfty" > "$DIR/out" 2>&1
 check "the stats of a lossy connection" 0 $? "echoed 200000, gaps true"
 if grep -q '^Warning: Detected .*gaps in received TCP data (holes_in=[1-9]' "$DIR/out" ; then
     echo "ok   the losses are warned of"
@@ -241,7 +241,7 @@ ip netns exec $NS tc qdisc del dev $NS_IF root
 # above the 5ms by which some echoes overtake others:
 tc qdisc add dev $HOST_IF root netem delay 20ms
 ip netns exec $NS tc qdisc add dev $NS_IF root netem delay 5ms reorder 25% 50%
-"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw "$DIR/lossy.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF "$DIR/lossy.cfty" > "$DIR/out" 2>&1
 check "the stats of a reordering connection" 0 $? "echoed 200000, .*out of order true"
 if grep -q '^Warning: Detected .*TCP segments out of order (ooo_in=[1-9]' "$DIR/out" ; then
     echo "ok   the reordering is warned of"
@@ -251,16 +251,16 @@ fi
 ip netns exec $NS tc qdisc del dev $NS_IF root
 tc qdisc del dev $HOST_IF root
 
-"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw --stats "$DIR/tcp.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --stats "$DIR/tcp.cfty" > "$DIR/out" 2>&1
 check "--stats with TCP" 0 $? "hello"
-if grep -q '^Closed /IP(src=10.77.0.1, dst=10.77.0.2)/TCP(src=140[0-9][0-9], dst=7): packets_out=[0-9]* bytes_out=5 .* bytes_acked=5 bytes_received=5 .* established=true$' "$DIR/out" ; then
+if grep -q '^Closed /IP(src=10.77.0.1, dst=10.77.0.2)/TCP(src=[0-9]*, dst=7): packets_out=[0-9]* bytes_out=5 .* bytes_acked=5 bytes_received=5 .* established=true$' "$DIR/out" ; then
     echo "ok   the stats of a stream are printed as it closes"
 else
     echo "FAIL no stats of the stream as it closes:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 
-"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw --stats -p --verbose --format csv "$DIR/tcp.cfty" > "$DIR/out" 2> "$DIR/err"
-check "CSV" 0 $? '^closed,[0-9.]*,"/IP(src=10.77.0.1, dst=10.77.0.2)/TCP(src=140[0-9][0-9], dst=7)",[0-9]*,5,'
+"$CRAFTY" -i $HOST_IF --stats -p --verbose --format csv "$DIR/tcp.cfty" > "$DIR/out" 2> "$DIR/err"
+check "CSV" 0 $? '^closed,[0-9.]*,"/IP(src=10.77.0.1, dst=10.77.0.2)/TCP(src=[0-9]*, dst=7)",[0-9]*,5,'
 if grep -q '^packet,[0-9.]*,out,' "$DIR/out" && grep -q '^print,[0-9.]*,hello$' "$DIR/out" &&
    grep -q '^done,[0-9.]*,OK,' "$DIR/out" && ! grep -qv '^[a-z]*,[0-9.]*,' "$DIR/out" &&
    grep -q '^Interface ' "$DIR/err" && grep -q '/nft ' "$DIR/err" ; then
@@ -269,7 +269,7 @@ else
     echo "FAIL not all in CSV:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 
-"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw --stats -p --format json "$DIR/tcp.cfty" > "$DIR/out" 2> "$DIR/err"
+"$CRAFTY" -i $HOST_IF --stats -p --format json "$DIR/tcp.cfty" > "$DIR/out" 2> "$DIR/err"
 check "JSON" 0 $?
 if python3 -c 'import json, sys
 rs = [ json.loads(l) for l in open(sys.argv[1]) ]
@@ -282,46 +282,46 @@ else
     echo "FAIL not all in JSON:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 
-"$CRAFTY" -i $HOST_IF --udp 40000-40010 --fw --max-packets 3 "$DIR/flood.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --max-packets 3 "$DIR/flood.cfty" > "$DIR/out" 2>&1
 check "a budget stops the program" 3 $? "stopped: max-packets"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/permitted.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 "$DIR/permitted.cfty" > "$DIR/out" 2>&1
 check "a remote address the program permits" 0 $? "permitted"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --remote-ip deny:10.77.0.2 "$DIR/to.cfty" 10.77.0.2 > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --remote-ip deny:10.77.0.2 "$DIR/to.cfty" 10.77.0.2 > "$DIR/out" 2>&1
 check "a remote address the command line denies" 4 $? "stopped: remote address 10.77.0.2 not permitted"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --remote-ip deny:10.77.0.2 "$DIR/to_arg.cfty" 10.77.0.2 > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --remote-ip deny:10.77.0.2 "$DIR/to_arg.cfty" 10.77.0.2 > "$DIR/out" 2>&1
 check "a computed remote address denied" 2 $? "Destination address 10.77.0.2 is not permitted"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --remote-ip deny:10.77.0.2 "$DIR/permitted.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --remote-ip deny:10.77.0.2 "$DIR/permitted.cfty" > "$DIR/out" 2>&1
 check "a literal remote address denied" 2 $? "Destination address 10.77.0.2 is not permitted"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/spoof_ip_literal.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 "$DIR/spoof_ip_literal.cfty" > "$DIR/out" 2>&1
 check "a literal spoofed IP address" 2 $? "Source address 10.77.0.9 is not permitted"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/spoof_ip.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 "$DIR/spoof_ip.cfty" > "$DIR/out" 2>&1
 check "a spoofed IP address" 4 $? "stopped: local address 10.77.0.9 not permitted"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --local-ip accept:10.77.0.9 "$DIR/spoof_ip.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --local-ip accept:10.77.0.9 "$DIR/spoof_ip.cfty" > "$DIR/out" 2>&1
 check "a spoofed IP address, permitted" 0 $?
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/echo_back.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 "$DIR/echo_back.cfty" > "$DIR/out" 2>&1
 check "sending back what was received to its sender" 0 $? "echoed back"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/relay.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 "$DIR/relay.cfty" > "$DIR/out" 2>&1
 check "sending what was received to another address" 2 $? "PERMISSIONS.exfiltration does not allow"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --exfiltration true "$DIR/relay.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --exfiltration true "$DIR/relay.cfty" > "$DIR/out" 2>&1
 check "sending what was received to another address, permitted" 0 $?
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/spoof_mac.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 "$DIR/spoof_mac.cfty" > "$DIR/out" 2>&1
 check "a spoofed MAC" 4 $? "stopped: source MAC 02:00:00:00:00:99 not permitted"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --mac-spoofing true "$DIR/spoof_mac.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --mac-spoofing true "$DIR/spoof_mac.cfty" > "$DIR/out" 2>&1
 check "a spoofed MAC, permitted" 0 $?
 
-"$CRAFTY" -i $HOST_IF --udp 40000-40010 --fw "$DIR/flood.cfty" > "$DIR/out" 2>&1 &
+"$CRAFTY" -i $HOST_IF "$DIR/flood.cfty" > "$DIR/out" 2>&1 &
 sleep 1.5
 "$CRAFTY" --cleanup > /dev/null
 if nft list tables | grep -q crafty_ ; then
@@ -333,7 +333,7 @@ pkill -INT -x crafty.opt
 wait $!
 check "interrupted" 130 $? "interrupted"
 
-"$CRAFTY" -i $HOST_IF --udp 40000-40010 --fw "$DIR/flood.cfty" > /dev/null 2>&1 &
+"$CRAFTY" -i $HOST_IF "$DIR/flood.cfty" > /dev/null 2>&1 &
 sleep 1.5
 pkill -KILL -x crafty.opt
 wait $!
@@ -342,15 +342,15 @@ check "cleaned up after being killed" 0 $? "Cleaned up after crafty_"
 
 # Two at once, keeping the kernel off ports of their own: the first to
 # start ends first, and frees its ports, and only those:
-"$CRAFTY" -i $HOST_IF --udp 40000-40010 --fw --max-duration 2s "$DIR/flood.cfty" > /dev/null 2>&1 &
+"$CRAFTY" -i $HOST_IF --udp-ephemeral 40000-40063 --max-duration 2s "$DIR/flood.cfty" > /dev/null 2>&1 &
 FIRST=$!
 sleep 1
-"$CRAFTY" -i $HOST_IF --udp 40020-40030 --fw --max-duration 3s "$DIR/flood.cfty" > "$DIR/out" 2>&1 &
+"$CRAFTY" -i $HOST_IF --udp-ephemeral 40100-40163 --max-duration 3s "$DIR/flood.cfty" > "$DIR/out" 2>&1 &
 SECOND=$!
 wait $FIRST
 code=$?
 reserved=$(cat /proc/sys/net/ipv4/ip_local_reserved_ports)
-if [ $code = 3 ] && echo "$reserved" | grep -q '40020-40030' &&
+if [ $code = 3 ] && echo "$reserved" | grep -q '40100-40163' &&
    ! echo "$reserved" | grep -q '40000' ; then
     echo "ok   two at once, the first over"
 else
@@ -359,7 +359,42 @@ fi
 wait $SECOND
 check "two at once, both over" 3 $?
 
-"$CRAFTY" -i $HOST_IF --udp 40000-40010 --fw "$DIR/bad.cfty" > "$DIR/out" 2>&1
+# Only the protocols sent over get ephemeral ports, which the kernel is kept
+# off; ICMP alone changes nothing on the host:
+"$CRAFTY" --verbose -i $HOST_IF "$DIR/udp.cfty" > "$DIR/out" 2>&1
+check "ephemeral ports by default" 0 $? "^Ports: UDP [0-9]*-[0-9]*;"
+if grep -q '/nft ' "$DIR/out" ; then
+    echo "ok   the kernel is kept off them by default"
+else
+    echo "FAIL the kernel is not kept off them:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
+fi
+"$CRAFTY" --verbose --linger 0s -i $HOST_IF -e '/IP(dst=10.77.0.2)/ICMP/Echo/Request("x")' > "$DIR/out" 2>&1
+check "no port, no change on the host" 0 $? "^Ports: none"
+if grep -q '/nft \|/ethtool ' "$DIR/out" ; then
+    echo "FAIL the host was changed without ports:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
+fi
+
+"$CRAFTY" -i $HOST_IF --udp 40000 "$DIR/udp.cfty" > "$DIR/out" 2>&1
+check "--udp restricts the program's fixed ports only" 2 $? "declares none (PORTS.udp.fixed)"
+
+# A fixed port the host listens on is refused, unless left to the host:
+socat -u UDP4-RECV:40500,bind=10.77.0.1 /dev/null >/dev/null 2>&1 &
+SOCAT=$!
+sleep 0.5
+cat > "$DIR/listened.cfty" <<'EOF2'
+PORTS = {udp: {fixed: [40500], ephemeral: 0}}
+/IP(dst=10.77.0.2)/UDP(src=40500, dst=7) {
+  Raw("listened")
+  expect timeout=1s Raw { print(MATCH[Raw].data) }
+}
+EOF2
+"$CRAFTY" -i $HOST_IF "$DIR/listened.cfty" > "$DIR/out" 2>&1
+check "a fixed port the host listens on" 2 $? "ports it listens on: UDP 40500"
+"$CRAFTY" -i $HOST_IF --no-fw "$DIR/listened.cfty" > "$DIR/out" 2>&1
+check "the same, left to the host" 0 $? "listened"
+kill $SOCAT
+
+"$CRAFTY" -i $HOST_IF "$DIR/bad.cfty" > "$DIR/out" 2>&1
 check "a broken program changes nothing" 2 $? "Cannot apply +"
 
 # The kernel's routes: an address only a route reaches, the namespace not
@@ -387,7 +422,8 @@ check "manual routing ignores the routes" 0 $code
 ip route show default | grep -q . || { ip route add default via 10.77.0.2 ; ADDED_DEFAULT=1 ; }
 "$CRAFTY" --linger 0s -e "$(ping_prog 10.80.0.1)" > "$DIR/out" 2>&1
 check "a route that refuses, caught" 0 $? "Warning: Cannot send to 10.80.0.1"
-"$CRAFTY" --linger 0s -e '/IP(dst=10.80.0.1)/UDP(src=40000, dst=7)/Raw("x")' > "$DIR/out" 2>&1
+"$CRAFTY" --linger 0s -e 'PORTS = {udp: {fixed: [40000]}}
+/IP(dst=10.80.0.1)/UDP(src=40000, dst=7)/Raw("x")' > "$DIR/out" 2>&1
 code=$?
 check "a route that refuses ends the program" 1 $code "Cannot send to 10.80.0.1"
 check "and warns" 1 $code "Warning: Cannot send to 10.80.0.1"

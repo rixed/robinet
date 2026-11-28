@@ -729,11 +729,11 @@ and 'a by_proto = { tcp : 'a ; udp : 'a }
 
 (* The local ports. Ranges are sorted and disjoint: *)
 and ports =
-    { (* Those used by number, if restricted (then none for a protocol
-       * without): *)
-      fixed : (int * int) list by_proto option ;
+    { (* Local ports used by number, which alone are captured besides the
+       * ephemeral ones: *)
+      fixed : (int * int) list by_proto ;
       (* How many ephemeral ones are wanted: *)
-      ephemeral : int option by_proto ;
+      ephemeral : int by_proto ;
       (* What ephemeral ones are drawn from, if given: *)
       pool : (int * int) list option by_proto }
 
@@ -767,10 +767,20 @@ let no_permissions =
       exfiltration = None ; promiscuous = None ; public_env = None }
 
 let no_ports =
-    { fixed = None ; ephemeral = { tcp = None ; udp = None } ;
+    { fixed = { tcp = [] ; udp = [] } ; ephemeral = { tcp = 0 ; udp = 0 } ;
       pool = { tcp = None ; udp = None } }
 
 let no_limits = { budget = [] ; ports = no_ports ; permissions = no_permissions }
+
+let all_ports = [ 0, 65535 ]
+
+(** Limits that restrict nothing, as extra limits: *)
+let unrestricted =
+    { no_limits with ports = { no_ports with fixed = { tcp = all_ports ; udp = all_ports } } }
+
+(** How many ephemeral ports a program that sends over a protocol wants,
+ * unless it says: *)
+let default_ephemeral = 64
 
 let both f a b = { tcp = f a.tcp b.tcp ; udp = f a.udp b.udp }
 
@@ -787,13 +797,8 @@ let print_ranges oc = function
     | [ p1, p2 ] when p1 = p2 -> Int.print oc p1
     | ps -> List.print (Tuple2.print Int.print Int.print) oc ps
 
-let print_fixed oc = function
-    | None ->
-        String.print oc "<none>"
-    | Some { tcp ; udp } ->
-        Printf.fprintf oc "{tcp: %a; udp: %a }"
-            print_ranges tcp
-            print_ranges udp
+let print_fixed oc { tcp ; udp } =
+    Printf.fprintf oc "{tcp: %a; udp: %a }" print_ranges tcp print_ranges udp
 
 let print_pool oc pool =
     Printf.fprintf oc "{tcp: %a; udp: %a }"
@@ -904,8 +909,11 @@ let self_declarations (program : Ast.program) =
         | Ast.Declare (n, _) -> List.mem n Ast.self_declared
         | _ -> false) program
 
-(* What those declarations say, telling [errors] what is wrong with them: *)
-let limits_of errors decls =
+(* What those declarations say, telling [errors] what is wrong with them,
+ * with {!default_ephemeral} ports for the protocols the program [sends]
+ * over unless it says: *)
+let limits_of ?(sends={ tcp = false ; udp = false }) errors decls =
+    let ephemeral sent n = n |? (if sent then default_ephemeral else 0) in
     List.fold_left (fun (declared, limits) (s : Ast.stmt) ->
         match s.stmt with
         | Ast.Declare (n, e) ->
@@ -943,12 +951,14 @@ let limits_of errors decls =
                         if tf = [] && uf = [] && te = None && ue = None then
                             error e.loc "PORTS gives no port" ;
                         { limits with ports = {
-                            fixed = Some { tcp = tf ; udp = uf } ;
-                            ephemeral = { tcp = te ; udp = ue } ;
+                            fixed = { tcp = tf ; udp = uf } ;
+                            ephemeral = { tcp = ephemeral sends.tcp te ;
+                                          udp = ephemeral sends.udp ue } ;
                             pool = no_ports.pool } }) in
                 n :: declared, limits
             with Error _ as ex -> tell errors ex ; n :: declared, limits)
-        | _ -> declared, limits) ([], no_limits) decls |> snd
+        | _ -> declared, limits) ([], { no_limits with ports = { no_ports with
+            ephemeral = both ephemeral sends { tcp = None ; udp = None } } }) decls |> snd
 
 let least a b =
     match a, b with
@@ -959,7 +969,7 @@ let least a b =
     | _ -> invalid_arg "Crafty_typing.least"
 
 (** What both the [program] and the [cli] allow, or why nothing is: the
- * fixed ports of both, as many ephemeral ones as the least wanted and the
+ * fixed ports of both, as many ephemeral ones as the [program] wants and the
  * pool of the [cli] over the [program]'s, which must hold that many. The
  * permissions are the [program]'s, which {!resolve_permissions} combines
  * with the [cli]'s. *)
@@ -977,67 +987,58 @@ let combine ~program:a ~cli:b =
                 let lo = max lo lo' and hi = min hi hi' in
                 if lo <= hi then Some (lo, hi) else None) rb) ra |>
         merge_ranges in
-    let ( let* ) = Stdlib.Result.bind in
-    let some f = f.tcp <> [] || f.udp <> [] in
-    let* fixed =
-        match a.ports.fixed, b.ports.fixed with
-        | Some fa, Some fb ->
-            let f = both inter fa fb in
-            if some fa && some fb && not (some f) then
-                Stdlib.Error "no fixed port is allowed by both"
-            else Ok (Some f)
-        | Some f, None | None, Some f -> Ok (Some f)
-        | None, None -> Ok None in
-    let ephemeral =
-        both (fun x y ->
-            match x, y with
-            | Some x, Some y -> Some (min x y)
-            | x, None | None, x -> x) a.ports.ephemeral b.ports.ephemeral
+    let fixed = both inter a.ports.fixed b.ports.fixed in
+    let lost name wanted f =
+        if wanted <> [] && f = [] then
+            Some (Printf.sprintf "no fixed %s port is allowed by both" name)
+        else None in
+    let ephemeral = a.ports.ephemeral
     and pool = both (fun x y -> if y = None then x else y) a.ports.pool b.ports.pool in
     let short name n r =
-        match n, r with
-        | Some n, Some r ->
+        match r with
+        | Some r ->
             let m = List.fold_left (fun m (lo, hi) -> m + hi - lo + 1) 0 r in
             if m < n then
                 Some (Printf.sprintf "%d %s ephemeral ports are wanted, the pool has %d"
                                      n name m)
             else None
         | _ -> None in
-    match short "TCP" ephemeral.tcp pool.tcp, short "UDP" ephemeral.udp pool.udp with
-    | Some e, _ | None, Some e -> Stdlib.Error e
-    | None, None -> Ok { budget ; ports = { fixed ; ephemeral ; pool } ; permissions }
+    match List.find_map_opt identity
+            [ lost "TCP" a.ports.fixed.tcp fixed.tcp ; lost "UDP" a.ports.fixed.udp fixed.udp ;
+              short "TCP" ephemeral.tcp pool.tcp ; short "UDP" ephemeral.udp pool.udp ] with
+    | Some e -> Stdlib.Error e
+    | None -> Ok { budget ; ports = { fixed ; ephemeral ; pool } ; permissions }
 
 (*$inject
-  let fixed tcp udp = { no_ports with fixed = Some { tcp ; udp } }
+  let fixed tcp udp = { no_ports with fixed = { tcp ; udp } }
 *)
 (*$T combine
   combine ~program:{ no_limits with budget = [ "max_syns", Ast.Int 3 ; "max_bytes", Ast.Int 10 ] } \
-          ~cli:{ no_limits with \
-                 budget = [ "max_syns", Ast.Int 2 ; "max_duration", Ast.Interval (Clock.Interval.sec 1.) ] ; \
-                 ports = fixed [ 1, 10 ; 20, 30 ] [] } = \
+          ~cli:{ unrestricted with \
+                 budget = [ "max_syns", Ast.Int 2 ; "max_duration", Ast.Interval (Clock.Interval.sec 1.) ] } = \
     Ok { no_limits with \
          budget = [ "max_duration", Ast.Interval (Clock.Interval.sec 1.) ; \
-                    "max_bytes", Ast.Int 10 ; "max_syns", Ast.Int 2 ] ; \
-         ports = fixed [ 1, 10 ; 20, 30 ] [] }
+                    "max_bytes", Ast.Int 10 ; "max_syns", Ast.Int 2 ] }
   combine ~program:{ no_limits with ports = fixed [ 5, 25 ] [ 1, 2 ] } \
-          ~cli:{ no_limits with ports = fixed [ 1, 10 ; 20, 30 ] [] } = \
-    Ok { no_limits with ports = fixed [ 5, 10 ; 20, 25 ] [] }
-  Result.is_error (combine ~program:{ no_limits with ports = fixed [ 1, 2 ] [] } \
-                           ~cli:{ no_limits with ports = fixed [] [ 1, 2 ] })
-*)
-(* A program wanting only ephemeral ports gets the pool given, which must
- * hold that many, along with its fixed ones: *)
-(*$T combine
-  let wants = { (fixed [ 80, 80 ] []) with ephemeral = { tcp = Some 3 ; udp = None } } in \
-  let pool r = { no_ports with pool = { tcp = Some r ; udp = None } } in \
-  combine ~program:{ no_limits with ports = wants } ~cli:{ no_limits with ports = pool [ 5000, 5002 ] } = \
-    Ok { no_limits with ports = { wants with pool = { tcp = Some [ 5000, 5002 ] ; udp = None } } }
-  let wants = { (fixed [ 80, 80 ] []) with ephemeral = { tcp = Some 3 ; udp = None } } in \
-  let pool r = { no_ports with pool = { tcp = Some r ; udp = None } } in \
-  combine ~program:{ no_limits with ports = wants } ~cli:{ no_limits with ports = pool [ 5000, 5001 ] } = \
-    Error "3 TCP ephemeral ports are wanted, the pool has 2"
+          ~cli:{ no_limits with ports = fixed [ 1, 10 ; 20, 30 ] all_ports } = \
+    Ok { no_limits with ports = fixed [ 5, 10 ; 20, 25 ] [ 1, 2 ] }
+  combine ~program:{ no_limits with ports = fixed [ 1, 2 ] [] } \
+          ~cli:{ no_limits with ports = fixed [] [ 1, 2 ] } = \
+    Error "no fixed TCP port is allowed by both"
   combine ~program:{ no_limits with ports = fixed [] [] } ~cli:{ no_limits with ports = fixed [ 1, 2 ] [] } = \
     Ok { no_limits with ports = fixed [] [] }
+*)
+(* A program wanting ephemeral ports gets the pool given, which must hold
+ * that many, along with its fixed ones: *)
+(*$T combine
+  let wants = { (fixed [ 80, 80 ] []) with ephemeral = { tcp = 3 ; udp = 0 } } in \
+  let pool r = { unrestricted.ports with pool = { tcp = Some r ; udp = None } } in \
+  combine ~program:{ no_limits with ports = wants } ~cli:{ no_limits with ports = pool [ 5000, 5002 ] } = \
+    Ok { no_limits with ports = { wants with pool = { tcp = Some [ 5000, 5002 ] ; udp = None } } }
+  let wants = { (fixed [ 80, 80 ] []) with ephemeral = { tcp = 3 ; udp = 0 } } in \
+  let pool r = { unrestricted.ports with pool = { tcp = Some r ; udp = None } } in \
+  combine ~program:{ no_limits with ports = wants } ~cli:{ no_limits with ports = pool [ 5000, 5001 ] } = \
+    Error "3 TCP ephemeral ports are wanted, the pool has 2"
 *)
 
 (** The permissions a program runs with, all set: the [cli]'s rules before the
@@ -3214,6 +3215,99 @@ let destinations (b : block) =
         | _ -> ()) b ;
     List.rev !dsts
 
+(** Whether the stacks of [b] send over TCP, and over UDP. *)
+let sent_protocols (b : block) =
+    let sends name =
+        fold_stmts (fun found s ->
+            found ||
+            match s.stmt with
+            | Stack { layers ; _ } | Send { layers ; _ } ->
+                List.exists (fun l -> l.layer.Lay.name = name && not l.layer.Lay.quoted) layers
+            | _ -> false) false b in
+    { tcp = sends Ast.Layer_name.TCP ; udp = sends UDP }
+
+(*$inject
+  let body text =
+      match Result.bind (Result.map_error (fun e -> [ e ]) (Prs.parse text)) check with
+      | Ok b -> b
+      | Error es -> failwith (String.concat "\n" (List.map (IO.to_string Prs.print_error) es))
+*)
+(*$= sent_protocols & ~printer:dump
+  { tcp = false ; udp = true } \
+    (sent_protocols (body "on /IP/TCP(dst == 80) { /IP(dst=1.2.3.4)/UDP(dst=7)/Raw(\"x\") }"))
+  { tcp = false ; udp = false } \
+    (sent_protocols (body "/IP(dst=1.2.3.4)/ICMP/DestUnreachable/IP(src=1.2.3.4, dst=5.6.7.8)/UDP(src=1, dst=2)/Raw()"))
+*)
+
+(** Warnings of the literal local ports, or ranges of them, that the
+ * patterns of [b] match and that are not among the [fixed] ones, which alone
+ * are captured besides the ephemeral ones. *)
+let uncaptured_ports ~(fixed : (int * int) list by_proto) (b : block) =
+    let warnings = ref [] in
+    let rec conjuncts e =
+        match e.desc with
+        | Binop (Ast.And, a, b) -> conjuncts a @ conjuncts b
+        | _ -> [ e ] in
+    let pattern p =
+        List.iteri (fun i pl ->
+            let l = pl.pl_layer in
+            match l.Lay.name, pl.cond with
+            | (Ast.Layer_name.TCP | UDP) as name, Some c when not l.Lay.quoted ->
+                let dst = function
+                    | { desc = Packet_field { layer ; field } ; _ } ->
+                        layer = p.depth + i && l.Lay.fields.(field).Lay.name = "dst"
+                    | _ -> false in
+                (* Each bound on the port, as (lowest, highest): *)
+                let bounds =
+                    List.filter_map (fun e ->
+                        let bound op n =
+                            match op with
+                            | Ast.Eq -> Some (n, n)
+                            | Ge -> Some (n, max_int) | Gt -> Some (n + 1, max_int)
+                            | Le -> Some (min_int, n) | Lt -> Some (min_int, n - 1)
+                            | _ -> None in
+                        match e.desc with
+                        | Binop (op, f, { desc = Lit (Ast.Int n) ; _ }) when dst f -> bound op n
+                        | Binop (op, { desc = Lit (Ast.Int n) ; _ }, f) when dst f ->
+                            let flip = function
+                                | Ast.Ge -> Ast.Le | Gt -> Lt | Le -> Ge | Lt -> Gt | op -> op in
+                            bound (flip op) n
+                        | _ -> None) (conjuncts c) in
+                (match bounds with
+                | [] -> ()
+                | bs ->
+                    let lo = List.fold_left (fun m (lo, _) -> max m lo) min_int bs
+                    and hi = List.fold_left (fun m (_, hi) -> min m hi) max_int bs in
+                    if lo > min_int && hi < max_int && lo <= hi then
+                        let fixed = if name = TCP then fixed.tcp else fixed.udp in
+                        if not (List.exists (fun (a, b) -> a <= lo && hi <= b) fixed) then
+                            let proto = Lay.N.to_string name in
+                            warnings :=
+                                (c.loc, Printf.sprintf "%s %s not among PORTS.%s.fixed: \
+                                                        what is for %s is not captured"
+                                    proto
+                                    (if lo = hi then Printf.sprintf "port %d is" lo
+                                     else Printf.sprintf "ports %d-%d are" lo hi)
+                                    (String.lowercase_ascii proto)
+                                    (if lo = hi then "it" else "them")) :: !warnings)
+            | _ -> ()) p.pat_layers in
+    let cases = List.iter (fun (c : case) -> List.iter pattern c.patterns) in
+    iter_stmts (fun s -> match s.stmt with On { cases = cs ; _ } -> cases cs | _ -> ()) b ;
+    iter_exprs (fun e -> match e.desc with Expect { cases = cs ; _ } -> cases cs | _ -> ()) b ;
+    in_order !warnings
+
+(*$= uncaptured_ports & ~printer:(IO.to_string (List.print Prs.print_error))
+  [] (uncaptured_ports ~fixed:{ tcp = [ 80, 80 ] ; udp = [] } \
+        (body "on /IP/TCP(dst == 80) {}\non /IP/UDP(src == 53) {}"))
+*)
+(*$= uncaptured_ports & ~printer:identity
+  ("line 1, column 12: TCP port 80 is not among PORTS.tcp.fixed: what is for it is not captured\n" ^ \
+   "line 2, column 16: UDP ports 40000-40003 are not among PORTS.udp.fixed: what is for them is not captured") \
+    (String.concat "\n" (List.map (IO.to_string Prs.print_error) \
+      (uncaptured_ports ~fixed:{ tcp = [] ; udp = [ 40000, 40002 ] } \
+        (body "on /IP/TCP(dst == 80) {}\nexpect /IP/UDP(dst >= 40000, dst < 40004) {}"))))
+*)
+
 (* What a message carries, which is the payload of the packet: its bytes and
  * strings, and what holds them, rather than its numbers: *)
 let is_payload (l : Lay.layer) (f : Lay.field) =
@@ -3718,10 +3812,11 @@ let check ?(warnings=ref []) (program : Ast.program) =
     let errors = !self_errors @ !(env.errors) in
     if errors = [] then (cache_constants p ; Ok p) else Error (in_order errors)
 
-(** What [program] declares of itself, or what is wrong with it. *)
-let limits (program : Ast.program) =
+(** What [program] declares of itself, or what is wrong with it, with
+ * ephemeral ports for the protocols it [sends] over unless it says. *)
+let limits ?sends (program : Ast.program) =
     let errors = ref [] in
-    let l = limits_of errors (fst (self_declarations program)) in
+    let l = limits_of ?sends errors (fst (self_declarations program)) in
     if !errors = [] then Ok l else Error (in_order !errors)
 
 (** The typed patterns, absolute and with no variable but the fields of their

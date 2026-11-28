@@ -1529,10 +1529,8 @@ let self_values ~own (l : Typ.limits) =
     record Typ.ports_type (fun proto ->
         let of_proto (b : _ Typ.by_proto) = if proto = "tcp" then b.tcp else b.udp in
         record Typ.proto_ports_type (fun n ->
-            if n = "fixed" then
-                Option.map_default (ranges % of_proto) Void l.ports.fixed
-            else
-                Option.map_default (fun c -> Int c) Void (of_proto l.ports.ephemeral))),
+            if n = "fixed" then ranges (of_proto l.ports.fixed)
+            else Int (of_proto l.ports.ephemeral))),
     record Typ.permissions_type (fun n ->
         let p = l.permissions in
         let rules =
@@ -2013,12 +2011,16 @@ end
 
 (** The program, or all the errors found in it, in the order of the source;
  * and in [warnings], what is likely not what was meant. *)
-let compile ?warnings text : (program, error list) result =
+let compile ?(warnings=ref []) text : (program, error list) result =
     match Prs.parse text with
     | Error e -> Error [ e ]
     | Ok p ->
-        Result.bind (Typ.check ?warnings p) (fun body ->
-            Result.map (fun limits -> { body ; limits }) (Typ.limits p))
+        Result.bind (Typ.check ~warnings p) (fun body ->
+            Result.map (fun (limits : Typ.limits) ->
+                warnings :=
+                    List.sort (fun (a : error) b -> compare a.where b.where)
+                        (!warnings @ Typ.uncaptured_ports ~fixed:limits.ports.fixed body) ;
+                { body ; limits }) (Typ.limits ~sends:(Typ.sent_protocols body) p))
 
 (** The filter of that text, alternative absolute patterns, or what is wrong
  * with it. *)
@@ -2038,8 +2040,9 @@ let print_status oc = function
  * MAC one for both), or wherever [router] says if given, answering ARP and neighbor solicitations for its
  * addresses unless [answer_requests] is false,
  * taking the frames for other addresses too if [promisc],
- * picking the local ports it is not given from the pool of [limits], else
- * from its fixed ports, not one that went away less than [time_wait] ago (as
+ * picking the local ports it is not given from the pool of [limits] (any
+ * dynamic port when it has none but wants ephemeral ones), else from its
+ * fixed ports, not one that went away less than [time_wait] ago (as
  * {!Tre.make_root} does), and failing on a given one out of them if
  * [strict_ports] (else warning of it), [limits] (default: the program's) being
  * what [BUDGET] and [PORTS] are, printing with [print] and [print_err],
@@ -2060,14 +2063,18 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
         (program : program) =
     let limits = limits |? program.limits in
     let p = limits.ports in
+    (* Without a pool, ephemeral ports are any dynamic one: *)
     let pools =
-        List.filter_map (fun (n, pool) -> Option.map (fun r -> n, r) pool)
-                        [ "TCP", p.pool.tcp ; "UDP", p.pool.udp ] in
+        List.filter_map (fun (n, wanted, pool) ->
+            match pool with
+            | Some r -> Some (n, r)
+            | None when wanted > 0 -> Some (n, Tre.dynamic_ports)
+            | None -> None)
+            [ "TCP", p.ephemeral.tcp, p.pool.tcp ; "UDP", p.ephemeral.udp, p.pool.udp ] in
     let ports =
-        Option.map (fun (f : _ Typ.by_proto) ->
-            List.map (fun (n, r) ->
-                n, Typ.merge_ranges (r @ (List.assoc_opt n pools |? [])))
-                [ "TCP", f.tcp ; "UDP", f.udp ]) p.fixed in
+        List.map (fun (n, r) ->
+            n, Typ.merge_ranges (r @ (List.assoc_opt n pools |? [])))
+            [ "TCP", p.fixed.tcp ; "UDP", p.fixed.udp ] in
     let gateways =
         List.concat_map (fun gw ->
             let sel v6 = Eth.State.gw_selector ~v6 (), Some gw in
@@ -2101,7 +2108,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
                 Printf.sprintf "%s source port %d is outside the ports allowed (%s): \
                                 replies to it are not captured" name p ranges }) in
     let tree =
-        Tre.make_root ?ports ~pools ?router ?time_wait eth
+        Tre.make_root ~ports ~pools ?router ?time_wait eth
             ~on_removed:on_closed ~on_foreign_port in
     let started = ref None and stopped = ref false in
     Simulation.asap power (fun () ->
@@ -3565,7 +3572,9 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
           Simulation.run sim false ;
           String.concat "\n" (List.rev !out) ^ Printf.sprintf "\n%d frames" !frames
 
-  let pings = "/IP(dst=1.2.3.4)/UDP(src=1000, dst=7) { repeat count=500 every=1ms { Raw(\"ping\") } }"
+  let ports_1000 = "PORTS = {udp: {fixed: [1000]}}\n"
+  let pings_stack = "/IP(dst=1.2.3.4)/UDP(src=1000, dst=7) { repeat count=500 every=1ms { Raw(\"ping\") } }"
+  let pings = ports_1000 ^ pings_stack
 *)
 (*$= policed & ~printer:identity
   "line 1, column 5: Cannot apply + to a string and an int[]\nline 2, column 1: Unknown variable y" \
@@ -3573,14 +3582,14 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   "line 1, column 5: Expected expression in statement" \
     (policed "x = ")
   "0.000s: hello\n0.000s: done\n1 frames" \
-    (policed "print(\"hello\")\n/IP(dst=1.2.3.4)/UDP(src=1000, dst=7)/Raw(\"x\")")
+    (policed (ports_1000 ^ "print(\"hello\")\n/IP(dst=1.2.3.4)/UDP(src=1000, dst=7)/Raw(\"x\")"))
   "0.003s: hit max-packets\n0.003s: stopped\n3 frames" (policed ~max_packets:3 pings)
   "0.003s: hit max-packets\n0.003s: stopped\n3 frames" \
-    (policed ~max_packets:3 ("try { "^ pings ^" } else {}\nprint(\"not caught\")"))
+    (policed ~max_packets:3 (ports_1000 ^ "try { "^ pings_stack ^" } else {}\nprint(\"not caught\")"))
   "0.110s: hit max-packet-rate\n0.110s: stopped\n110 frames" (policed ~max_packet_rate:100. pings)
   "0.100s: stopped\n100 frames" (policed ~stop_at:0.1 pings)
   "0.000s: stopped\n0 frames" (policed ~stop:true pings)
-  "0.000s: warning line 2, column 35: UDP source port 5000 is outside the ports allowed (53, 40000-40100): replies to it are not captured\n0.000s: done\n4 frames" \
+  "0.000s: warning line 2, column 35: UDP source port 5000 is outside the ports allowed (53, 40000-40100, 49152-65535): replies to it are not captured\n0.000s: done\n4 frames" \
     (policed "PORTS = {udp: {fixed: [[40000, 40100], 53]}}\nrepeat count=2 { /IP(dst=1.2.3.4)/UDP(src=5000, dst=7)/Raw(\"x\") }\n\
               /IP(dst=1.2.3.4)/UDP(src=53, dst=7)/Raw(\"y\")\n/IP(dst=1.2.3.4)/UDP(dst=7)/Raw(\"z\")")
   "0.000s: 3 10s [[40000, 40200]] [] 20\n0.000s: done\n0 frames" \
@@ -3591,10 +3600,11 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (policed "print(PORTS.udp.fixed)\nPORTS = {udp: {fixed: [[40000, 40100], 53]}}")
   "0.000s: failed: line 1, column 7: max_bytes is not set, by the program or the command line\n0 frames" \
     (policed "print(BUDGET.max_bytes)")
-  "0.000s: failed: line 1, column 7: fixed is not set, by the program or the command line\n0 frames" \
-    (policed "print(PORTS.tcp.fixed)")
-  "0.000s: failed: line 2, column 7: ephemeral is not set, by the program or the command line\n0 frames" \
-    (policed "PORTS = {tcp: {fixed: [80]}}\nprint(PORTS.tcp.ephemeral)")
+  "0.000s: [] 0\n0.000s: done\n0 frames" \
+    (policed "print(\"${PORTS.tcp.fixed} ${PORTS.tcp.ephemeral}\")")
+  "0.000s: 0 64\n0.000s: done\n1 frames" \
+    (policed "PORTS = {tcp: {fixed: [80]}}\nprint(\"${PORTS.tcp.ephemeral} ${PORTS.udp.ephemeral}\")\n\
+              /IP(dst=1.2.3.4)/UDP(dst=7)/Raw(\"x\")")
   (String.concat "\n" [ \
     "line 1, column 11: BUDGET can only be declared at the top level of the program" ; \
     "line 2, column 9: PORTS gives no port" ; \
@@ -3695,7 +3705,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
     (policed "PERMISSIONS = {local_ips: [Deny(10.0.0.66), Accept(OWN_IPS), Accept(10.20.4.1)]}\n\
               print(PERMISSIONS.local_ips)")
   "0.000s: done\n1 frames" \
-    (policed "/IP(src=OWN_IPS[0], dst=1.2.3.4)/UDP(src=1000, dst=7)/Raw(\"x\")")
+    (policed (ports_1000 ^ "/IP(src=OWN_IPS[0], dst=1.2.3.4)/UDP(src=1000, dst=7)/Raw(\"x\")"))
   "line 1, column 1: OWN_IPS is a reserved name" (policed "OWN_IPS = 1")
   "0.000s: 10.0.0.1 [10.0.0.1, 2001:db8::1]\n0.000s: done\n0 frames" \
     (policed ~addresses:[ "2001:db8::1/64" ; "10.0.0.1/24" ] "print(\"${OWN_IP} ${OWN_IPS}\")")
@@ -3721,7 +3731,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   let arp ?(from="02:00:00:00:00:fe") pdu =
       Eth.Pdu.(pack (make Eth.Proto.arp (mac from) (mac "02:00:00:00:00:01") (Arp.Pdu.pack pdu))) in
   let p = Result.get_ok (compile
-              "PORTS = {udp: {fixed: [[5000, 5000]]}}\n\
+              "PORTS = {udp: {fixed: [[5000, 5000]], ephemeral: 0}}\n\
                wait dur=1s\n/IP(dst=1.2.3.4)/UDP(dst=7)/Raw(\"x\")") in
   let dev, h =
       run ~parent:sim.SimTypes.root ~mac:(mac "02:00:00:00:00:01")
@@ -3778,7 +3788,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
       Lay.make_router ~ifname:"a" ~lookup
           ~on_unrouted:(fun dst e -> unrouted := (Ip.Addr.to_string dst, e) :: !unrouted) in
   let p = Result.get_ok (compile
-      "PORTS = {udp: {fixed: [[5000, 5000]]}}\n\
+      "PORTS = {udp: {fixed: [[5000, 5000]], ephemeral: 0}}\n\
        wait dur=1s\n\
        /IP(dst=10.0.0.2)/UDP(dst=7)/Raw(\"on-subnet\")\n\
        /IP(dst=10.1.0.1)/UDP(dst=7)/Raw(\"specific\")\n\
@@ -3905,7 +3915,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
 (*$R routed_run
   let run text =
       let status, _, _ =
-          routed_run ("PORTS = {udp: {fixed: [[5000, 5000]]}}\n\
+          routed_run ("PORTS = {udp: {fixed: [[5000, 5000]], ephemeral: 0}}\n\
                        /IP(dst=10.9.9.9)/UDP(dst=7) {\n"^ text ^"\n}")
                      ~lookup:(fun _ _ -> via ()) in
       status in
@@ -3921,7 +3931,7 @@ let run ~parent ?(name="crafty") ~mac ~addresses ?(gateways=[]) ?answer_requests
   let run ?strict_ports () =
       let status, _, frames =
           routed_run ?strict_ports
-              "PORTS = {udp: {fixed: [[5000, 5000]]}}\n\
+              "PORTS = {udp: {fixed: [[5000, 5000]], ephemeral: 0}}\n\
                /IP(dst=10.9.9.9)/UDP(src=6000, dst=7)/Raw(\"x\")"
               ~lookup:(fun _ _ -> via ()) in
       status, frames in

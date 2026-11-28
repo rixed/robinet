@@ -870,6 +870,22 @@ let listening () =
         [ Tcp, "/proc/net/tcp", "0A" ; Tcp, "/proc/net/tcp6", "0A" ;
           Udp, "/proc/net/udp", "07" ; Udp, "/proc/net/udp6", "07" ]
 
+(** The local ports of the host's TCP and UDP sockets, in any state. *)
+let ports_in_use () =
+    List.concat_map (fun (proto, file) ->
+        match File.with_file_in file IO.read_all with
+        | text ->
+            String.split_on_char '\n' text |>
+            List.filter_map (fun l ->
+                match String.split_on_char ' ' l |> List.filter ((<>) "") with
+                | _ :: _ :: _ :: state :: _ ->
+                    Option.map (fun (_, p) -> proto, p) (socket_of_proc_line state l)
+                | _ -> None)
+        | exception Sys_error _ -> [])
+        [ Tcp, "/proc/net/tcp" ; Tcp, "/proc/net/tcp6" ;
+          Udp, "/proc/net/udp" ; Udp, "/proc/net/udp6" ] |>
+    List.unique
+
 (** Of [sockets], those that a firewall of [ports] on an interface of
  * [addresses] keeps the host off: on one of those ports, and for any
  * address or one of those. *)
