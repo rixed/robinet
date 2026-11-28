@@ -232,11 +232,12 @@ struct
     (** The ports of the runs in progress. *)
     let ports_in_use t = locked t (fun () -> List.concat_map snd t.runs)
 
-    (* Why a run capturing for address [ip] (or any) and [ports] cannot run
-     * alongside those in progress, if it cannot: none may capture what is for
-     * another, and two may not answer for the same address. Otherwise it is
-     * in progress until the function returned is called. *)
-    let enter t ip ports =
+    (* With [t.lock] held: why a run capturing for address [ip] (or any) and
+     * [ports] cannot run alongside those in progress, if it cannot: none may
+     * capture what is for another, and two may not answer for the same
+     * address. Otherwise it is in progress until the function returned is
+     * called. *)
+    let enter_locked t ip ports =
         let overlap (r : Host_config.port_range) (r' : Host_config.port_range) =
             r.proto = r'.proto && r.lo <= r'.hi && r'.lo <= r.hi in
         let conflicts (ip', ports') =
@@ -244,19 +245,18 @@ struct
              | Some a, Some b -> Ip.Addr.compare a b = 0
              | _ -> List.exists (fun r -> List.exists (overlap r) ports') ports) in
         let me = (ip, ports) in
-        locked t (fun () ->
-            match List.find_opt conflicts t.runs with
-            | Some (Some a, _) when ip <> None ->
-                Error (Setup (Printf.sprintf
-                    "Another run on interface %s has address %s already."
-                    t.ifname (Ip.Addr.to_dotted_string a)))
-            | Some _ ->
-                Error (Setup (Printf.sprintf
-                    "Another run on interface %s may capture what is for this \
-                     one: give them addresses, or ports, of their own." t.ifname))
-            | None ->
-                t.runs <- me :: t.runs ;
-                Ok (fun () -> locked t (fun () -> t.runs <- List.filter ((!=) me) t.runs)))
+        match List.find_opt conflicts t.runs with
+        | Some (Some a, _) when ip <> None ->
+            Error (Setup (Printf.sprintf
+                "Another run on interface %s has address %s already."
+                t.ifname (Ip.Addr.to_dotted_string a)))
+        | Some _ ->
+            Error (Setup (Printf.sprintf
+                "Another run on interface %s may capture what is for this \
+                 one: give them addresses, or ports, of their own." t.ifname))
+        | None ->
+            t.runs <- me :: t.runs ;
+            Ok (fun () -> locked t (fun () -> t.runs <- List.filter ((!=) me) t.runs))
 end
 
 (** {2 Running} *)
@@ -321,15 +321,51 @@ let pools_clear_of ?(busy=[]) (limits : Typ.limits) =
   (Result.get_ok (pools_clear_of (wanting 0))).ports.pool.tcp = None
 *)
 
-(** [limits] with {!pools_clear_of} the ports the host and the runs on
- * [iface] use, which {!run} needs; or why there are none. *)
-let draw_pools (iface : Iface.t) limits =
-    let busy =
-        Iface.ports_in_use iface @
+(* The fixed ports and the pools of [limits]: *)
+let ports_of (limits : Typ.limits) =
+    let p = limits.ports in
+    let ranges proto fixed pool =
+        Typ.merge_ranges (fixed @ (pool |? [])) |>
+        List.map (fun (lo, hi) -> Host_config.{ proto ; lo ; hi }) in
+    ranges Host_config.Tcp p.fixed.tcp p.pool.tcp @ ranges Host_config.Udp p.fixed.udp p.pool.udp
+
+(** A run on an interface, in progress from {!reserve} until {!run} is over
+ * or the reservation is {!cancel}led. *)
+type reservation =
+    { iface : Iface.t ;
+      own_ip : Ip.Addr.t option ;
+      (* With their pools: *)
+      limits : Typ.limits ;
+      ports : Host_config.port_range list ;
+      leave : unit -> unit ;
+      left : bool Atomic.t ;
+      ran : bool Atomic.t }
+
+(** Draw the pools [limits] lacks clear of the ports the host and the runs on
+ * [iface] use, and have the run in progress on [iface] with them and [own_ip]
+ * at once, lest another one draws the same ports; or why it cannot be.
+ *
+ * - [own_ip]: an address of its own, on the network of the interface's first
+ *   one of its family (else on no network), rather than the interface's. *)
+let reserve (iface : Iface.t) ?own_ip (limits : Typ.limits) =
+    let promisc = limits.permissions.promiscuous |? false in
+    let host_ports =
         List.map (fun (proto, p) -> Host_config.{ proto ; lo = p ; hi = p })
                  (Host_config.ports_in_use ()) in
-    Result.map_error (fun e -> Setup ("The program's ports: "^ e ^"."))
-                     (pools_clear_of ~busy limits)
+    Iface.locked iface (fun () ->
+        let busy = List.concat_map snd iface.runs @ host_ports in
+        match pools_clear_of ~busy limits with
+        | Error e ->
+            Error (Setup ("The program's ports: "^ e ^"."))
+        | Ok limits ->
+            let ports = ports_of limits in
+            Iface.enter_locked iface (if promisc then None else own_ip) ports |>
+            Result.map (fun leave ->
+                { iface ; own_ip ; limits ; ports ; leave ;
+                  left = Atomic.make false ; ran = Atomic.make false }))
+
+(** Give up reservation [r], unless {!run} did already. *)
+let cancel r = if not (Atomic.exchange r.left true) then r.leave ()
 
 (** Whether a run with [limits] has ports, which [fw] keeps the kernel off. *)
 let has_ports (limits : Typ.limits) =
@@ -363,17 +399,15 @@ let route_ifname (program : Itp.program) =
             (String.concat ", " (List.map (fun (i, d) ->
                 Ip.Addr.to_dotted_string d ^" through "^ i) routes)))
 
-(** Run [body], as {!Crafty_interp.Partial.block} may have made it, on
- * [iface] with [limits], and return how it went, once it is over and what it
- * changed on the host undone; or why it did not run. [limits] has a pool for
- * each protocol that wants ephemeral ports, as {!draw_pools} gives.
+(** Run [body], as {!Crafty_interp.Partial.block} may have made it, with
+ * reservation [r], and return how it went, once it is over, what it changed
+ * on the host undone and [r] given up; or why it did not run. A reservation
+ * runs once.
  *
  * Runs on the same interface at once must not capture each other's frames:
- * with addresses of their own, or else ports of their own, which pools
- * keep apart.
+ * with addresses of their own, or else ports of their own, which
+ * {!reserve} keeps apart.
  *
- * - [own_ip]: an address of its own, on the network of the interface's first
- *   one of its family (else on no network), rather than the interface's.
  * - [fw]: keep the kernel off the program's ports, if any (not with
  *   [own_ip]).
  * - [kernel_routing]: ask the kernel for each packet's route (default, on
@@ -408,29 +442,22 @@ let route_ifname (program : Itp.program) =
  *   marks of the frame sent) and what the host sent from its address;
  *   arriving, what is for the program, before the firewall and the policer.
  * - [on_stream]: each stream as it closes, then those still open at the end. *)
-let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
+let run (r : reservation) ?(fw=false) ?kernel_routing ?(any_iface=false)
         ?speed ?full_duplex ?mtu ?(linger=Clock.Interval.sec 2.) ?(time_wait=Clock.Interval.zero) ?strict_ports ?format ?args
-        ~resolver ~getenv ~(limits : Typ.limits)
+        ~resolver ~getenv
         ?(on_start=ignore) ?(info=ignore)
         ?(on_print=fun _ _ -> ()) ?(on_print_err=fun _ _ -> ()) ?on_report
         ?(on_warning=fun _ _ -> ()) ?(on_packet=fun _ _ _ -> ())
         ?(on_stream=fun _ _ _ -> ())
         (body : Typ.block) =
+    if Atomic.exchange r.ran true || Atomic.get r.left then
+        Error (Setup "This reservation was run or cancelled already.") else
+    Fun.protect ~finally:(fun () -> cancel r) @@ fun () ->
     let ( let* ) = Stdlib.Result.bind in
     let refuse cond e = if cond then Error (Setup e) else Ok () in
-    let* () =
-        let p = limits.ports in
-        refuse ((p.ephemeral.tcp > 0 && p.pool.tcp = None) ||
-                (p.ephemeral.udp > 0 && p.pool.udp = None))
-            "The program wants ephemeral ports and was given no pool of them." in
+    let iface = r.iface and own_ip = r.own_ip and limits = r.limits
+    and ports = r.ports in
     let ifname = iface.ifname and host = iface.host in
-    (* The fixed ports and the pools: *)
-    let ports =
-        let p = limits.ports in
-        let ranges proto fixed pool =
-            Typ.merge_ranges (fixed @ (pool |? [])) |>
-            List.map (fun (lo, hi) -> Host_config.{ proto ; lo ; hi }) in
-        ranges Host_config.Tcp p.fixed.tcp p.pool.tcp @ ranges Host_config.Udp p.fixed.udp p.pool.udp in
     (* Without ports, there is nothing to keep the kernel off: *)
     let fw = fw && ports <> [] in
     let permissions = limits.permissions in
@@ -530,9 +557,6 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
         refuse ((fw || own_ip <> None) && not iface.rx_offloads_off)
             (Printf.sprintf "Interface %s was set up with its RX offloads on, \
                              which a run that changes the host needs off." ifname) in
-    let* leave =
-        Iface.enter iface (if promisc then None else own_ip) ports in
-    Fun.protect ~finally:leave (fun () ->
     let changes_host = fw || forward_drop in
     let* () = refuse (changes_host && not (Privileges.has_net_admin ())) (needs_net_admin ifname) in
     let* () =
@@ -824,4 +848,4 @@ let run (iface : Iface.t) ?own_ip ?(fw=false) ?kernel_routing ?(any_iface=false)
     Ok { status = !status ; limit = !limit ; denied = !denied ;
          stopped = Atomic.get stops > 0 ; over_ram = h.over_ram () ;
          duration = Clock.Time.to_interval (instant ()) ;
-         counters = counters () })))))
+         counters = counters () }))))

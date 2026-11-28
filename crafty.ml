@@ -501,17 +501,16 @@ let () =
         if !signalled then c.Run.stop () in
     let res =
         Fun.protect ~finally:(fun () -> Run.Iface.release iface) (fun () ->
-            let limits = match Run.draw_pools iface limits with Ok l -> l | Error e -> failed e in
+            let r = match Run.reserve iface ?own_ip:!own_ip limits with Ok r -> r | Error e -> failed e in
             Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ]
                 ~on_signal:(fun () ->
                     signalled := true ;
                     Option.may (fun c -> c.Run.stop ()) !control)
                 (fun () ->
-                    Run.run iface ?own_ip:!own_ip ~fw ~kernel_routing ~any_iface
+                    Run.run r ~fw ~kernel_routing ~any_iface
                         ?speed:!speed ?full_duplex:!full_duplex ?mtu:!mtu ~linger:!linger ~time_wait:!time_wait
                         ~format ~args ~resolver
                         ~getenv:Itp.getenv
-                        ~limits
                         ~on_start ~info:(info "%s") ~on_report:report
                         ~on_print:(fun t s ->
                             if format = Human then print_endline s
